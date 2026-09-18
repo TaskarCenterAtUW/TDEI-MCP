@@ -1,0 +1,20 @@
+# Dependencies and compiled output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Credentials and local environment files
+.env
+.env.*
+!.env.example
+
+# Logs and test output
+*.log
+coverage/
+
+# Machine-specific MCP configuration
+.codex/config.toml
+
+# Operating system files
+.DS_Store
+Thumbs.db
