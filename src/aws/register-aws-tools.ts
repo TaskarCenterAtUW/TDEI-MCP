@@ -31,6 +31,16 @@ const registeredToolsByServer = new WeakMap<
   Set<string>
 >();
 
+// Authentication is owned by the outer connector. Exposing these generated
+// operations would give agents a second, conflicting way to manage tokens.
+const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
+  "authenticate",
+  "refreshToken",
+  "ssoRedirect",
+  "ssoLogin",
+  "ssoLogout",
+]);
+
 export async function registerAwsTools(
   server: McpServer,
   client: AwsToolClient = awsMcpClient,
@@ -53,6 +63,13 @@ export async function registerAwsTools(
   );
 
   for (const awsTool of result.tools) {
+    if (CONNECTOR_MANAGED_AUTH_TOOLS.has(awsTool.name)) {
+      console.error(
+        `[aws-tools] skipped connector-managed auth tool ${awsTool.name}`,
+      );
+      continue;
+    }
+
     if (registeredTools.has(awsTool.name)) {
       continue;
     }

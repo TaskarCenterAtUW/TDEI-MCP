@@ -18,7 +18,7 @@ import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
 export interface ServerDependencies {
   authManager: Pick<
     AuthManager,
-    "getAccessToken" | "getStatus" | "logout"
+    "getAccessToken" | "getStatus" | "logout" | "startSsoLogin"
   >;
   awsMcpClient: Pick<
     AwsMcpClient,
@@ -48,12 +48,63 @@ export async function createServer(
     dependencies.registerAwsTools,
   );
 
+  server.registerTool(
+    "tdei_sso_login",
+    {
+      description:
+        "Start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        if (auth.getStatus().authenticated) {
+          return {
+            content: [{
+              type: "text",
+              text: "TDEI SSO session is already authenticated.",
+            }],
+          };
+        }
+
+        const login = await auth.startSsoLogin();
+
+        void login.completion
+          .then(async () => {
+            console.error("[auth] SSO login successful");
+            await awsToolsLifecycle.load();
+          })
+          .catch((error) => {
+            console.error(
+              "[auth] SSO login did not complete:",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "login_pending",
+                loginUrl: login.loginUrl,
+                callbackUrl: login.callbackUrl,
+                message: "Open loginUrl in your browser to sign in to TDEI.",
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
 
   server.registerTool(
     "tdei_auth_status",
     {
       description:
-        "Check whether TDEI credentials are configured and whether the current TDEI session is authenticated.",
+        "Check whether TDEI SSO is configured and whether the current session is signed out, pending, or authenticated.",
       inputSchema: z.object({}),
     },
     async (_args) => {
@@ -74,7 +125,7 @@ export async function createServer(
     "tdei_test_authentication",
     {
       description:
-        "Authenticate with TDEI or verify that the current TDEI authentication session is valid.",
+        "Check whether the connector currently has a usable TDEI SSO access token.",
       inputSchema: z.object({}),
     },
     async (_args) => {
@@ -95,14 +146,14 @@ export async function createServer(
             ? error.message
             : String(error);
 
-        if (message === "TDEI_AUTH_REQUIRED") {
+        if (message === "TDEI_SSO_REQUIRED") {
           return {
             isError: true,
             content: [
               {
                 type: "text",
                 text:
-                  "TDEI authentication is required. Configure TDEI_USERNAME and TDEI_PASSWORD before using protected TDEI tools.",
+                  "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.",
               },
             ],
           };
@@ -179,13 +230,14 @@ export async function createServer(
     },
   );
 
-  // Make generated tools available in the client's first tools/list response.
-  // Some clients retain that first catalogue despite list-change notifications.
+  // Discover tool definitions before MCP initialization so hosts that cache
+  // the initial catalogue can see API tools before the user signs in. Calls
+  // still require SSO and restart the child with the real access token.
   try {
     await awsToolsLifecycle.load();
   } catch (error) {
     console.error(
-      "[aws-tools] automatic loading failed:",
+      "[aws-tools] initial discovery failed:",
       error instanceof Error ? error.message : String(error),
     );
   }
