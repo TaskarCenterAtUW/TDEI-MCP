@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 
 import type { AuthManager } from "../auth/auth-manager.js";
+import type { SsoLogoutStart } from "../auth/types.js";
 import type { AwsMcpClient } from "./aws-mcp-client.js";
 import type { registerAwsTools } from "./register-aws-tools.js";
 
@@ -36,12 +37,12 @@ export class AwsToolsLifecycle {
     });
   }
 
-  logout(): Promise<void> {
+  logout(): Promise<SsoLogoutStart> {
     return this.serialize(async () => {
       try {
-        await this.awsSession.close();
+        return await this.authSession.logout();
       } finally {
-        this.authSession.logout();
+        await this.awsSession.close();
         this.loaded = false;
       }
     });

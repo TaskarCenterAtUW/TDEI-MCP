@@ -5,7 +5,11 @@ export interface TokenResponse {
   refresh_expires_in?: number;
 }
 
-export type AuthState = "signed_out" | "login_pending" | "authenticated";
+export type AuthState =
+  | "signed_out"
+  | "login_pending"
+  | "authenticated"
+  | "logout_pending";
 
 export interface AuthStatus {
   configured: boolean;
@@ -17,6 +21,12 @@ export interface AuthStatus {
 
 export interface SsoLoginStart {
   loginUrl: string;
+  callbackUrl: string;
+  completion: Promise<void>;
+}
+
+export interface SsoLogoutStart {
+  logoutUrl: string;
   callbackUrl: string;
   completion: Promise<void>;
 }

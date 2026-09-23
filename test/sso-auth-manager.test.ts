@@ -43,8 +43,19 @@ test("browser callback exchanges code and state for tokens", async () => {
     });
     assert.equal(auth.getStatus().state, "authenticated");
     assert.equal(await auth.getAccessToken(), "sso-access-token");
+
+    const logout = await auth.logout();
+    const logoutUrl = new URL(logout.logoutUrl);
+    assert.equal(logoutUrl.pathname, "/api/v1/sso-logout");
+    assert.equal(logoutUrl.searchParams.get("client_id"), "tdei-mcp");
+    assert.equal(logoutUrl.searchParams.get("redirect_uri"), "http://127.0.0.1:18765/callback");
+    assert.equal(auth.getStatus().state, "logout_pending");
+
+    const logoutCallbackResponse = await originalFetch(logout.callbackUrl);
+    assert.equal(logoutCallbackResponse.status, 200);
+    await logout.completion;
+    assert.equal(auth.getStatus().state, "signed_out");
   } finally {
-    auth.logout();
     globalThis.fetch = originalFetch;
   }
 });

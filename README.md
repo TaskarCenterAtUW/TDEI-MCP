@@ -103,7 +103,7 @@ The connector exposes five built-in tools while signed out:
 | `tdei_sso_login` | Start browser SSO and return the login URL. |
 | `tdei_test_authentication` | Check for a usable SSO session token. |
 | `tdei_load_api_tools` | Retry API tool loading after SSO succeeds. |
-| `tdei_logout` | Clear local session tokens and close the AWS child process. |
+| `tdei_logout` | Clear local tokens, close the AWS child, and return the browser SSO logout URL. |
 
 The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. The first authenticated API call restarts the AWS child with the user's access token.
 
@@ -119,7 +119,7 @@ If loading fails, correct the underlying issue and call `tdei_load_api_tools`. I
 
 Tokens are kept in process memory. When a token needs renewal, the connector attempts a refresh. If refresh fails, a new browser SSO login is required. It restarts the AWS child when the token changes.
 
-`tdei_logout` clears tokens and closes the AWS child while retaining registered tool definitions. Call `tdei_sso_login` to authenticate again. To disconnect completely, disable the MCP entry or stop the connector through your client.
+`tdei_logout` clears tokens and closes the AWS child while retaining registered tool definitions, then returns a `logoutUrl`. Open that URL in the same browser used for login to end the upstream SSO session. Call `tdei_sso_login` to authenticate again. To disconnect completely, disable the MCP entry or stop the connector through your client.
 
 ## Configuration reference
 

@@ -71,9 +71,14 @@ test("SSO login loads API tools and supports calls and logout", async () => {
           ? { ...signedOutStatus(), authenticated: true, state: "authenticated" as const }
           : signedOutStatus();
       },
-      logout() {
+      async logout() {
         authenticated = false;
         logoutCount += 1;
+        return {
+          logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
+          callbackUrl: "http://127.0.0.1:8765/callback",
+          completion: Promise.resolve(),
+        };
       },
     },
     awsMcpClient: awsClient,
@@ -115,7 +120,8 @@ test("SSO login loads API tools and supports calls and logout", async () => {
     await client.callTool({ name: "listServices", arguments: {} });
     assert.equal(serviceCallCount, 1);
 
-    await client.callTool({ name: "tdei_logout", arguments: {} });
+    const logout = await client.callTool({ name: "tdei_logout", arguments: {} });
+    assert.match(logout.content[0]?.type === "text" ? logout.content[0].text : "", /logoutUrl/);
     assert.equal(closeCount, 1);
     assert.equal(logoutCount, 1);
   } finally {
@@ -136,7 +142,13 @@ test("signed-out server remains available for SSO login", async () => {
       },
       async getAccessToken() { throw new Error("TDEI_SSO_REQUIRED"); },
       getStatus: signedOutStatus,
-      logout() {},
+      async logout() {
+        return {
+          logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
+          callbackUrl: "http://127.0.0.1:8765/callback",
+          completion: Promise.resolve(),
+        };
+      },
     },
     awsMcpClient: {
       async listTools() { throw new Error("TDEI_SSO_REQUIRED"); },

@@ -179,13 +179,27 @@ export async function createServer(
     },
     async (_args) => {
       try {
-        await awsToolsLifecycle.logout();
+        const logout = await awsToolsLifecycle.logout();
+
+        void logout.completion
+          .then(() => console.error("[auth] SSO logout successful"))
+          .catch((error) => {
+            console.error(
+              "[auth] SSO logout did not complete:",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
 
         return {
           content: [
             {
               type: "text",
-              text: "Logged out of TDEI session and closed the AWS API tool session.",
+              text: JSON.stringify({
+                status: "logout_pending",
+                logoutUrl: logout.logoutUrl,
+                callbackUrl: logout.callbackUrl,
+                message: "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the AWS API tool session have already been cleared.",
+              }, null, 2),
             },
           ],
         };
