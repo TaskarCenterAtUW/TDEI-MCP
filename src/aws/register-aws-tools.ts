@@ -15,6 +15,7 @@ import {
 
 import { awsMcpClient } from "./aws-mcp-client.js";
 import { errorResult } from "../mcp/responses.js";
+import { isToolAllowed, type EndpointFilter } from "../config-file.js";
 
 export interface AwsToolClient {
   listTools: typeof awsMcpClient.listTools;
@@ -24,6 +25,8 @@ export interface AwsToolClient {
 export interface AwsToolRegistrationResult {
   discovered: number;
   registered: number;
+  skipped: number;
+  toolSchemas: Map<string, { description?: string; inputSchema: unknown }>;
 }
 
 const registeredToolsByServer = new WeakMap<
@@ -44,6 +47,7 @@ const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
 export async function registerAwsTools(
   server: McpServer,
   client: AwsToolClient = awsMcpClient,
+  filter: EndpointFilter = { mode: "all", allow: [], deny: [] },
 ): Promise<AwsToolRegistrationResult> {
   console.error(
     "[aws-tools] discovering AWS OpenAPI tools",
@@ -62,11 +66,21 @@ export async function registerAwsTools(
     `[aws-tools] discovered ${result.tools.length} tools`,
   );
 
+  let skipped = 0;
+  const toolSchemas = new Map<string, { description?: string; inputSchema: unknown }>();
+
   for (const awsTool of result.tools) {
     if (CONNECTOR_MANAGED_AUTH_TOOLS.has(awsTool.name)) {
       console.error(
         `[aws-tools] skipped connector-managed auth tool ${awsTool.name}`,
       );
+      skipped += 1;
+      continue;
+    }
+
+    if (!isToolAllowed(awsTool.name, filter)) {
+      console.error(`[aws-tools] skipped ${awsTool.name} (disabled by config)`);
+      skipped += 1;
       continue;
     }
 
@@ -98,6 +112,7 @@ export async function registerAwsTools(
     );
 
     registeredTools.add(awsTool.name);
+    toolSchemas.set(awsTool.name, { description: awsTool.description, inputSchema: awsTool.inputSchema });
 
     console.error(
       `[aws-tools] registered ${awsTool.name}`,
@@ -111,5 +126,7 @@ export async function registerAwsTools(
   return {
     discovered: result.tools.length,
     registered: registeredTools.size,
+    skipped,
+    toolSchemas,
   };
 }
