@@ -34,6 +34,31 @@ const registeredToolsByServer = new WeakMap<
   Set<string>
 >();
 
+// The live TDEI spec uses draft-04 boolean exclusiveMinimum/Maximum
+// (e.g. {minimum: 0, exclusiveMinimum: true}), but fromJsonSchema expects
+// draft 2020-12 numeric form. Rewrite in place before conversion; without
+// this the whole load() fails on the first such schema.
+export function sanitizeJsonSchema(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i += 1) node[i] = sanitizeJsonSchema(node[i]);
+    return node;
+  }
+  if (node !== null && typeof node === "object") {
+    const record = node as Record<string, unknown>;
+    if (record["exclusiveMinimum"] === true) {
+      record["exclusiveMinimum"] = typeof record["minimum"] === "number" ? record["minimum"] : undefined;
+      if (record["exclusiveMinimum"] === undefined) delete record["exclusiveMinimum"];
+    }
+    if (record["exclusiveMaximum"] === true) {
+      record["exclusiveMaximum"] = typeof record["maximum"] === "number" ? record["maximum"] : undefined;
+      if (record["exclusiveMaximum"] === undefined) delete record["exclusiveMaximum"];
+    }
+    for (const key of Object.keys(record)) record[key] = sanitizeJsonSchema(record[key]);
+    return record;
+  }
+  return node;
+}
+
 // Authentication is owned by the outer connector. Exposing these generated
 // operations would give agents a second, conflicting way to manage tokens.
 const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
@@ -93,7 +118,7 @@ export async function registerAwsTools(
 
     const inputSchema =
       fromJsonSchema<Record<string, unknown>>(
-        awsTool.inputSchema as Record<string, unknown>,
+        sanitizeJsonSchema(structuredClone(awsTool.inputSchema)) as Record<string, unknown>,
       );
 
     server.registerTool(
