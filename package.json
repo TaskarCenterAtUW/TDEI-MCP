@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "description": "TDEI-MCP connector for the TDEI API",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TaskarCenterAtUW/TDEI-MCP.git"
+  },
   "bin": {
-    "tdei-mcp": "dist/index.js"
+    "tdei-mcp": "dist/index.js",
+    "tdei-mcp-init": "dist/init.js"
   },
   "files": [
     "dist",
