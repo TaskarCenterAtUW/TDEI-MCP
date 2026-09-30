@@ -128,6 +128,24 @@ Example:
 
 Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request spawns the AWS child fresh (v1 trade-off); the child is closed after the response.
 
+### Docker deployment
+
+Build the image (multi-stage; ships compiled `dist/` plus Node 22, Python 3, and `uvx` for the AWS child — no source or dev dependencies):
+
+    docker build -t tdei-mcp:http .
+
+Run it with your SSO configuration. The container defaults to `TDEI_TRANSPORT=http`, host `0.0.0.0`, port `3000`:
+
+    docker run --rm -p 3000:3000 --env-file .env tdei-mcp:http
+
+Override individual values with `-e` (explicit env beats the image defaults; CLI flags win over everything):
+
+    docker run --rm -p 8080:8080 -e TDEI_HTTP_PORT=8080 -e TDEI_SSO_CALLBACK_URL=https://mcp.example.com/callback --env-file .env tdei-mcp:http
+
+Smoke check from the host (expect `401 TDEI_SSO_REQUIRED` — proof the server is up and enforcing Bearer auth):
+
+    curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
 ## 4. Verify and use the connection
 
 The connector exposes five built-in tools while signed out:
