@@ -43,7 +43,7 @@ export async function runWorkflow(
 ): Promise<RunWorkflowResult> {
   for (const step of def.steps) {
     for (const key of step.ask ?? []) {
-      if (!(key in userArgs) || userArgs[key] === undefined) {
+      if (!(key in userArgs) || userArgs[key] === undefined || userArgs[key] === "") {
         throw new Error(
           `[workflows.${def.name}] step ${step.id}: ask "${key}" is required but missing from workflow input`,
         );
@@ -84,7 +84,7 @@ export async function runWorkflow(
         schemaEntry.inputSchema as Record<string, unknown>,
       );
       const validated = await validator["~standard"].validate(resolved);
-      if ("issues" in validated && validated.issues) {
+      if ("issues" in validated && Array.isArray(validated.issues) && validated.issues.length > 0) {
         const issues = validated.issues
           .map((issue: { message: string }) => issue.message)
           .join("; ");

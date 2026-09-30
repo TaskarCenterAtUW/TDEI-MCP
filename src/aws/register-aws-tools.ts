@@ -67,6 +67,9 @@ export async function registerAwsTools(
   );
 
   let skipped = 0;
+  // Contract: this map covers only tools newly registered by THIS call
+  // (early-continue above skips already-registered tools). AwsToolsLifecycle
+  // accumulates across calls in allToolSchemas for workflow step validation.
   const toolSchemas = new Map<string, { description?: string; inputSchema: unknown }>();
 
   for (const awsTool of result.tools) {

@@ -5,6 +5,9 @@ import type { SsoLogoutStart } from "../auth/types.js";
 import type { AwsMcpClient } from "./aws-mcp-client.js";
 import type { registerAwsTools } from "./register-aws-tools.js";
 import {
+  BUILTIN_TOOL_PREFIX,
+  CONNECTOR_AUTH_TOOLS,
+  ensureDefaultConfig,
   loadConfigFile,
   type EndpointFilter,
 } from "../config-file.js";
@@ -61,7 +64,12 @@ function deniedFor(
   if (filter.mode === "allow") {
     const allowed = new Set(filter.allow);
     return new Set(
-      discoveredNames.filter((name) => !allowed.has(name)),
+      discoveredNames.filter(
+        (name) =>
+          !allowed.has(name) &&
+          !CONNECTOR_AUTH_TOOLS.has(name) &&
+          !name.startsWith(BUILTIN_TOOL_PREFIX),
+      ),
     );
   }
 
@@ -107,6 +115,7 @@ export class AwsToolsLifecycle {
   }
 
   private async discoverAndRegister(): Promise<void> {
+    ensureDefaultConfig();
     const cfg = loadConfigFile();
 
     // Single listTools per load/reload: the registrar reuses this
