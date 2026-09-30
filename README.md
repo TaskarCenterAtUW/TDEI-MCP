@@ -42,6 +42,12 @@ documented under Advanced below.
 
 The AWS child package is pinned to `awslabs.openapi-mcp-server@1.1.2`, the version tested with this connector. `uvx` manages that Python tool separately from the npm dependencies; its first launch may take longer while dependencies download.
 
+## Advanced: manual setup from a checkout (developers only)
+
+If you installed via `npx -y tdei-mcp init`, skip this section — `init` already
+wrote your client config with the environment inline and there is no `.env` to
+manage. The steps below are only for running from source.
+
 ## 1. Download and install
 
 On this repository's GitHub page, choose **Code → Download ZIP**, extract it, and open a terminal in the extracted project folder. Alternatively, copy the repository's clone URL from **Code**, clone it with Git, and enter the cloned folder.
@@ -55,26 +61,15 @@ cp .env.example .env
 
 In Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
 
-`npm ci` installs the dependency versions recorded in `package-lock.json`. Create `.env` only on initial setup; copying the example again overwrites your existing configuration.
+`npm ci` installs the dependency versions recorded in `package-lock.json`. Create `.env` only on initial setup; copying the example again overwrites your existing configuration. Keep `.env` private; it is excluded by `.gitignore`. The callback URL must exactly match the URI registered for the `tdei-mcp` client, and its port must be free locally.
 
-## 2. Configure SSO and build
-
-Open `.env` in a text editor and confirm the SSO client and registered callback URL:
-
-```dotenv
-TDEI_SSO_CLIENT_ID=tdei-mcp
-TDEI_SSO_CALLBACK_URL=http://127.0.0.1:8765/callback
-```
-
-Keep the other values from `.env.example` for the development environment. The callback URL must exactly match the URI registered for the `tdei-mcp` client. Port 8765 must be available locally. Keep `.env` private; it is excluded by `.gitignore`.
-
-Build the connector:
+## 2. Build (checkout only — `init` users skip this)
 
 ```bash
 npm run build
 ```
 
-This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source.
+This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for checkout runs — `init` users already have them inline in the client config.
 
 ## 3. Connect your MCP client
 
