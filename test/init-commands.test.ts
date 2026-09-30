@@ -17,7 +17,7 @@ const deps = (fs: ReturnType<typeof memFs>, prompter: unknown) => ({ exec, ...fs
 
 test("runInit writes codex entry end to end", async () => {
   const fs = memFs();
-  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", nodePath: "/usr/bin/node" });
+  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx" });
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.client, "codex");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
@@ -26,7 +26,7 @@ test("runInit writes codex entry end to end", async () => {
 
 test("runInit custom prints manual and writes nothing", async () => {
   const fs = memFs();
-  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ url: "https://example.com/" }), chooseClient: async () => "custom" as const }) as never, { home: "/h", nodePath: "/usr/bin/node", port: 9999 });
+  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ url: "https://example.com/" }), chooseClient: async () => "custom" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 9999 });
   assert.equal(summary.callbackUrl, "http://127.0.0.1:9999/callback");
   assert.equal(fs.files.size, 0);
   assert.match(logs.join("\n"), /Manual MCP setup/);
@@ -34,7 +34,7 @@ test("runInit custom prints manual and writes nothing", async () => {
 
 test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   const fs = memFs();
-  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", nodePath: "/usr/bin/node", port: 8765 });
+  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 8765 });
   logs.length = 0;
   const summary = await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
   assert.equal(summary.apiUrl, "https://api-stage.tdei.us");

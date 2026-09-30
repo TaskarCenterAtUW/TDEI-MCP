@@ -1,13 +1,19 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const CLIENTS = ["codex", "claude", "vscode", "custom"] as const;
 export type ClientName = (typeof CLIENTS)[number];
 
 export interface ServerEntry { command: string; args: string[]; env: Record<string, string>; }
 
-export function buildServerEntry(nodePath: string, env: Record<string, string>): ServerEntry {
-  return { command: nodePath, args: ["-y", "tdei-mcp"], env: { ...env } };
+export function buildServerEntry(npxPath: string, env: Record<string, string>): ServerEntry {
+  return { command: npxPath, args: ["-y", "tdei-mcp"], env: { ...env } };
+}
+
+// npx ships beside node (same bin dir on all platforms). The client entry
+// must launch npx — NOT node — because args ["-y", "tdei-mcp"] are npx flags.
+export function npxPathFor(nodeExecPath: string): string {
+  return join(dirname(nodeExecPath), process.platform === "win32" ? "npx.cmd" : "npx");
 }
 
 function upsertTomlBlock(toml: string, header: string, body: string): string {
@@ -48,7 +54,7 @@ export function writeCodexEntry(toml: string, entry: ServerEntry, env: Record<st
   return upsertTomlBlock(toml, "[mcp_servers.tdei]", body);
 }
 
-export function readCodexEntry(toml: string): { found: boolean; env: Record<string, string> } {
+export function readCodexEntry(toml: string): { found: boolean; env: Record<string, string>; command?: string } {
   const lines = toml.split("\n");
   const start = lines.findIndex((l) => l.trim() === "[mcp_servers.tdei]");
   if (start === -1) return { found: false, env: {} };
@@ -59,11 +65,13 @@ export function readCodexEntry(toml: string): { found: boolean; env: Record<stri
     if (/^\[.*\]$/.test(trimmed) && trimmed !== "[mcp_servers.tdei.env]") { end = i; break; }
   }
   const env: Record<string, string> = {};
+  let command: string | undefined;
   for (const line of lines.slice(start + 1, end)) {
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"(.*)"\s*$/);
-    if (m) env[m[1]!] = JSON.parse(`"${m[2]}"`);
+    if (m && m[1] === "command") command = JSON.parse(`"${m[2]}"`);
+    else if (m) env[m[1]!] = JSON.parse(`"${m[2]}"`);
   }
-  return { found: true, env };
+  return { found: true, env, command };
 }
 
 export function claudeConfigPath(platform: string = process.platform, home: string = homedir()): string {
@@ -88,19 +96,19 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
-function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): { found: boolean; env: Record<string, string> } {
+function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): { found: boolean; env: Record<string, string>; command?: string } {
   if (!jsonText.trim()) return { found: false, env: {} };
   const doc = JSON.parse(jsonText) as Record<string, unknown>;
-  const entry = (doc[rootKey] as Record<string, unknown> | undefined)?.[serverKey] as { env?: Record<string, string> } | undefined;
+  const entry = (doc[rootKey] as Record<string, unknown> | undefined)?.[serverKey] as { env?: Record<string, string>; command?: string } | undefined;
   if (!entry) return { found: false, env: {} };
-  return { found: true, env: { ...(entry.env ?? {}) } };
+  return { found: true, env: { ...(entry.env ?? {}) }, command: entry.command };
 }
 
 export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Record<string, string>, pathForError = "claude_desktop_config.json"): string {
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", { command: entry.command, args: entry.args, env }, pathForError);
 }
 
-export function readClaudeEntry(jsonText: string): { found: boolean; env: Record<string, string> } {
+export function readClaudeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string } {
   return readJsonEntry(jsonText, "mcpServers", "tdei");
 }
 
@@ -112,7 +120,7 @@ export function writeVscodeEntry(jsonText: string, entry: ServerEntry, env: Reco
   return upsertJsonEntry(jsonText, "servers", "tdei", { command: entry.command, args: entry.args, env }, pathForError);
 }
 
-export function readVscodeEntry(jsonText: string): { found: boolean; env: Record<string, string> } {
+export function readVscodeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string } {
   return readJsonEntry(jsonText, "servers", "tdei");
 }
 
