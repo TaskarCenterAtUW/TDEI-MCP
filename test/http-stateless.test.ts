@@ -79,3 +79,54 @@ test("validateToken accepts good bearer on probe success", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+import { AwsMcpClient } from "../src/aws/aws-mcp-client.js";
+
+class StubAwsMcpClient extends AwsMcpClient {
+  public startedWith: string[] = [];
+  public closedCount = 0;
+  protected override async startChild(accessToken: string): Promise<void> {
+    this.startedWith.push(accessToken);
+    (this as unknown as Record<string, unknown>)["client"] = {
+      listTools: async () => ({
+        tools: [
+          {
+            name: "listServices",
+            description: "List TDEI services.",
+            inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+          },
+        ],
+      }),
+      callTool: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      close: async () => undefined,
+    };
+  }
+  override async close(): Promise<void> {
+    this.closedCount += 1;
+    await super.close();
+  }
+}
+
+test("AwsMcpClient uses injected provider instead of singleton", async () => {
+  const seen: string[] = [];
+  const client = new StubAwsMcpClient(async () => {
+    seen.push("provider-called");
+    return "bearer-A";
+  });
+  await client.callTool("listServices", {});
+  assert.deepEqual(client.startedWith, ["bearer-A"]);
+  assert.deepEqual(seen, ["provider-called"]);
+  await client.close();
+  assert.equal(client.closedCount, 1);
+});
+
+test("two clients with different providers stay isolated", async () => {
+  const a = new StubAwsMcpClient(async () => "bearer-A");
+  const b = new StubAwsMcpClient(async () => "bearer-B");
+  await a.callTool("listServices", {});
+  await b.callTool("listServices", {});
+  assert.deepEqual(a.startedWith, ["bearer-A"]);
+  assert.deepEqual(b.startedWith, ["bearer-B"]);
+  await a.close();
+  await b.close();
+});

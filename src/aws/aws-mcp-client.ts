@@ -13,6 +13,7 @@ export class AwsMcpClient {
   private connectedMode?: ConnectionMode;
   private connectedTokenVersion?: number;
 
+  constructor(private readonly tokenProvider?: () => Promise<string>) {}
   private async connectForDiscovery(): Promise<void> {
     if (this.client) return;
 
@@ -21,6 +22,18 @@ export class AwsMcpClient {
   }
 
   private async connectAuthenticated(): Promise<void> {
+    if (this.tokenProvider) {
+      // Stateless per-request path: always start a fresh child with the
+      // request Bearer, then the caller closes it after the response.
+      if (this.client) {
+        await this.close();
+      }
+      console.error("[aws-mcp] starting per-request AWS OpenAPI MCP server");
+      const accessToken = await this.tokenProvider();
+      await this.startChild(accessToken, "authenticated");
+      return;
+    }
+
     const accessToken = await authManager.getAccessToken();
     const tokenVersion = authManager.getTokenVersion();
 
@@ -45,7 +58,7 @@ export class AwsMcpClient {
     await this.startChild(accessToken, "authenticated", tokenVersion);
   }
 
-  private async startChild(
+  protected async startChild(
     accessToken: string,
     mode: ConnectionMode,
     tokenVersion?: number,
@@ -88,6 +101,10 @@ export class AwsMcpClient {
   }
 
   async listTools() {
+    if (this.tokenProvider) {
+      await this.connectAuthenticated();
+      return this.client!.listTools();
+    }
     if (authManager.getStatus().authenticated) {
       await this.connectAuthenticated();
     } else {
