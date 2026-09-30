@@ -175,6 +175,42 @@ export class AuthManager {
     throw new Error("TDEI_SSO_REQUIRED");
   }
 
+  /** Seed a Bearer received over HTTP. Internal: use injectAccessToken(). */
+  seedInjectedToken(token: string, expiresInSeconds?: number): void {
+    this.accessToken = token;
+    this.refreshToken = undefined;
+    this.tokenVersion += 1;
+    const lifetime =
+      typeof expiresInSeconds === "number" && expiresInSeconds >= 0
+        ? expiresInSeconds
+        : DEFAULT_TOKEN_LIFETIME_SECONDS;
+    this.expiresAt = Date.now() + lifetime * 1000;
+  }
+
+  /**
+   * Stateless validation for an injected Bearer: local expiry check first
+   * (never attempts refresh — the server holds no refresh_token), then one
+   * lightweight TDEI probe. Throws TDEI_TOKEN_EXPIRED / TDEI_TOKEN_INVALID.
+   */
+  async validateToken(): Promise<void> {
+    if (!this.hasUsableAccessToken()) {
+      throw new Error("TDEI_TOKEN_EXPIRED");
+    }
+    let response: Response;
+    try {
+      response = await fetch(new URL("/api/v1/project-groups", `${config.apiUrl}/`), {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${this.accessToken}` },
+      });
+    } catch {
+      throw new Error("TDEI_TOKEN_INVALID");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("TDEI_TOKEN_INVALID");
+    }
+    await response.body?.cancel().catch(() => undefined);
+  }
+
   async logout(): Promise<SsoLogoutStart> {
     if (this.pendingLogout) return this.publicLogout(this.pendingLogout);
 
@@ -338,6 +374,13 @@ export class AuthManager {
     this.refreshToken = undefined;
     this.expiresAt = undefined;
   }
+}
+
+export function injectAccessToken(token: string, expiresInSeconds?: number): AuthManager {
+  if (!token) throw new Error("TDEI_TOKEN_INVALID");
+  const manager = new AuthManager();
+  manager.seedInjectedToken(token, expiresInSeconds);
+  return manager;
 }
 
 export const authManager = new AuthManager();
