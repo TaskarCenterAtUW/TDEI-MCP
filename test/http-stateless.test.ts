@@ -130,3 +130,111 @@ test("two clients with different providers stay isolated", async () => {
   await a.close();
   await b.close();
 });
+
+import { serveHttp } from "../src/http.js";
+
+// Fixed test port passed via overrides (static imports hoist above any env
+// assignment, so config already evaluated by the time module code runs).
+const TEST_PORT = 18080;
+
+function mcpBody(id: number, method: string, params: unknown = {}) {
+  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
+}
+
+async function postMcp(url: string, body: string, token?: string) {
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body,
+  });
+}
+
+test("http.ts import has no side effects on singletons", async () => {
+  const auth = await import("../src/auth/auth-manager.js");
+  const aws = await import("../src/aws/aws-mcp-client.js");
+  await import("../src/http.js");
+  assert.equal(auth.authManager.getStatus().authenticated, false);
+  assert.equal(aws.awsMcpClient.isConnected(), false);
+});
+
+test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
+  const handle = await serveHttp({ createAwsClient: () => { throw new Error("must not spawn"); } }, { port: TEST_PORT });
+  try {
+    const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    assert.equal(response.status, 401);
+    const body = (await response.json()) as Record<string, unknown>;
+    assert.equal(body.code, "TDEI_SSO_REQUIRED");
+    assert.match(String(body.message), /tdei_sso_login/);
+    assert.ok(String(body.loginUrl).includes("/api/v1/sso-redirect"));
+  } finally {
+    await handle.close();
+  }
+});
+
+test("POST /mcp with bad bearer returns 401 without spawning child", async () => {
+  let spawned = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/api/v1/project-groups")) {
+      return new Response("unauthorized", { status: 401 });
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+  try {
+    const handle = await serveHttp({
+      createAwsClient: () => { spawned += 1; throw new Error("must not spawn"); },
+    }, { port: TEST_PORT });
+    try {
+      const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
+      assert.equal(response.status, 401);
+      const body = (await response.json()) as Record<string, unknown>;
+      assert.equal(body.code, "TDEI_TOKEN_INVALID");
+      assert.equal(spawned, 0);
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("good bearer serves tools/list and calls; bearers isolated", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenTokens: string[] = [];
+  globalThis.fetch = (async (input: unknown, init?: { headers?: Record<string, string> } & RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/api/v1/project-groups")) {
+      seenTokens.push(String(init?.headers?.["Authorization"] ?? ""));
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+  try {
+    const closed: string[] = [];
+    const handle = await serveHttp({
+      createAwsClient: (token: string) => {
+        const stub = new StubAwsMcpClient(async () => token);
+        const origClose = stub.close.bind(stub);
+        stub.close = async () => { closed.push(token); await origClose(); };
+        return stub as unknown as AwsMcpClient;
+      },
+    }, { port: TEST_PORT });
+    try {
+      const list = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "good-A");
+      assert.equal(list.status, 200);
+      const second = await postMcp(`${handle.url}/mcp`, mcpBody(2, "tools/list"), "good-B");
+      assert.equal(second.status, 200);
+      assert.deepEqual(seenTokens, ["Bearer good-A", "Bearer good-B"]);
+      assert.deepEqual(closed, ["good-A", "good-B"]);
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
