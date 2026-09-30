@@ -4,7 +4,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { config } from "./config.js";
 import { injectAccessToken } from "./auth/auth-manager.js";
 import { AwsMcpClient } from "./aws/aws-mcp-client.js";
-import { createServer, type ServerDependencies } from "./index.js";
+import { createServer, type ServerDependencies } from "./server.js";
 
 export interface HttpServeOptions {
   createAwsClient?: (token: string) => AwsMcpClient;

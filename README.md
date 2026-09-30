@@ -112,6 +112,22 @@ node --env-file=.env dist/index.js
 
 Expect `[tdei-mcp] Starting MCP server` on stderr. The process waits for MCP messages on stdin and starts signed out. This is a stdio server, so there is no browser page or HTTP port. Manual startup alone does not verify authentication or tool calls; an MCP client must send the initialization request. Press Ctrl+C to stop. For normal use, let your MCP client launch the process.
 
+### HTTP mode (Streamable HTTP, stateless)
+
+One process serves one transport. HTTP mode serves no STDIO; STDIO mode opens no port.
+
+Run:
+
+    node --env-file=.env dist/index.js --transport=http --port 3000
+
+Every request must carry `Authorization: Bearer <access_token>` from the same TDEI SSO protocol (login page, token exchange, refresh endpoints unchanged). The server holds no sessions and no refresh tokens: it validates the Bearer per request (local expiry check plus a lightweight TDEI probe) and cannot refresh on the client's behalf — refresh via `POST /api/v1/refresh-token` or re-run SSO login yourself.
+
+Example:
+
+    curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer <token>" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request spawns the AWS child fresh (v1 trade-off); the child is closed after the response.
+
 ## 4. Verify and use the connection
 
 The connector exposes five built-in tools while signed out:
@@ -151,6 +167,12 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_API_URL` | No | `https://api-dev.tdei.us` |
 | `TDEI_SPEC_URL` | No | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
 | `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` |
+| `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
+| `TDEI_HTTP_HOST` | No | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides) |
+| `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
+| `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
+| `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
+| `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 
 The API and specification URLs must use HTTPS. The local SSO callback must exactly match the registered HTTP loopback URL. When selecting another environment, use a matching API URL, OpenAPI specification, and account. Keep the AWS package pinned to an exact version that you have tested with this connector.
 
