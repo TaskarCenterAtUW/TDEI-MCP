@@ -135,6 +135,24 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 
 The API and specification URLs must use HTTPS. The local SSO callback must exactly match the registered HTTP loopback URL. When selecting another environment, use a matching API URL, OpenAPI specification, and account. Keep the AWS package pinned to an exact version that you have tested with this connector.
 
+## Endpoint filtering and workflows (tdei.config.json)
+
+Config path: `TDEI_CONFIG_PATH` env else `./tdei.config.json` in `cwd` (same dir as `.env`).
+Missing or invalid file → stderr warning + fallback to full access, no workflows.
+Run once to scaffold: the server writes a default `{mode:"all"}` file on first use —
+edit it, then restart or call `tdei_reload_config` (additive; removals need restart).
+
+`endpoints.mode`: `all` | `allow` (non-empty allow, empty deny) | `deny` (inverse).
+Match key is the exact operationId (`listServices`, `cloneDataset`, ...). `tdei_*`
+and connector-managed auth ops are never filtered. See `tdei.config.example.json`;
+editors get completion via `tdei.config.schema.json`.
+
+Workflows are linear `workflow_*` tools: each step calls one REST operation in order,
+`ask[]` becomes required input, `{{user.*}}` / `{{steps.<id>.output.<path>}}` thread
+values, failure aborts with a transcript. First built-in example:
+`workflow_download_osw_dataset_bundle` (listProjectGroups → listDatasetFiles →
+getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
+
 ## Troubleshooting
 
 | Symptom | What to check |

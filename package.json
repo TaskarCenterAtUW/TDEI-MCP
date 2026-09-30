@@ -9,7 +9,9 @@
   "files": [
     "dist",
     "README.md",
-    ".env.example"
+    ".env.example",
+    "tdei.config.schema.json",
+    "tdei.config.example.json"
   ],
   "engines": {
     "node": ">=22"
