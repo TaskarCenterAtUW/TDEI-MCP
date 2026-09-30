@@ -245,6 +245,31 @@ export async function createServer(
     },
   );
 
+  server.registerTool(
+    "tdei_reload_config",
+    {
+      description:
+        "Re-read tdei.config.json and register new endpoint tools and workflow_* tools. Removals require restart in v1.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const result = await awsToolsLifecycle.reload();
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `TDEI config reloaded: ${result}. New tools registered; removed tools require restart.`,
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
   // Discover tool definitions before MCP initialization so hosts that cache
   // the initial catalogue can see API tools before the user signs in. Calls
   // still require SSO and restart the child with the real access token.
