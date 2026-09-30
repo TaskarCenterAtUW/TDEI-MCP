@@ -71,9 +71,9 @@ npm run build
 
 This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for checkout runs — `init` users already have them inline in the client config.
 
-## 3. Connect your MCP client
+## 3. Connect your MCP client (checkout only — `init` already wrote this entry)
 
-Configure your client to start the connector with Node.js and explicitly load `.env`. The application does not load `.env` on its own; `npm start` and `npm run dev` use only the environment already supplied to their process.
+Configure your client to start the connector with Node.js and explicitly load `.env`. The application does not load `.env` on its own; `npm start` and `npm run dev` use only the environment already supplied to their process. `init` users: your entry launches `npx -y tdei-mcp` with env inline, so skip this section.
 
 ### Codex
 
