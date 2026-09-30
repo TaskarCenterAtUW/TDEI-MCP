@@ -1,0 +1,123 @@
+import { dirname } from "node:path";
+import { DEFAULT_SPEC_URL, assertCallbackUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
+import { checkPreflight, type ExecFn } from "./preflight.js";
+import { findFreePort } from "./ports.js";
+import {
+  buildServerEntry, claudeConfigPath, codexConfigPath, formatManual,
+  readClaudeEntry, readCodexEntry, readVscodeEntry, vscodeConfigPath,
+  writeClaudeEntry, writeCodexEntry, writeVscodeEntry,
+  type ClientName, type ServerEntry,
+} from "./clients.js";
+
+export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CLIENT_ID", "TDEI_SSO_CALLBACK_URL"];
+
+export interface Prompter {
+  chooseEnv(): Promise<{ env?: string; url?: string }>;
+  chooseClient(): Promise<ClientName>;
+}
+
+export interface Deps {
+  exec: ExecFn;
+  readFile: (path: string) => Promise<string>;
+  writeFile: (path: string, content: string) => Promise<void>;
+  mkdir: (path: string) => Promise<void>;
+  prompter: Prompter;
+  log: (msg: string) => void;
+}
+
+export const VERIFY_PROMPT = "Verify: Call tdei_sso_login and give me the loginUrl. After browser login, check tdei_auth_status and call listServices.";
+
+function clientPaths(client: ClientName, home: string, cwd: string): string {
+  if (client === "codex") return codexConfigPath(home);
+  if (client === "claude") return claudeConfigPath(process.platform, home);
+  return vscodeConfigPath(cwd);
+}
+
+async function readExisting(deps: Deps, path: string): Promise<string> {
+  try {
+    return await deps.readFile(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+function writeEntry(client: ClientName, current: string, entry: ServerEntry, env: Record<string, string>, path: string): string {
+  if (client === "codex") return writeCodexEntry(current, entry, env);
+  if (client === "claude") return writeClaudeEntry(current, entry, env, path);
+  return writeVscodeEntry(current, entry, env, path);
+}
+
+function readEntry(client: ClientName, current: string): { found: boolean; env: Record<string, string> } {
+  if (client === "codex") return readCodexEntry(current);
+  if (client === "claude") return readClaudeEntry(current);
+  return readVscodeEntry(current);
+}
+
+export async function runInit(
+  deps: Deps,
+  opts: { env?: string; url?: string; client?: ClientName; port?: number; nodePath?: string; home?: string; cwd?: string },
+): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
+  await checkPreflight(deps.exec);
+  const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
+  const apiUrl = resolveApiUrl(choice);
+  const port = opts.port ?? (await findFreePort(8765));
+  const callbackUrl = assertCallbackUrl(buildCallbackUrl(port));
+  const client = opts.client ?? (await deps.prompter.chooseClient());
+  const nodePath = opts.nodePath ?? (await deps.exec(process.execPath, ["-p", "process.execPath"])).stdout.trim();
+  const env: Record<string, string> = {
+    TDEI_API_URL: apiUrl,
+    TDEI_SPEC_URL: DEFAULT_SPEC_URL,
+    TDEI_SSO_CLIENT_ID: "tdei-mcp",
+    TDEI_SSO_CALLBACK_URL: callbackUrl,
+  };
+  const entry = buildServerEntry(nodePath, env);
+  if (client === "custom") {
+    deps.log(formatManual(entry, env));
+    deps.log(VERIFY_PROMPT);
+    return { client, apiUrl, callbackUrl };
+  }
+  const home = opts.home ?? process.env.HOME ?? "";
+  const cwd = opts.cwd ?? process.cwd();
+  const path = clientPaths(client, home, cwd);
+  const updated = writeEntry(client, await readExisting(deps, path), entry, env, path);
+  await deps.mkdir(dirname(path));
+  await deps.writeFile(path, updated);
+  deps.log(`wrote ${client} MCP entry for ${apiUrl} to ${path}`);
+  deps.log(VERIFY_PROMPT);
+  return { client, apiUrl, callbackUrl };
+}
+
+export async function runSwitch(
+  deps: Deps,
+  opts: { env?: string; url?: string; client?: ClientName; home?: string; cwd?: string },
+): Promise<{ client: ClientName; apiUrl: string }> {
+  const client = opts.client ?? (await deps.prompter.chooseClient());
+  if (client === "custom") {
+    throw new Error("switch needs a client config file (custom has none) — re-run with --client codex|claude|vscode");
+  }
+  const home = opts.home ?? process.env.HOME ?? "";
+  const cwd = opts.cwd ?? process.cwd();
+  const path = clientPaths(client, home, cwd);
+  const current = await readExisting(deps, path);
+  const existing = readEntry(client, current);
+  if (!existing.found) {
+    throw new Error(`no tdei entry found in ${path} — run tdei-mcp-init init first`);
+  }
+  const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
+  const apiUrl = resolveApiUrl(choice);
+  const nodePath = (existing.env["TDEI_NODE_PATH"] as string | undefined) ?? process.execPath;
+  const specUrl = existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== DEFAULT_SPEC_URL
+    ? existing.env["TDEI_SPEC_URL"]!
+    : DEFAULT_SPEC_URL;
+  const env: Record<string, string> = {
+    TDEI_API_URL: apiUrl,
+    TDEI_SPEC_URL: specUrl,
+    TDEI_SSO_CLIENT_ID: existing.env["TDEI_SSO_CLIENT_ID"] ?? "tdei-mcp",
+    TDEI_SSO_CALLBACK_URL: existing.env["TDEI_SSO_CALLBACK_URL"] ?? buildCallbackUrl(8765),
+  };
+  const entry = buildServerEntry(nodePath, env);
+  await deps.writeFile(path, writeEntry(client, current, entry, env, path));
+  deps.log(`restart your MCP client to reconnect to ${apiUrl} (tokens are in-memory)`);
+  return { client, apiUrl };
+}
