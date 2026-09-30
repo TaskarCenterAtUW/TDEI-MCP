@@ -4,23 +4,32 @@ Connect an MCP-compatible AI client to the TDEI API. This local server authentic
 
 The default configuration uses the **TDEI development environment**. You need an account with access to that environment; downloading the repository does not create an account or grant API permissions.
 
-## Quickstart (npx)
+## Quickstart (npx, once published)
 
 ```bash
 npx -y tdei-mcp init
 ```
 
-This checks Node.js ≥22 and `uvx`, asks for your TDEI environment
-(dev / stage / prod / custom URL — one per setup), picks a free local port for
-the SSO callback, and writes the `tdei` entry into your MCP client config
-(Codex / Claude Desktop / VSCode / Custom-manual). Re-run any time; only the
-`tdei` entry is touched. To move an existing setup to another environment:
+This checks Node.js ≥22 and `uvx`, asks for your TDEI base URL (no default —
+paste the API host, portal URL, or even an endpoint path; only the host is
+used), picks a free local port for the SSO callback, and writes the `tdei`
+entry into your MCP client config (Codex / Claude Desktop / VSCode /
+Custom-manual). You never start the server yourself: your MCP client spawns
+it per session and stops it when the session ends.
+
+Restart your MCP client, then verify:
+
+> Call tdei_sso_login and give me the loginUrl. After browser login, check
+> tdei_auth_status and call listServices.
+
+To move an existing setup to another environment:
 
 ```bash
 npx -y tdei-mcp switch base-url
 ```
 
-Then restart your MCP client (tokens live in server memory). Manual setup is
+Then restart your MCP client (tokens live in server memory). Re-run `init`
+any time; only the `tdei` entry is touched. Manual setup from a checkout is
 documented under Advanced below.
 
 ## Requirements
