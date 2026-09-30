@@ -3,11 +3,13 @@ import test from "node:test";
 import { assertCallbackUrl, buildCallbackUrl, resolveApiUrl } from "../src/init/envs.js";
 import { checkPreflight } from "../src/init/preflight.js";
 
-test("resolveApiUrl maps env names and validates custom", () => {
+test("resolveApiUrl maps env names, requires explicit choice, normalizes pasted URLs", () => {
   assert.equal(resolveApiUrl({ env: "dev" }), "https://api-dev.tdei.us");
   assert.equal(resolveApiUrl({ env: "stage" }), "https://api-stage.tdei.us");
   assert.equal(resolveApiUrl({ env: "prod" }), "https://api.tdei.us");
-  assert.equal(resolveApiUrl({ url: "https://example.com/api/" }), "https://example.com/api");
+  assert.equal(resolveApiUrl({ url: "https://example.com/api/" }), "https://example.com");
+  assert.equal(resolveApiUrl({ url: "https://api-dev.tdei.us/api/v1/authenticate" }), "https://api-dev.tdei.us");
+  assert.throws(() => resolveApiUrl({}), /no environment given/);
   assert.throws(() => resolveApiUrl({ env: "dev", url: "https://x" }), /mutually exclusive/);
   assert.throws(() => resolveApiUrl({ env: "qa" }), /unknown environment "qa"/);
   assert.throws(() => resolveApiUrl({ url: "http://insecure" }), /TDEI_API_URL must use HTTPS/);

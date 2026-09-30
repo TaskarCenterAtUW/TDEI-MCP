@@ -4,7 +4,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { runInit, runSwitch } from "./init/commands.js";
 import { CLIENTS, type ClientName } from "./init/clients.js";
-import { ENVS } from "./init/envs.js";
 
 function usage(): string {
   return [
@@ -30,13 +29,11 @@ async function interactivePrompter() {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return {
     async chooseEnv() {
-      const names = Object.keys(ENVS);
-      const answer = (await rl.question(`TDEI environment (${names.join("/")}/custom) [dev]: `)).trim() || "dev";
-      if (answer === "custom") {
-        const url = (await rl.question("Custom TDEI API URL (https://...): ")).trim();
-        return { url };
+      for (;;) {
+        const answer = (await rl.question("TDEI base URL (e.g. https://api-dev.tdei.us — a portal page or endpoint path is fine, only the host is used): ")).trim();
+        if (answer) return { url: answer };
+        console.error("A base URL is required — there is no default.");
       }
-      return { env: answer };
     },
     async chooseClient(): Promise<ClientName> {
       const answer = (await rl.question(`MCP client (${CLIENTS.join("/")}) [codex]: `)).trim() || "codex";

@@ -37,11 +37,26 @@ export function resolveApiUrl(opts: { env?: string; url?: string }): string {
   if (opts.env && opts.url) {
     throw new Error("--env and --url are mutually exclusive: pick one environment per run");
   }
-  if (opts.url) return assertHttpsUrl(opts.url, "TDEI_API_URL");
-  const env = opts.env ?? "dev";
-  const entry = (ENVS as Record<string, { apiUrl: string }>)[env];
+  if (opts.url) return normalizeToOrigin(opts.url, "TDEI_API_URL");
+  if (!opts.env) {
+    throw new Error("no environment given: pass --env dev|stage|prod or --url <https-url>");
+  }
+  const entry = (ENVS as Record<string, { apiUrl: string }>)[opts.env];
   if (!entry) {
-    throw new Error(`unknown environment "${env}" (expected one of: dev, stage, prod, or pass --url)`);
+    throw new Error(`unknown environment "${opts.env}" (expected one of: dev, stage, prod, or pass --url)`);
   }
   return entry.apiUrl;
+}
+
+// Users paste what they have — often a portal page or a full endpoint path
+// (e.g. https://api-dev.tdei.us/api/v1/authenticate). The server derives all
+// paths from the base URL (auth-manager.ts builds {API_URL}/api/v1/...), so
+// reduce any input to its https origin and warn when something was stripped.
+export function normalizeToOrigin(value: string, name: string): string {
+  const cleaned = assertHttpsUrl(value, name);
+  const origin = new URL(cleaned).origin;
+  if (origin !== cleaned) {
+    console.error(`[${name}] using base URL ${origin} (trimmed path from ${cleaned})`);
+  }
+  return origin;
 }
