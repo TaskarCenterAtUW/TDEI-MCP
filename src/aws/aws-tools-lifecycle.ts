@@ -13,7 +13,7 @@ import {
 } from "../config-file.js";
 import { registerWorkflows } from "../workflows/register.js";
 
-type AuthSession = Pick<AuthManager, "logout">;
+type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion">;
 type AwsSession = Pick<
   AwsMcpClient,
   "close" | "listTools" | "callTool"
@@ -77,7 +77,8 @@ function deniedFor(
 }
 
 export class AwsToolsLifecycle {
-  private loaded = false;
+  private state: "unloaded" | "loading" | "loaded" | "reloading" = "unloaded";
+  private lastTokenVersion?: number;
   private operationQueue: Promise<void> =
     Promise.resolve();
   private allToolSchemas = new Map<
@@ -94,24 +95,43 @@ export class AwsToolsLifecycle {
 
   load(): Promise<"loaded" | "already-loaded"> {
     return this.serialize(async () => {
-      if (this.loaded) {
+      const current = this.authSession.getTokenVersion();
+      if (this.state === "loaded" && this.lastTokenVersion === current) {
         return "already-loaded";
       }
-
-      await this.discoverAndRegister();
-      this.loaded = true;
-
+      await this.ensureFreshLocked(current);
       return "loaded";
     });
   }
 
   reload(): Promise<"reloaded"> {
     return this.serialize<"reloaded">(async () => {
-      await this.discoverAndRegister();
-      this.loaded = true;
-
+      this.lastTokenVersion = undefined;
+      await this.ensureFreshLocked(this.authSession.getTokenVersion());
       return "reloaded";
     });
+  }
+
+  callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
+    return this.serialize(async () => {
+      await this.ensureFreshLocked(this.authSession.getTokenVersion());
+      return this.awsSession.callTool(tool, input);
+    });
+  }
+
+  private async ensureFreshLocked(currentVersion: number): Promise<void> {
+    if (this.state === "loaded" && this.lastTokenVersion === currentVersion) {
+      return;
+    }
+    const firstLoad = this.lastTokenVersion === undefined;
+    this.state = firstLoad ? "loading" : "reloading";
+    if (!firstLoad) {
+      console.error("[aws-mcp] token changed; restarting AWS MCP server");
+      await this.awsSession.close();
+    }
+    await this.discoverAndRegister();
+    this.lastTokenVersion = currentVersion;
+    this.state = "loaded";
   }
 
   private async discoverAndRegister(): Promise<void> {
@@ -186,13 +206,14 @@ export class AwsToolsLifecycle {
         return await this.authSession.logout();
       } finally {
         await this.awsSession.close();
-        this.loaded = false;
+        this.lastTokenVersion = undefined;
+        this.state = "unloaded";
       }
     });
   }
 
   isLoaded(): boolean {
-    return this.loaded;
+    return this.state === "loaded";
   }
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {

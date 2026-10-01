@@ -71,6 +71,7 @@ test("SSO login loads API tools and supports calls and logout", async () => {
           ? { ...signedOutStatus(), authenticated: true, state: "authenticated" as const }
           : signedOutStatus();
       },
+      getTokenVersion: () => 1,
       async logout() {
         authenticated = false;
         logoutCount += 1;
@@ -142,6 +143,7 @@ test("signed-out server remains available for SSO login", async () => {
       },
       async getAccessToken() { throw new Error("TDEI_SSO_REQUIRED"); },
       getStatus: signedOutStatus,
+      getTokenVersion: () => 1,
       async logout() {
         return {
           logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
