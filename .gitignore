@@ -11,6 +11,7 @@ dist/
 # Logs and test output
 *.log
 coverage/
+downloads/
 
 # Machine-specific MCP configuration
 .codex/config.toml

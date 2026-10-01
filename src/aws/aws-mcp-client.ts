@@ -3,6 +3,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { authManager } from "../auth/auth-manager.js";
 import { config } from "../config.js";
+import { downloadFile, isDownloadTool } from "../api/file-download.js";
+import { isUploadTool, uploadFiles } from "../api/file-upload.js";
 
 const DISCOVERY_TOKEN = "tdei-schema-discovery";
 type ConnectionMode = "discovery" | "authenticated";
@@ -97,6 +99,10 @@ export class AwsMcpClient {
   }
 
   async callTool(name: string, args: Record<string, unknown>) {
+    // Generated OpenAPI tools decode downloads as JSON/text. Preserve ZIP bytes
+    // locally for both direct tool calls and workflow calls through this client.
+    if (isDownloadTool(name)) return downloadFile(name, args);
+    if (isUploadTool(name)) return uploadFiles(name, args);
     // Every API invocation must upgrade a discovery-only child to a child
     // carrying the user's current SSO access token.
     await this.connectAuthenticated();

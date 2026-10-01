@@ -1,4 +1,5 @@
 import type { WorkflowDef } from "../config-file.js";
+import { isUploadTool } from "../api/file-upload.js";
 import { CONNECTOR_AUTH_TOOLS } from "../config-file.js";
 import { validateRefs } from "./template.js";
 
@@ -29,7 +30,7 @@ export function validateWorkflow(def: WorkflowDef, deps: WorkflowValidationDeps)
       problems.push(`${at}.tool "${step.tool}" is not present: no such operationId in the discovered API tools`);
     } else if (deps.denied.has(step.tool)) {
       problems.push(`${at}.tool "${step.tool}" is not present: disabled by endpoints config`);
-    } else if (deps.multipart?.has(step.tool)) {
+    } else if (deps.multipart?.has(step.tool) && !isUploadTool(step.tool)) {
       problems.push(`${at}.tool "${step.tool}" is a multipart/form-data operation; file uploads are not supported in workflows (v1)`);
     }
 

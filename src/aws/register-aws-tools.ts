@@ -14,6 +14,8 @@ import {
 } from "@modelcontextprotocol/server";
 
 import { awsMcpClient } from "./aws-mcp-client.js";
+import { isDownloadTool } from "../api/file-download.js";
+import { isUploadTool } from "../api/file-upload.js";
 import { errorResult } from "../mcp/responses.js";
 import { isToolAllowed, type EndpointFilter } from "../config-file.js";
 
@@ -124,7 +126,11 @@ export async function registerAwsTools(
     server.registerTool(
       awsTool.name,
       {
-        description: awsTool.description,
+        description: isDownloadTool(awsTool.name)
+          ? `${awsTool.description ?? "Downloads a file."} Saves the file on the MCP connector host and returns JSON containing its absolute path, filename, contentType, and bytes.`
+          : isUploadTool(awsTool.name)
+            ? `${awsTool.description ?? "Uploads files."} File arguments (dataset, metadata, changeset, or file) must be absolute paths to readable files on the MCP connector host. Sends the file bytes as multipart/form-data and returns JSON containing status, result, and location.`
+            : awsTool.description,
         inputSchema,
       },
       async (args) => {

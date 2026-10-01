@@ -1,4 +1,5 @@
 import { fromJsonSchema } from "@modelcontextprotocol/server";
+import { isUploadTool } from "../api/file-upload.js";
 import type { WorkflowDef } from "../config-file.js";
 import { resolveValue, validateRefs } from "./template.js";
 import type { StepResult, WorkflowCallTool } from "./types.js";
@@ -65,7 +66,7 @@ export async function runWorkflow(
       );
     }
 
-    if (deps.multipart?.has(step.tool)) {
+    if (deps.multipart?.has(step.tool) && !isUploadTool(step.tool)) {
       throw new Error(
         `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" is a multipart/form-data operation; file uploads are not supported in v1`,
       );
@@ -83,7 +84,7 @@ export async function runWorkflow(
         `[workflows.${def.name}] step ${step.id}: no input schema discovered for tool "${step.tool}" — cannot validate step input`,
       );
     }
-    if (declaresFileUpload(schemaEntry.inputSchema)) {
+    if (declaresFileUpload(schemaEntry.inputSchema) && !isUploadTool(step.tool)) {
       throw new Error(
         `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" uses file upload (multipart) which is not supported in v1`,
       );

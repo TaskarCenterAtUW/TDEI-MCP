@@ -69,7 +69,7 @@ Location: `$TDEI_CONFIG_PATH` (set by `init`), else `./tdei.config.json`. Schema
 
 - **`endpoints.mode`**: `all` (default), `allow` (only the operationIds in `allow`), or `deny` (everything except `deny`). Only one of `allow`/`deny` may be non-empty. Match is the exact operationId (`listServices`, `cloneDataset`, …); hyphens and underscores are interchangeable (`job-download` = `job_download`, the name the tool is exposed under). A filtered tool is simply not present in the tool list. `tdei_*` tools and connector auth are never filtered.
 - **`workflows`**: each becomes a tool `workflow_<name>` that runs REST operations one after another. Each step's `ask` keys become required inputs; `{{user.<key>}}` and `{{steps.<id>.output.<path>}}` pass values along. A failing step aborts the chain and returns the failed step, its input, the error, and the outputs so far.
-- **Workflows are validated against the effective tool list** when loaded: every step's `tool` must exist, must not be filtered out, must not be a multipart/form-data operation (file uploads are not supported in v1; detected from the OpenAPI spec), and every `{{…}}` reference must resolve. A workflow that fails is skipped and the reason is logged to stderr and returned by `tdei_reload_config`.
+- **Workflows are validated against the effective tool list** when loaded: every step's `tool` must exist, must not be filtered out, and every `{{…}}` reference must resolve. File operations listed below use local handlers and work in workflows. Unknown multipart operations remain unsupported. A workflow that fails is skipped and the reason is logged to stderr and returned by `tdei_reload_config`.
 - **Invalid config falls back to allow-all** (all endpoints, no workflows) with a warning on stderr naming the file and JSON path. This includes both `allow` and `deny` set, unknown operationIds, and duplicate workflow names or step ids.
 - Edits apply on restart, or via `tdei_reload_config` for additions. Removing or changing an existing workflow or filter needs a restart.
 
@@ -85,8 +85,52 @@ Set by `init` in your client entry; override there if needed.
 | `TDEI_SSO_CALLBACK_URL` | `http://127.0.0.1:<port>/callback` (loopback only) |
 | `TDEI_CONFIG_PATH` | see above |
 | `TDEI_AWS_MCP_PACKAGE` | `awslabs.openapi-mcp-server@1.1.2` (keep pinned) |
+| `TDEI_DOWNLOAD_DIR` | `./downloads`, resolved relative to the connector working directory |
 
-URLs must be `https://`.
+API and specification URLs must be `https://`.
+
+### File downloads
+
+`getOswFile`, `getGtfsFlexFile`, `getGtfsPathwaysFile`, `job_download`, and
+`oswDatasetViewerFeedbacksDownload` use the connector's current SSO token and
+stream files directly to `TDEI_DOWNLOAD_DIR`. OSW supports `format="osw"` and
+`format="osm"`, with `file_version="latest"` as the default. Feedback supports
+`format="csv"` (default) and `format="geojson"`, preserving query filters.
+Job downloads detect ZIP signatures and otherwise use the response filename's
+extension or content type, falling back to `.bin` for unknown binary output.
+The tools return JSON with `path` (absolute local path), `filename`,
+`contentType`, `bytes`, the dataset/job/project-group identifier, and `format`
+when applicable. The path belongs to the machine running the MCP connector.
+
+Each download gets a unique filename. Failed streams remove partial files.
+The connector preserves binary bytes rather than decoding the ZIP as UTF-8.
+Set `TDEI_DOWNLOAD_DIR` in your MCP server environment and reconnect the server
+after changing it or rebuilding the connector. Downloaded files remain on disk
+until you remove them.
+
+### File uploads
+
+File arguments are **absolute local paths on the MCP connector host**. Supply
+`dataset` for the ZIP, `metadata` for the metadata JSON, and optional `changeset`
+for dataset uploads. Operations with a single file use the `file` argument.
+The connector opens files as streaming blobs and sends multipart/form-data
+with filenames and content types, without decoding binary data or buffering
+the entire file in memory. Fetch generates the multipart boundary.
+
+Supported operations: `uploadOswFile`, `uploadGtfsFlexFile`,
+`uploadGtfsPathwaysFile`, `validateOswFile`, `validateGtfsFlexFile`,
+`validateGtfsPathwaysFile`, `sanitizeOswFile`, `editMetadata`, `cloneDataset`,
+`oswOnDemandFormat`, `oswConfidenceCalculate`, `oswQualityCalculate`, and
+`qualityMetricTag`. Confidence and intersection-quality files are optional.
+Conversion sends `source_format` and `target_format` as multipart text fields.
+Dataset uploads preserve the optional `derived_from_dataset_id` query value.
+
+Upload tools return JSON containing HTTP `status`, API response `result`, and
+the job-status `location` header (or null). In workflows, use
+`{{steps.<step-id>.output.structuredContent.result}}` for a job ID returned as a
+string, or `{{steps.<step-id>.output.structuredContent.path}}` for a downloaded
+file path that a later upload step consumes.
+HTTP errors fail the operation; the connector does not retry uploads.
 
 ## Troubleshooting
 
