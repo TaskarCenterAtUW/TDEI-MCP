@@ -16,7 +16,7 @@ import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
 export interface ServerDependencies {
   authManager: Pick<
     AuthManager,
-    "getAccessToken" | "getStatus" | "logout" | "startSsoLogin"
+    "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
   >;
   awsMcpClient: Pick<
     AwsMcpClient,

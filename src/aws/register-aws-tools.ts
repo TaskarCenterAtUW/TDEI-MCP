@@ -22,6 +22,11 @@ export interface AwsToolClient {
   callTool: typeof awsMcpClient.callTool;
 }
 
+export type AwsToolCall = (
+  tool: string,
+  input: Record<string, unknown>,
+) => ReturnType<AwsToolClient["callTool"]>;
+
 export interface AwsToolRegistrationResult {
   discovered: number;
   registered: number;
@@ -73,6 +78,7 @@ export async function registerAwsTools(
   server: McpServer,
   client: AwsToolClient = awsMcpClient,
   filter: EndpointFilter = { mode: "all", allow: [], deny: [] },
+  onCall?: AwsToolCall,
 ): Promise<AwsToolRegistrationResult> {
   console.error(
     "[aws-tools] discovering AWS OpenAPI tools",
@@ -129,10 +135,12 @@ export async function registerAwsTools(
       },
       async (args) => {
         try {
-          return await client.callTool(
-            awsTool.name,
-            args,
-          );
+          return await (onCall
+            ? onCall(awsTool.name, args)
+            : client.callTool(
+              awsTool.name,
+              args,
+            ));
         } catch (error) {
           return errorResult(error);
         }

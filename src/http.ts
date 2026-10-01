@@ -167,6 +167,7 @@ async function handleMcpRequest(
   const httpAuth: ServerDependencies["authManager"] = {
     getStatus: () => ephemeralAuth.getStatus(),
     getAccessToken: () => ephemeralAuth.getAccessToken(),
+    getTokenVersion: () => ephemeralAuth.getTokenVersion(),
     startSsoLogin: async () => ({
       loginUrl: buildLoginUrl(),
       callbackUrl: config.ssoCallbackUrl,

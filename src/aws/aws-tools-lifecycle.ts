@@ -112,7 +112,7 @@ export class AwsToolsLifecycle {
     });
   }
 
-  callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
+  callTool(tool: string, input: Record<string, unknown>): ReturnType<AwsSession["callTool"]> {
     return this.serialize(async () => {
       await this.ensureFreshLocked(this.authSession.getTokenVersion());
       return this.awsSession.callTool(tool, input);
@@ -165,6 +165,7 @@ export class AwsToolsLifecycle {
       this.server,
       discoveryClient,
       effectiveFilter,
+      (tool, input) => this.callTool(tool, input),
     );
 
     // Per-call toolSchemas cover newly registered tools only,
@@ -176,8 +177,11 @@ export class AwsToolsLifecycle {
     }
 
     const denied = deniedFor(effectiveFilter, discoveredNames);
+    // Workflow steps route through the version gate too. This closure only
+    // fires post-load (when MCP clients invoke workflow tools and the
+    // serialize() queue is idle), so it cannot self-deadlock.
     const callTool = (tool: string, input: Record<string, unknown>) =>
-      this.awsSession.callTool(tool, input);
+      this.callTool(tool, input);
 
     // Offending workflows are skipped one by one; the rest register.
     for (const workflow of cfg.workflows) {
