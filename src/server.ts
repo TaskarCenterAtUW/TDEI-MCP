@@ -10,8 +10,102 @@ import {
   type AwsMcpClient,
 } from "./aws/aws-mcp-client.js";
 import { errorResult } from "./mcp/responses.js";
+import { log } from "./mcp/log.js";
 import { registerAwsTools } from "./aws/register-aws-tools.js";
 import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
+import { config } from "./config.js";
+import { loadConfigFile } from "./config-file.js";
+
+export interface HealthProbes {
+  fetchImpl?: typeof fetch;
+  runUvx?: () => Promise<string>;
+  canBind?: (port: number, host: string) => Promise<boolean>;
+}
+
+export interface HealthReport {
+  ok: boolean;
+  auth: { state: string; expiresAt?: number };
+  child: { connected: boolean; mode: string };
+  spec: { url: string; reachable: boolean; latencyMs?: number; hint?: string };
+  uvx: { found: boolean; version?: string; hint?: string };
+  callback: { url: string; portFree: boolean | "n/a"; hint?: string };
+  config: { transport: string; mode: string };
+}
+
+async function defaultRunUvx(): Promise<string> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { stdout } = await promisify(execFile)("uvx", ["--version"], { timeout: 10_000 });
+  return stdout;
+}
+
+async function defaultCanBind(port: number, host: string): Promise<boolean> {
+  const { createServer } = await import("node:net");
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.listen(port, host);
+  });
+}
+
+export async function checkHealth(
+  deps: {
+    auth: Pick<AuthManager, "getStatus">;
+    aws: { isConnected(): boolean };
+  },
+  probes: HealthProbes = {},
+): Promise<HealthReport> {
+  const fetchImpl = probes.fetchImpl ?? fetch;
+  const status = deps.auth.getStatus();
+  let spec: HealthReport["spec"];
+  const specStart = Date.now();
+  try {
+    const response = await Promise.race([
+      fetchImpl(config.specUrl, { method: "GET" }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+    ]);
+    await response.body?.cancel().catch(() => undefined);
+    spec = { url: config.specUrl, reachable: response.ok, latencyMs: Date.now() - specStart };
+  } catch {
+    spec = { url: config.specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
+  }
+
+  let uvx: HealthReport["uvx"];
+  try {
+    const version = await (probes.runUvx ?? defaultRunUvx)();
+    uvx = { found: true, version: version.trim() };
+  } catch {
+    uvx = { found: false, hint: "uvx not found on PATH; install uv (https://docs.astral.sh/uv/getting-started/installation/)." };
+  }
+
+  let callback: HealthReport["callback"];
+  try {
+    const url = new URL(config.ssoCallbackUrl);
+    if (url.protocol === "https:") {
+      callback = { url: config.ssoCallbackUrl, portFree: "n/a", hint: "https callback terminates remotely; no local bind applies." };
+    } else {
+      const port = Number(url.port);
+      const free = await (probes.canBind ?? defaultCanBind)(port, url.hostname);
+      callback = free
+        ? { url: config.ssoCallbackUrl, portFree: true }
+        : { url: config.ssoCallbackUrl, portFree: false, hint: `Port ${port} is in use; stop the occupying process before SSO login.` };
+    }
+  } catch {
+    callback = { url: config.ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
+  }
+
+  const ok = spec.reachable && uvx.found && callback.portFree !== false;
+  return {
+    ok,
+    auth: { state: status.state, ...(status.expiresAt ? { expiresAt: status.expiresAt } : {}) },
+    child: { connected: deps.aws.isConnected(), mode: status.authenticated ? "authenticated" : "discovery" },
+    spec,
+    uvx,
+    callback,
+    config: { transport: config.transport, mode: loadConfigFile().filter.mode },
+  };
+}
 
 export interface ServerDependencies {
   authManager: Pick<
@@ -20,7 +114,7 @@ export interface ServerDependencies {
   >;
   awsMcpClient: Pick<
     AwsMcpClient,
-    "callTool" | "close" | "listTools"
+    "callTool" | "close" | "listTools" | "isConnected"
   >;
   registerAwsTools: typeof registerAwsTools;
 }
@@ -113,6 +207,27 @@ export async function createServer(
           {
             type: "text",
             text: JSON.stringify(status, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "tdei_health",
+    {
+      description:
+        "Report connector health: auth state, AWS child, spec reachability, uvx, callback port, and config. Read-only, safe signed-out, never emits tokens.",
+      inputSchema: z.object({}),
+    },
+    async (_args) => {
+      log("info", "health check", { tool: "tdei_health" });
+      const report = await checkHealth({ auth, aws: awsClient });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(report, null, 2),
           },
         ],
       };

@@ -135,7 +135,7 @@ async function handleMcpRequest(
   const authHeader = request.headers.authorization ?? "";
   const match = /^Bearer (.+)$/.exec(authHeader.trim());
   if (!match) {
-    unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.");
+    unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
     return;
   }
   const bearer = match[1].trim();
@@ -151,9 +151,9 @@ async function handleMcpRequest(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "TDEI_TOKEN_EXPIRED") {
-      unauthorized(response, message, "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", { refresh_hint: true });
+      unauthorized(response, message, "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", { refresh_hint: true, retryable: true });
     } else {
-      unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true });
+      unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true, retryable: false });
     }
     return;
   } finally {
