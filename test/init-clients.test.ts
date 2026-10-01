@@ -12,7 +12,8 @@ test("findFreePort skips busy ports", async () => {
 });
 
 test("server entry launches npx, resolves beside node", () => {
-  assert.equal(npxPathFor("/usr/bin/node"), "/usr/bin/npx");
+  assert.equal(npxPathFor("/usr/bin/node", "linux"), "/usr/bin/npx");
+  assert.equal(npxPathFor("C:\\Program Files\\nodejs\\node.exe", "win32"), "C:\\Program Files\\nodejs\\npx.cmd");
   const entry = buildServerEntry("/usr/bin/npx", ENV);
   assert.equal(entry.command, "/usr/bin/npx");
   assert.deepEqual(entry.args, ["-y", "tdei-mcp"]);

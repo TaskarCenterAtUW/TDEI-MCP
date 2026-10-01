@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { posix, win32 } from "node:path";
+import { join } from "node:path";
 
 export const CLIENTS = ["codex", "claude", "vscode", "custom"] as const;
 export type ClientName = (typeof CLIENTS)[number];
@@ -17,8 +18,9 @@ export function buildLocalEntry(nodePath: string, indexJsPath: string, env: Reco
 
 // npx ships beside node (same bin dir on all platforms). The client entry
 // must launch npx — NOT node — because args ["-y", "tdei-mcp"] are npx flags.
-export function npxPathFor(nodeExecPath: string): string {
-  return join(dirname(nodeExecPath), process.platform === "win32" ? "npx.cmd" : "npx");
+export function npxPathFor(nodeExecPath: string, platform: string = process.platform): string {
+  const p = platform === "win32" ? win32 : posix;
+  return p.join(p.dirname(nodeExecPath), platform === "win32" ? "npx.cmd" : "npx");
 }
 
 function upsertTomlBlock(toml: string, header: string, body: string): string {

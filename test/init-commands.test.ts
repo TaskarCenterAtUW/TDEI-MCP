@@ -3,11 +3,13 @@ import test from "node:test";
 import { runInit, runSwitch } from "../src/init/commands.js";
 
 function memFs(initial: Record<string, string> = {}) {
-  const files = new Map(Object.entries(initial));
+  // Keys are POSIX-style so assertions pass on Windows, where path.join emits backslashes.
+  const norm = (p: string) => p.replace(/\\/g, "/");
+  const files = new Map(Object.entries(initial).map(([k, v]) => [norm(k), v]));
   return {
     files,
-    readFile: async (p: string) => { const v = files.get(p); if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return v; },
-    writeFile: async (p: string, c: string) => { files.set(p, c); },
+    readFile: async (p: string) => { const v = files.get(norm(p)); if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return v; },
+    writeFile: async (p: string, c: string) => { files.set(norm(p), c); },
     mkdir: async (_p: string) => {},
   };
 }
@@ -47,7 +49,7 @@ test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
 test("runInit from a checkout writes node + dist/index.js and scaffolds config beside it", async () => {
   const fs = memFs();
   await runInit(deps(fs, { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", nodePath: "/usr/bin/node", port: 8765, local: { root: "/repo", indexPath: "/repo/dist/index.js" } });
-  const toml = fs.files.get("/h/.codex/config.toml") ?? "";
+  const toml = (fs.files.get("/h/.codex/config.toml") ?? "").replace(/\\\\/g, "/");
   assert.match(toml, /command = "\/usr\/bin\/node"/);
   assert.match(toml, /args = \["\/repo\/dist\/index\.js"\]/);
   assert.match(toml, /TDEI_CONFIG_PATH = "\/repo\/tdei\.config\.json"/);
