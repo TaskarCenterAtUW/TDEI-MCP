@@ -148,6 +148,7 @@ The connector exposes five built-in tools while signed out:
 | Tool | Purpose |
 | --- | --- |
 | `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated. |
+| `tdei_health` | Report connector health: auth state, AWS child, spec reachability, `uvx`, callback port, and config. Read-only, safe signed-out. |
 | `tdei_sso_login` | Start browser SSO and return the login URL. |
 | `tdei_test_authentication` | Check for a usable SSO session token. |
 | `tdei_load_api_tools` | Retry API tool loading after SSO succeeds. |
@@ -160,6 +161,10 @@ Raw authentication operations generated from the OpenAPI specification are inten
 For a first check, ask your AI client:
 
 > Call tdei_sso_login and give me the loginUrl. After I finish browser login, check tdei_auth_status and call listServices.
+
+Ask for a health report any time, signed out or authenticated:
+
+    {"ok": true, "auth": {"state": "authenticated"}, "child": {"connected": true, "mode": "authenticated"}, "spec": {"reachable": true, "latencyMs": 210}, "uvx": {"found": true}, "callback": {"portFree": true}}
 
 Successful setup means SSO succeeds, generated tools appear, and a permitted API call returns a response. Tool names and inputs come from the configured OpenAPI specification, so the client's tool descriptions are the reference for individual operations. Calls use your account's API permissions.
 
@@ -220,6 +225,16 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | First load times out | Check network access and allow time for `uvx` downloads. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
 | URL validation fails | Ensure `TDEI_API_URL` and `TDEI_SPEC_URL` are valid absolute URLs beginning with `https://`. |
+| `TDEI_SSO_REQUIRED` | Call `tdei_sso_login` and open the returned `loginUrl`. |
+| `TDEI_TOKEN_EXPIRED` | Refresh via `POST /api/v1/refresh-token` or re-run SSO login. |
+| `TDEI_TOKEN_INVALID` | Call `tdei_sso_login` again; do not reuse the old Bearer. |
+| `TDEI_FORBIDDEN` | Check your TDEI account's project-group permissions; the error names the requirement. |
+| `TDEI_NOT_FOUND` | Verify the resource id and environment (dev/stage/prod). |
+| `TDEI_CONFLICT` | Re-read the resource and retry with current values. |
+| `TDEI_UPSTREAM_5XX` | Retry; if it persists, check TDEI environment status. |
+| `TDEI_CONFIG_INVALID` | Check `.env` values and `tdei.config.json` against the schema. |
+| `TDEI_TOOL_DISABLED` | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`. |
+| `TDEI_CHILD_UNAVAILABLE` | Call `tdei_load_api_tools` to restart the AWS child. |
 
 Connector diagnostics are written to stderr, which MCP clients usually capture in server logs. Keep stdout reserved for MCP messages.
 
