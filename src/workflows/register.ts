@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import type { WorkflowDef } from "../config-file.js";
 import { runWorkflow } from "./runner.js";
-import { errorResult, jsonResult } from "../mcp/responses.js";
+import { jsonResult } from "../mcp/responses.js";
+import { formatError } from "../mcp/errors.js";
 
 const registeredWorkflows = new Set<string>();
 
@@ -22,7 +23,7 @@ export function registerWorkflows(server: McpServer, workflows: WorkflowDef[], d
       try {
         const result = await runWorkflow(def, args as Record<string, unknown>, { callTool: deps.callTool, toolSchemas: deps.toolSchemas, denied: deps.denied });
         return jsonResult({ workflow: def.name, outputs: result.outputs, transcript: result.transcript });
-      } catch (error) { return errorResult(error); }
+      } catch (error) { return formatError(error); }
     });
     registeredWorkflows.add(toolName);
     console.error(`[workflows] registered ${toolName} (${def.steps.length} steps)`);

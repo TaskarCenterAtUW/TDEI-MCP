@@ -1,5 +1,6 @@
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { WorkflowDef } from "../config-file.js";
+import type { TdeiErrorStepRef } from "../mcp/errors.js";
 import { resolveValue, validateRefs } from "./template.js";
 import type { StepResult, WorkflowCallTool } from "./types.js";
 
@@ -116,9 +117,16 @@ export async function runWorkflow(
         error: message,
         priorOutputs: { ...outputs },
       };
-      throw new Error(
+      const abort = new Error(
         `[workflows.${def.name}] step ${step.id} (${step.tool}) failed: ${message} — transcript ${JSON.stringify(payload)}`,
       );
+      (abort as unknown as { stepRef: TdeiErrorStepRef }).stepRef = {
+        workflow: def.name,
+        stepId: step.id,
+        stepIndex: index,
+        tool: step.tool,
+      };
+      throw abort;
     }
   }
 

@@ -14,7 +14,7 @@ import {
 } from "@modelcontextprotocol/server";
 
 import { awsMcpClient } from "./aws-mcp-client.js";
-import { errorResult } from "../mcp/responses.js";
+import { formatError, truncateText } from "../mcp/errors.js";
 import { isToolAllowed, type EndpointFilter } from "../config-file.js";
 
 export interface AwsToolClient {
@@ -38,6 +38,24 @@ const registeredToolsByServer = new WeakMap<
   McpServer,
   Set<string>
 >();
+
+function truncateResult<T>(result: T): T {
+  if (
+    typeof result === "object" && result !== null &&
+    "content" in result && Array.isArray((result as { content: unknown }).content)
+  ) {
+    const content = (result as { content: Array<Record<string, unknown>> }).content.map((block) => {
+      if (block.type === "text" && typeof block.text === "string") {
+        const { text } = truncateText(block.text);
+        return { ...block, text };
+      }
+      return block;
+    });
+    // Shape-preserving: only text payloads are shortened in place.
+    return { ...(result as Record<string, unknown>), content } as T;
+  }
+  return result;
+}
 
 // The live TDEI spec uses draft-04 boolean exclusiveMinimum/Maximum
 // (e.g. {minimum: 0, exclusiveMinimum: true}), but fromJsonSchema expects
@@ -135,14 +153,15 @@ export async function registerAwsTools(
       },
       async (args) => {
         try {
-          return await (onCall
+          const raw = await (onCall
             ? onCall(awsTool.name, args)
             : client.callTool(
               awsTool.name,
               args,
             ));
+          return truncateResult(raw);
         } catch (error) {
-          return errorResult(error);
+          return formatError(error);
         }
       },
     );
