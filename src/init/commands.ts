@@ -12,7 +12,7 @@ import {
 export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CLIENT_ID", "TDEI_SSO_CALLBACK_URL"];
 
 export interface Prompter {
-  chooseEnv(): Promise<{ env?: string; url?: string }>;
+  chooseEnv(): Promise<{ env?: string | undefined; url?: string | undefined }>;
   chooseClient(): Promise<ClientName>;
 }
 
@@ -48,7 +48,7 @@ function writeEntry(client: ClientName, current: string, entry: ServerEntry, env
   return writeVscodeEntry(current, entry, env, path);
 }
 
-function readEntry(client: ClientName, current: string): { found: boolean; env: Record<string, string>; command?: string } {
+function readEntry(client: ClientName, current: string): { found: boolean; env: Record<string, string>; command?: string | undefined } {
   if (client === "codex") return readCodexEntry(current);
   if (client === "claude") return readClaudeEntry(current);
   return readVscodeEntry(current);
@@ -56,7 +56,7 @@ function readEntry(client: ClientName, current: string): { found: boolean; env: 
 
 export async function runInit(
   deps: Deps,
-  opts: { env?: string; url?: string; client?: ClientName; port?: number; npxPath?: string; nodePath?: string; home?: string; cwd?: string },
+  opts: { env?: string | undefined; url?: string | undefined; client?: ClientName | undefined; port?: number | undefined; npxPath?: string; nodePath?: string; home?: string; cwd?: string },
 ): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
   await checkPreflight(deps.exec);
   const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
@@ -91,7 +91,7 @@ export async function runInit(
 
 export async function runSwitch(
   deps: Deps,
-  opts: { env?: string; url?: string; client?: ClientName; home?: string; cwd?: string },
+  opts: { env?: string | undefined; url?: string | undefined; client?: ClientName | undefined; home?: string; cwd?: string },
 ): Promise<{ client: ClientName; apiUrl: string }> {
   const client = opts.client ?? (await deps.prompter.chooseClient());
   if (client === "custom") {

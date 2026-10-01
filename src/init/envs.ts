@@ -33,7 +33,7 @@ export function assertCallbackUrl(value: string): string {
   return url.toString();
 }
 
-export function resolveApiUrl(opts: { env?: string; url?: string }): string {
+export function resolveApiUrl(opts: { env?: string | undefined; url?: string | undefined }): string {
   if (opts.env && opts.url) {
     throw new Error("--env and --url are mutually exclusive: pick one environment per run");
   }

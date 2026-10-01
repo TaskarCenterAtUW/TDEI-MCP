@@ -78,12 +78,12 @@ function deniedFor(
 
 export class AwsToolsLifecycle {
   private state: "unloaded" | "loading" | "loaded" | "reloading" = "unloaded";
-  private lastTokenVersion?: number;
+  private lastTokenVersion: number | undefined;
   private operationQueue: Promise<void> =
     Promise.resolve();
   private allToolSchemas = new Map<
     string,
-    { description?: string; inputSchema: unknown }
+    { description?: string | undefined; inputSchema: unknown }
   >();
 
   constructor(

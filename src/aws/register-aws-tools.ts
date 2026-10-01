@@ -31,7 +31,7 @@ export interface AwsToolRegistrationResult {
   discovered: number;
   registered: number;
   skipped: number;
-  toolSchemas: Map<string, { description?: string; inputSchema: unknown }>;
+  toolSchemas: Map<string, { description?: string | undefined; inputSchema: unknown }>;
 }
 
 const registeredToolsByServer = new WeakMap<
@@ -119,7 +119,7 @@ export async function registerAwsTools(
   // Contract: this map covers only tools newly registered by THIS call
   // (early-continue above skips already-registered tools). AwsToolsLifecycle
   // accumulates across calls in allToolSchemas for workflow step validation.
-  const toolSchemas = new Map<string, { description?: string; inputSchema: unknown }>();
+  const toolSchemas = new Map<string, { description?: string | undefined; inputSchema: unknown }>();
 
   for (const awsTool of result.tools) {
     if (CONNECTOR_MANAGED_AUTH_TOOLS.has(awsTool.name)) {
@@ -148,7 +148,7 @@ export async function registerAwsTools(
     server.registerTool(
       awsTool.name,
       {
-        description: awsTool.description,
+        ...(awsTool.description !== undefined ? { description: awsTool.description } : {}),
         inputSchema,
       },
       async (args) => {

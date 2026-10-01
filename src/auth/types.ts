@@ -16,7 +16,7 @@ export interface AuthStatus {
   authenticated: boolean;
   state: AuthState;
   loginMethod: "sso";
-  expiresAt?: number;
+  expiresAt?: number | undefined;
 }
 
 export interface SsoLoginStart {

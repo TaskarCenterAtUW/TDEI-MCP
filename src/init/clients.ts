@@ -54,7 +54,7 @@ export function writeCodexEntry(toml: string, entry: ServerEntry, env: Record<st
   return upsertTomlBlock(toml, "[mcp_servers.tdei]", body);
 }
 
-export function readCodexEntry(toml: string): { found: boolean; env: Record<string, string>; command?: string } {
+export function readCodexEntry(toml: string): { found: boolean; env: Record<string, string>; command?: string | undefined } {
   const lines = toml.split("\n");
   const start = lines.findIndex((l) => l.trim() === "[mcp_servers.tdei]");
   if (start === -1) return { found: false, env: {} };
@@ -96,7 +96,7 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
-function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): { found: boolean; env: Record<string, string>; command?: string } {
+function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): { found: boolean; env: Record<string, string>; command?: string | undefined } {
   if (!jsonText.trim()) return { found: false, env: {} };
   const doc = JSON.parse(jsonText) as Record<string, unknown>;
   const entry = (doc[rootKey] as Record<string, unknown> | undefined)?.[serverKey] as { env?: Record<string, string>; command?: string } | undefined;
@@ -108,7 +108,7 @@ export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Reco
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", { command: entry.command, args: entry.args, env }, pathForError);
 }
 
-export function readClaudeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string } {
+export function readClaudeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string | undefined } {
   return readJsonEntry(jsonText, "mcpServers", "tdei");
 }
 
@@ -120,7 +120,7 @@ export function writeVscodeEntry(jsonText: string, entry: ServerEntry, env: Reco
   return upsertJsonEntry(jsonText, "servers", "tdei", { command: entry.command, args: entry.args, env }, pathForError);
 }
 
-export function readVscodeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string } {
+export function readVscodeEntry(jsonText: string): { found: boolean; env: Record<string, string>; command?: string | undefined } {
   return readJsonEntry(jsonText, "servers", "tdei");
 }
 

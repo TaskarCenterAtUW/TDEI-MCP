@@ -7,7 +7,7 @@ import { formatError } from "../mcp/errors.js";
 
 const registeredWorkflows = new Set<string>();
 
-export function registerWorkflows(server: McpServer, workflows: WorkflowDef[], deps: { callTool: (tool: string, input: Record<string, unknown>) => Promise<unknown>; toolSchemas: Map<string, { description?: string; inputSchema: unknown }>; denied: Set<string>; configPath: string }): { registered: string[] } {
+export function registerWorkflows(server: McpServer, workflows: WorkflowDef[], deps: { callTool: (tool: string, input: Record<string, unknown>) => Promise<unknown>; toolSchemas: Map<string, { description?: string | undefined; inputSchema: unknown }>; denied: Set<string>; configPath: string }): { registered: string[] } {
   const registered: string[] = [];
   for (const def of workflows) {
     const toolName = `workflow_${def.name}`;
