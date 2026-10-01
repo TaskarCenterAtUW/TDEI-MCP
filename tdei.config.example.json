@@ -10,7 +10,7 @@
         { "id": "pick_dataset", "tool": "listDatasetFiles", "ask": ["tdei_project_group_id"], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
         { "id": "fetch_osw", "tool": "getOswFile", "ask": ["tdei_dataset_id"], "input": { "tdei_dataset_id": "{{user.tdei_dataset_id}}" } },
         { "id": "find_job", "tool": "listJobs", "ask": [], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
-        { "id": "download_output", "tool": "job-download", "ask": ["job_id"], "input": { "job_id": "{{user.job_id}}" } }
+        { "id": "download_output", "tool": "job_download", "ask": ["job_id"], "input": { "job_id": "{{user.job_id}}" } }
       ]
     }
   ]

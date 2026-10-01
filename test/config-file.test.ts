@@ -47,3 +47,22 @@ test("re-registering an identical workflow is a no-op; a changed or conflicting 
   assert.equal(registerWorkflows(server, [def], deps).registered.length, 0);
   assert.throws(() => registerWorkflows(server, [{ ...def, description: "changed" }], deps), /duplicate workflow.*restart/);
 });
+
+test("hyphenated operationIds are normalized to the tool-name form used by the AWS server", () => {
+  const cfg = load({
+    endpoints: { mode: "deny", deny: ["job-download"] },
+    workflows: [{ name: "w", steps: [{ id: "s1", tool: "osw-union", input: {} }] }],
+  });
+  assert.deepEqual(cfg.filter.deny, ["job_download"]);
+  assert.equal(cfg.workflows[0]!.steps[0]!.tool, "osw_union");
+  assert.equal(isToolAllowed("job_download", cfg.filter), false);
+  assert.equal(isToolAllowed("job-download", cfg.filter), false);
+});
+
+test("shipped example config loads without warnings and uses live tool names", () => {
+  const cfg = loadConfigFile(join(process.cwd(), "tdei.config.example.json"));
+  assert.deepEqual(cfg.warnings, []);
+  const tools = cfg.workflows.flatMap((w) => w.steps.map((s) => s.tool));
+  assert.ok(tools.includes("job_download"));
+  assert.ok(!tools.some((t) => t.includes("-")));
+});

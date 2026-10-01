@@ -1,3 +1,4 @@
+// Ids are returned in tool-name form ("-" -> "_") to match the AWS server.
 // Finds operations whose request body is multipart/form-data in the OpenAPI
 // spec the connector already uses (TDEI_SPEC_URL). This is authoritative;
 // guessing from the generated MCP tool schema is not (file fields are
@@ -28,7 +29,7 @@ export function multipartOperationIds(spec: unknown): Set<string> {
         (content && typeof content === "object" && Object.keys(content).some((k) => k.toLowerCase().startsWith("multipart/"))) ||
         (Array.isArray(consumes) && consumes.some((c) => typeof c === "string" && c.toLowerCase().startsWith("multipart/"))) ||
         params.some((p) => (p as Json | null)?.["in"] === "formData");
-      if (isMultipart) ids.add(operationId);
+      if (isMultipart) ids.add(operationId.replace(/-/g, "_"));
     }
   }
   return ids;

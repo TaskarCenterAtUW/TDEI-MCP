@@ -2,6 +2,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as z from "zod/v4";
 
+// The AWS OpenAPI server exposes operationIds as tool names with "-" turned
+// into "_" (spec "job-download" -> tool job_download). Config accepts either.
+export function normalizeOperationId(id: string): string {
+  return id.replace(/-/g, "_");
+}
+
 export const BUILTIN_TOOL_PREFIX = "tdei_";
 export const CONNECTOR_AUTH_TOOLS = new Set([
   "authenticate", "refreshToken", "ssoRedirect", "ssoLogin", "ssoLogout",
@@ -99,7 +105,13 @@ export function loadConfigFile(explicitPath?: string): LoadedConfig {
   if (endpoints.mode === "deny" && endpoints.deny.length === 0) {
     return fallback(path, true, `[tdei-config] schema violation in ${path}: endpoints.mode is "deny" but endpoints.deny is empty — using allow-all, no workflows`);
   }
-  return { path, exists: true, filter: { mode: endpoints.mode, allow: [...endpoints.allow], deny: [...endpoints.deny] }, workflows: workflows as WorkflowDef[], warnings: [] };
+  return {
+    path,
+    exists: true,
+    filter: { mode: endpoints.mode, allow: endpoints.allow.map(normalizeOperationId), deny: endpoints.deny.map(normalizeOperationId) },
+    workflows: workflows.map((w) => ({ ...w, steps: w.steps.map((s) => ({ ...s, tool: normalizeOperationId(s.tool) })) })) as WorkflowDef[],
+    warnings: [],
+  };
 }
 
 export function ensureDefaultConfig(explicitPath?: string): string {
@@ -110,7 +122,8 @@ export function ensureDefaultConfig(explicitPath?: string): string {
   return path;
 }
 
-export function isToolAllowed(toolName: string, filter: EndpointFilter): boolean {
+export function isToolAllowed(rawToolName: string, filter: EndpointFilter): boolean {
+  const toolName = normalizeOperationId(rawToolName);
   if (toolName.startsWith(BUILTIN_TOOL_PREFIX)) return true;
   if (CONNECTOR_AUTH_TOOLS.has(toolName)) return true;
   if (filter.mode === "all") return true;
