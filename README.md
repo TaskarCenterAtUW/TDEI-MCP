@@ -166,6 +166,10 @@ Ask for a health report any time, signed out or authenticated:
 
     {"ok": true, "auth": {"state": "authenticated"}, "child": {"connected": true, "mode": "authenticated"}, "spec": {"reachable": true, "latencyMs": 210}, "uvx": {"found": true}, "callback": {"portFree": true}}
 
+Bad env fails fast before serving anything:
+
+    {"code": "TDEI_CONFIG_INVALID", "errors": [{"var": "TDEI_API_URL", "rule": "must use HTTPS", "example": "https://api-dev.tdei.us"}]}
+
 Successful setup means SSO succeeds, generated tools appear, and a permitted API call returns a response. Tool names and inputs come from the configured OpenAPI specification, so the client's tool descriptions are the reference for individual operations. Calls use your account's API permissions.
 
 If loading fails, correct the underlying issue and call `tdei_load_api_tools`. If you changed `.env`, restart the connector first because configuration is read at process startup. Repeated or concurrent load requests do not register duplicate tools.
@@ -235,6 +239,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | `TDEI_CONFIG_INVALID` | Check `.env` values and `tdei.config.json` against the schema. |
 | `TDEI_TOOL_DISABLED` | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`. |
 | `TDEI_CHILD_UNAVAILABLE` | Call `tdei_load_api_tools` to restart the AWS child. |
+| `TDEI_CONFIG_INVALID` | Check the named variable against its rule; the error JSON includes a working example value. |
 
 Connector diagnostics are written to stderr, which MCP clients usually capture in server logs. Keep stdout reserved for MCP messages.
 
