@@ -2,7 +2,7 @@
 
 Local **stdio** MCP server for the TDEI API. It signs you in through TDEI browser SSO, starts the AWS Labs OpenAPI MCP server, and exposes the TDEI API operations as MCP tools to Codex, Claude Desktop, VS Code, or any stdio MCP client. Your MCP client launches and stops the server; you never run it by hand.
 
-**You need:** [Node.js ≥ 22](https://nodejs.org/), [uv](https://docs.astral.sh/uv/getting-started/installation/) (provides `uvx`), a TDEI account, and a free local port (default 8765) for the SSO callback.
+**You need:** [Node.js ≥ 22](https://nodejs.org/), a TDEI account, and a free local port (default 8765) for the SSO callback. [uv](https://docs.astral.sh/uv/getting-started/installation/) (provides `uvx`) is also required; if it is missing, `init` offers to install it with the official installer (`--install-uv` to accept, `--no-install-uv` to skip). After a fresh uv install, open a new terminal and restart your MCP client so it can find `uvx`.
 
 ## Option 1 — Install from npm
 
@@ -10,7 +10,7 @@ Local **stdio** MCP server for the TDEI API. It signs you in through TDEI browse
 npx -y tdei-mcp init
 ```
 
-`init` asks for your TDEI base URL (for example `https://api-dev.tdei.us`; only the host is used) and your client (`codex`, `claude`, `vscode`, or `custom`), then writes the `tdei` MCP entry into that client's config and creates a default `~/.tdei-mcp/tdei.config.json`.
+`init` asks for your TDEI base URL (for example `https://api.tdei.us`; only the host is used; `--env stage|prod` or `--url <https-url>` skips the prompt) and your client (`codex`, `claude`, `vscode`, or `custom`), then writes the `tdei` MCP entry into that client's config and creates a default `~/.tdei-mcp/tdei.config.json`.
 
 Restart your MCP client, then ask it:
 
@@ -63,7 +63,7 @@ Set by `init` in your client entry; override there if needed.
 
 | Variable | Default |
 | --- | --- |
-| `TDEI_API_URL` | `https://api-dev.tdei.us` (`init` asks) |
+| `TDEI_API_URL` | `https://api.tdei.us` (`init` asks; use `switch base-url` to change) |
 | `TDEI_SPEC_URL` | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
 | `TDEI_SSO_CLIENT_ID` | `tdei-mcp` |
 | `TDEI_SSO_CALLBACK_URL` | `http://127.0.0.1:<port>/callback` (loopback only) |
@@ -85,8 +85,17 @@ URLs must be `https://`.
 
 ## Development
 
+CI runs on every push (typecheck, lint, build) and on pull requests to `main` (typecheck, lint, build, tests).
+
+
 ```bash
 npm test          # deterministic tests, no TDEI session needed
+npm run typecheck # tsc for src and tests
+npm run lint      # eslint
 npm run build
 npm run test:live # real SSO; needs a .env (see .env.example) and uvx
 ```
+
+## License
+
+Proprietary — all rights reserved (see `LICENSE`).

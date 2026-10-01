@@ -57,7 +57,7 @@ test("SSO login loads API tools and supports calls and logout", async () => {
     authManager: {
       async startSsoLogin() {
         return {
-          loginUrl: "https://api-dev.tdei.us/api/v1/sso-redirect?test=1",
+          loginUrl: "https://api.tdei.us/api/v1/sso-redirect?test=1",
           callbackUrl: "http://127.0.0.1:8765/callback",
           completion: completion.then(() => { authenticated = true; }),
         };
@@ -75,7 +75,7 @@ test("SSO login loads API tools and supports calls and logout", async () => {
         authenticated = false;
         logoutCount += 1;
         return {
-          logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
+          logoutUrl: "https://api.tdei.us/api/v1/sso-logout?test=1",
           callbackUrl: "http://127.0.0.1:8765/callback",
           completion: Promise.resolve(),
         };
@@ -135,7 +135,7 @@ test("signed-out server remains available for SSO login", async () => {
     authManager: {
       async startSsoLogin() {
         return {
-          loginUrl: "https://api-dev.tdei.us/api/v1/sso-redirect?test=1",
+          loginUrl: "https://api.tdei.us/api/v1/sso-redirect?test=1",
           callbackUrl: "http://127.0.0.1:8765/callback",
           completion: neverCompletes,
         };
@@ -144,7 +144,7 @@ test("signed-out server remains available for SSO login", async () => {
       getStatus: signedOutStatus,
       async logout() {
         return {
-          logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
+          logoutUrl: "https://api.tdei.us/api/v1/sso-logout?test=1",
           callbackUrl: "http://127.0.0.1:8765/callback",
           completion: Promise.resolve(),
         };

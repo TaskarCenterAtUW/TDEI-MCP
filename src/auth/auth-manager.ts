@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 
+import { portInUseHint } from "../port-hint.js";
 import { config } from "../config.js";
 import type {
   AuthStatus,
@@ -132,7 +133,8 @@ export class AuthManager {
         server.listen(Number(callbackUrl.port), callbackUrl.hostname);
       });
     } catch (error) {
-      throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
+      const inUse = (error as NodeJS.ErrnoException)?.code === "EADDRINUSE";
+      throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}${inUse ? ` ${portInUseHint(Number(callbackUrl.port))}` : ""}`);
     }
 
     const loginUrl = new URL("/api/v1/sso-redirect", `${config.apiUrl}/`);

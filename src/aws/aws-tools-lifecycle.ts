@@ -93,6 +93,7 @@ export class AwsToolsLifecycle {
     private readonly authSession: AuthSession,
     private readonly awsSession: AwsSession,
     private readonly registrar: AwsToolRegistrar,
+    private readonly fetchMultipart: (specUrl: string) => Promise<Set<string> | undefined> = fetchMultipartOperationIds,
   ) {}
 
   load(): Promise<"loaded" | "already-loaded"> {
@@ -121,7 +122,13 @@ export class AwsToolsLifecycle {
 
   private async discoverAndRegister(): Promise<string[]> {
     const problems: string[] = [];
-    ensureDefaultConfig();
+    try {
+      ensureDefaultConfig();
+    } catch (error) {
+      console.error(
+        `[tdei-config] could not create the default config file (${error instanceof Error ? error.message : String(error)}) — continuing with allow-all and no workflows. Set TDEI_CONFIG_PATH to a writable location.`,
+      );
+    }
     const cfg = loadConfigFile();
 
     // Single listTools per load/reload: the registrar reuses this
@@ -172,7 +179,7 @@ export class AwsToolsLifecycle {
     // Authoritative multipart detection comes from the OpenAPI spec; cached
     // once fetched. If the spec cannot be read, runner heuristics still apply.
     this.multipartIds ??= cfg.workflows.length > 0
-      ? await fetchMultipartOperationIds(config.specUrl)
+      ? await this.fetchMultipart(config.specUrl)
       : undefined;
 
     const denied = deniedFor(effectiveFilter, discoveredNames);

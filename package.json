@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "description": "TDEI-MCP connector for the TDEI API",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/TaskarCenterAtUW/TDEI-MCP#readme",
+  "bugs": {
+    "url": "https://github.com/TaskarCenterAtUW/TDEI-MCP/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/TaskarCenterAtUW/TDEI-MCP.git"
@@ -13,10 +18,11 @@
   },
   "files": [
     "dist",
-    "README.md",
     ".env.example",
-    "tdei.config.schema.json",
-    "tdei.config.example.json"
+    "LICENSE",
+    "README.md",
+    "tdei.config.example.json",
+    "tdei.config.schema.json"
   ],
   "engines": {
     "node": ">=22"
@@ -27,7 +33,9 @@
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts"
+    "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
+    "typecheck": "tsc --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
@@ -35,8 +43,11 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "^24.13.4",
+    "eslint": "^9.39.5",
     "tsx": "^4.0.0",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.71.0"
   }
 }

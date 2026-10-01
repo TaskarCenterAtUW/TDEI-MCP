@@ -2,9 +2,9 @@ import { dirname, join } from "node:path";
 import { defaultConfigJson } from "../config-file.js";
 import { DEFAULT_SPEC_URL, assertCallbackUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
 import { checkPreflight, type ExecFn } from "./preflight.js";
-import { findFreePort } from "./ports.js";
+import { assertPort, defaultTryPort, findFreePort, portInUseHint } from "./ports.js";
 import {
-  buildLocalEntry, buildServerEntry, claudeConfigPath, codexConfigPath, formatManual, npxPathFor,
+  CLIENTS, buildLocalEntry, buildServerEntry, claudeConfigPath, codexConfigPath, formatManual, npxPathFor,
   readClaudeEntry, readCodexEntry, readVscodeEntry, vscodeConfigPath,
   writeClaudeEntry, writeCodexEntry, writeVscodeEntry,
   type ClientName, type ServerEntry,
@@ -15,6 +15,7 @@ export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CLIENT_
 export interface Prompter {
   chooseEnv(): Promise<{ env?: string; url?: string }>;
   chooseClient(): Promise<ClientName>;
+  confirm(question: string): Promise<boolean>;
 }
 
 export interface Deps {
@@ -24,6 +25,15 @@ export interface Deps {
   mkdir: (path: string) => Promise<void>;
   prompter: Prompter;
   log: (msg: string) => void;
+  /** Injectable for tests; defaults to a real loopback bind probe. */
+  isPortFree?: (port: number) => Promise<boolean>;
+}
+
+function assertClient(value: string): ClientName {
+  if (!(CLIENTS as readonly string[]).includes(value)) {
+    throw new Error(`unknown client "${value}" (expected one of: ${CLIENTS.join(", ")})`);
+  }
+  return value as ClientName;
 }
 
 export interface LocalCheckout {
@@ -82,12 +92,25 @@ function readEntry(client: ClientName, current: string): { found: boolean; env: 
 
 export async function runInit(
   deps: Deps,
-  opts: { env?: string; url?: string; client?: ClientName; port?: number; npxPath?: string; nodePath?: string; home?: string; cwd?: string; local?: LocalCheckout },
+  opts: { env?: string; url?: string; client?: ClientName; port?: number; npxPath?: string; nodePath?: string; home?: string; cwd?: string; local?: LocalCheckout; installUv?: boolean },
 ): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
-  await checkPreflight(deps.exec);
+  if (opts.client !== undefined) assertClient(opts.client);
+  const isFree = deps.isPortFree ?? defaultTryPort;
+  await checkPreflight(deps.exec, {
+    log: deps.log,
+    confirmInstall: opts.installUv === undefined
+      ? () => deps.prompter.confirm("uv (uvx) was not found. Install it now with the official installer from astral.sh? [y/N] ")
+      : async () => opts.installUv === true,
+  });
   const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
   const apiUrl = resolveApiUrl(choice);
-  const port = opts.port ?? (await findFreePort(8765));
+  let port: number;
+  if (opts.port !== undefined) {
+    port = assertPort(opts.port);
+    if (!(await isFree(port))) throw new Error(portInUseHint(port));
+  } else {
+    port = await findFreePort(8765, isFree);
+  }
   const callbackUrl = assertCallbackUrl(buildCallbackUrl(port));
   const client = opts.client ?? (await deps.prompter.chooseClient());
   const nodeExecPath = opts.nodePath ?? (await deps.exec(process.execPath, ["-p", "process.execPath"])).stdout.trim();
@@ -122,6 +145,7 @@ export async function runSwitch(
   deps: Deps,
   opts: { env?: string; url?: string; client?: ClientName; home?: string; cwd?: string; local?: LocalCheckout; nodePath?: string },
 ): Promise<{ client: ClientName; apiUrl: string }> {
+  if (opts.client !== undefined) assertClient(opts.client);
   const client = opts.client ?? (await deps.prompter.chooseClient());
   if (client === "custom") {
     throw new Error("switch needs a client config file (custom has none) — re-run with --client codex|claude|vscode");

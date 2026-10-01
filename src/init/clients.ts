@@ -93,7 +93,7 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
     try {
       doc = JSON.parse(jsonText) as Record<string, unknown>;
     } catch (error) {
-      throw new Error(`existing Claude config is not valid JSON at ${pathForError}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`existing MCP client config at ${pathForError} is not valid JSON (${error instanceof Error ? error.message : String(error)}). Fix or move the file, then re-run init.`);
     }
   }
   const root = (doc[rootKey] as Record<string, unknown> | undefined) ?? {};
@@ -103,7 +103,12 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
 
 function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): { found: boolean; env: Record<string, string>; command?: string } {
   if (!jsonText.trim()) return { found: false, env: {} };
-  const doc = JSON.parse(jsonText) as Record<string, unknown>;
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(jsonText) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`existing MCP client config is not valid JSON (${error instanceof Error ? error.message : String(error)}). Fix or move the file, then re-run init.`);
+  }
   const entry = (doc[rootKey] as Record<string, unknown> | undefined)?.[serverKey] as { env?: Record<string, string>; command?: string } | undefined;
   if (!entry) return { found: false, env: {} };
   return { found: true, env: { ...(entry.env ?? {}) }, command: entry.command };

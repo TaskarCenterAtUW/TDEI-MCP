@@ -13,14 +13,14 @@ function memFs(initial: Record<string, string> = {}) {
 }
 const exec = async (cmd: string) => ({ stdout: cmd === "node" ? "v22.0.0\n" : cmd === process.execPath ? "/usr/bin/node\n" : "uvx 0.1\n" });
 const logs: string[] = [];
-const deps = (fs: ReturnType<typeof memFs>, prompter: unknown) => ({ exec, ...fs, prompter, log: (m: string) => { logs.push(m); } });
+const deps = (fs: ReturnType<typeof memFs>, prompter: unknown) => ({ exec, ...fs, prompter, log: (m: string) => { logs.push(m); }, isPortFree: async () => true });
 
 test("runInit writes codex entry end to end", async () => {
   const fs = memFs();
-  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx" });
-  assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
+  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx" });
+  assert.equal(summary.apiUrl, "https://api.tdei.us");
   assert.equal(summary.client, "codex");
-  assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
+  assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api\.tdei\.us/);
   assert.match(logs.join("\n"), /tdei_sso_login/);
 });
 
@@ -34,7 +34,7 @@ test("runInit custom prints manual and writes only the default config", async ()
 
 test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   const fs = memFs();
-  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 8765 });
+  await runInit(deps(fs, { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 8765 });
   logs.length = 0;
   const summary = await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
   assert.equal(summary.apiUrl, "https://api-stage.tdei.us");
@@ -46,7 +46,7 @@ test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
 
 test("runInit from a checkout writes node + dist/index.js and scaffolds config beside it", async () => {
   const fs = memFs();
-  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", nodePath: "/usr/bin/node", port: 8765, local: { root: "/repo", indexPath: "/repo/dist/index.js" } });
+  await runInit(deps(fs, { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", nodePath: "/usr/bin/node", port: 8765, local: { root: "/repo", indexPath: "/repo/dist/index.js" } });
   const toml = fs.files.get("/h/.codex/config.toml") ?? "";
   assert.match(toml, /command = "\/usr\/bin\/node"/);
   assert.match(toml, /args = \["\/repo\/dist\/index\.js"\]/);
@@ -56,6 +56,6 @@ test("runInit from a checkout writes node + dist/index.js and scaffolds config b
 
 test("init never overwrites an existing tdei.config.json", async () => {
   const fs = memFs({ "/h/.tdei-mcp/tdei.config.json": '{"endpoints":{"mode":"deny","deny":["x"]}}' });
-  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 8765 });
+  await runInit(deps(fs, { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", npxPath: "/usr/bin/npx", port: 8765 });
   assert.match(fs.files.get("/h/.tdei-mcp/tdei.config.json") ?? "", /"deny":\["x"\]/);
 });

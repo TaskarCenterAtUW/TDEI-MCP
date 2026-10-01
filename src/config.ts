@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = "https://api-dev.tdei.us";
+const DEFAULT_API_URL = "https://api.tdei.us";
 
 const DEFAULT_SPEC_URL =
   "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json";

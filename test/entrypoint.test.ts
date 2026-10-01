@@ -1,4 +1,3 @@
-import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
 import { mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
