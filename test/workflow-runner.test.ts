@@ -28,4 +28,23 @@ test("step-2 failure aborts with transcript preserving step-1", async () => {
   const error = await runWorkflow(def as never, {}, deps as never).then(() => assert.fail("should throw"), (e) => e);
   assert.match(String(error.message), /s2/);
   assert.match(String(error.message), /boom/);
+  const payload = JSON.parse(String(error.message).split("transcript ")[1]);
+  assert.equal(payload.failedStepId, "s2");
+  assert.equal(payload.stepIndex, 1);
+  assert.equal(payload.tool, "b");
+  assert.deepEqual(payload.priorOutputs, { s1: { id: "d1" } });
+});
+
+test("missing tool schema is an error, not a skipped check", async () => {
+  const deps = { async callTool() { return {}; }, toolSchemas: new Map() };
+  const def = { name: "t", steps: [{ id: "s1", tool: "zzz", input: {} }] };
+  await assert.rejects(() => runWorkflow(def as never, {}, deps as never), /no input schema discovered/);
+});
+
+test("multipart operations are rejected before any call", async () => {
+  let called = 0;
+  const deps = { async callTool() { called += 1; return {}; }, toolSchemas: schemas, multipart: new Set(["a"]) };
+  const def = { name: "t", steps: [{ id: "s1", tool: "a", input: { x: "v" } }] };
+  await assert.rejects(() => runWorkflow(def as never, {}, deps as never), /multipart/);
+  assert.equal(called, 0);
 });

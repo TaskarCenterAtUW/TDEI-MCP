@@ -5,7 +5,7 @@ export async function findFreePort(
   for (let port = fromPort; port < fromPort + 100; port += 1) {
     if (await tryPort(port)) return port;
   }
-  throw new Error(`no free loopback port found starting at ${fromPort} (tried 100 ports). Stop the process holding port ${fromPort} and re-run tdei-mcp-init`);
+  throw new Error(`no free loopback port found starting at ${fromPort} (tried 100 ports). Stop the process holding port ${fromPort} and re-run tdei-mcp init`);
 }
 
 async function defaultTryPort(port: number): Promise<boolean> {

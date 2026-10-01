@@ -10,7 +10,7 @@ export async function checkPreflight(exec: ExecFn): Promise<{ nodeVersion: strin
   try {
     uvxVersion = (await exec("uvx", ["--version"])).stdout.trim();
   } catch {
-    throw new Error("uvx not found on PATH. Install uv from https://docs.astral.sh/uv/, ensure uvx is on PATH, then re-run tdei-mcp-init");
+    throw new Error("uvx not found on PATH. Install uv from https://docs.astral.sh/uv/, ensure uvx is on PATH, then re-run tdei-mcp init");
   }
   return { nodeVersion: nodeOut, uvxVersion };
 }

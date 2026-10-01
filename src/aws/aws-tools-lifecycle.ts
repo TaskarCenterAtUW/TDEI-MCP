@@ -12,6 +12,9 @@ import {
   type EndpointFilter,
 } from "../config-file.js";
 import { registerWorkflows } from "../workflows/register.js";
+import { config } from "../config.js";
+import { fetchMultipartOperationIds } from "../openapi-multipart.js";
+import { sanitizeJsonSchema } from "./register-aws-tools.js";
 
 type AuthSession = Pick<AuthManager, "logout">;
 type AwsSession = Pick<
@@ -105,16 +108,19 @@ export class AwsToolsLifecycle {
     });
   }
 
-  reload(): Promise<"reloaded"> {
-    return this.serialize<"reloaded">(async () => {
-      await this.discoverAndRegister();
+  reload(): Promise<{ status: "reloaded"; problems: string[] }> {
+    return this.serialize(async () => {
+      const problems = await this.discoverAndRegister();
       this.loaded = true;
 
-      return "reloaded";
+      return { status: "reloaded" as const, problems };
     });
   }
 
-  private async discoverAndRegister(): Promise<void> {
+  private multipartIds: Set<string> | undefined;
+
+  private async discoverAndRegister(): Promise<string[]> {
+    const problems: string[] = [];
     ensureDefaultConfig();
     const cfg = loadConfigFile();
 
@@ -147,13 +153,27 @@ export class AwsToolsLifecycle {
       effectiveFilter,
     );
 
-    // Per-call toolSchemas cover newly registered tools only,
-    // so accumulate across calls for workflow step validation.
-    for (const [name, schema] of reg.toolSchemas) {
-      if (!this.allToolSchemas.has(name)) {
-        this.allToolSchemas.set(name, schema);
-      }
-    }
+    void reg;
+
+    // Workflow validation needs the schema of EVERY discovered operation
+    // (sanitized the same way as registered tools), rebuilt per load.
+    this.allToolSchemas = new Map(
+      listed.tools
+        .filter((tool) => !CONNECTOR_AUTH_TOOLS.has(tool.name))
+        .map((tool) => [
+          tool.name,
+          {
+            description: tool.description,
+            inputSchema: sanitizeJsonSchema(structuredClone(tool.inputSchema)),
+          },
+        ]),
+    );
+
+    // Authoritative multipart detection comes from the OpenAPI spec; cached
+    // once fetched. If the spec cannot be read, runner heuristics still apply.
+    this.multipartIds ??= cfg.workflows.length > 0
+      ? await fetchMultipartOperationIds(config.specUrl)
+      : undefined;
 
     const denied = deniedFor(effectiveFilter, discoveredNames);
     const callTool = (tool: string, input: Record<string, unknown>) =>
@@ -169,15 +189,18 @@ export class AwsToolsLifecycle {
             callTool,
             toolSchemas: this.allToolSchemas,
             denied,
+            multipart: this.multipartIds,
             configPath: cfg.path,
           },
         );
       } catch (error) {
-        console.error(
-          error instanceof Error ? error.message : String(error),
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        problems.push(message);
       }
     }
+
+    return problems;
   }
 
   logout(): Promise<SsoLogoutStart> {

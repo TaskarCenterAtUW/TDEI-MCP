@@ -7,6 +7,7 @@ export interface RunWorkflowDeps {
   callTool: WorkflowCallTool;
   toolSchemas: Map<string, { inputSchema: unknown }>;
   denied?: Set<string>;
+  multipart?: Set<string>;
 }
 
 export interface RunWorkflowResult {
@@ -64,6 +65,12 @@ export async function runWorkflow(
       );
     }
 
+    if (deps.multipart?.has(step.tool)) {
+      throw new Error(
+        `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" is a multipart/form-data operation; file uploads are not supported in v1`,
+      );
+    }
+
     validateRefs(step.input ?? {}, completedIds, step.id);
     const resolved = resolveValue(step.input ?? {}, {
       user: userArgs,
@@ -71,27 +78,27 @@ export async function runWorkflow(
     }) as Record<string, unknown>;
 
     const schemaEntry = deps.toolSchemas.get(step.tool);
-    if (
-      schemaEntry?.inputSchema !== undefined &&
-      schemaEntry?.inputSchema !== null
-    ) {
-      if (declaresFileUpload(schemaEntry.inputSchema)) {
-        throw new Error(
-          `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" uses file upload (multipart) which is not supported in v1`,
-        );
-      }
-      const validator = fromJsonSchema(
-        schemaEntry.inputSchema as Record<string, unknown>,
+    if (schemaEntry?.inputSchema === undefined || schemaEntry.inputSchema === null) {
+      throw new Error(
+        `[workflows.${def.name}] step ${step.id}: no input schema discovered for tool "${step.tool}" — cannot validate step input`,
       );
-      const validated = await validator["~standard"].validate(resolved);
-      if ("issues" in validated && Array.isArray(validated.issues) && validated.issues.length > 0) {
-        const issues = validated.issues
-          .map((issue: { message: string }) => issue.message)
-          .join("; ");
-        throw new Error(
-          `[workflows.${def.name}] step ${step.id}: invalid input for tool "${step.tool}": ${issues}`,
-        );
-      }
+    }
+    if (declaresFileUpload(schemaEntry.inputSchema)) {
+      throw new Error(
+        `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" uses file upload (multipart) which is not supported in v1`,
+      );
+    }
+    const validator = fromJsonSchema(
+      schemaEntry.inputSchema as Record<string, unknown>,
+    );
+    const validated = await validator["~standard"].validate(resolved);
+    if ("issues" in validated && Array.isArray(validated.issues) && validated.issues.length > 0) {
+      const issues = validated.issues
+        .map((issue: { message: string }) => issue.message)
+        .join("; ");
+      throw new Error(
+        `[workflows.${def.name}] step ${step.id}: invalid input for tool "${step.tool}": ${issues}`,
+      );
     }
 
     try {

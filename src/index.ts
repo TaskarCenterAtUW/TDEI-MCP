@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
 
 import {
@@ -254,13 +255,14 @@ export async function createServer(
     },
     async () => {
       try {
-        const result = await awsToolsLifecycle.reload();
+        const { status, problems } = await awsToolsLifecycle.reload();
 
         return {
           content: [
             {
               type: "text",
-              text: `TDEI config reloaded: ${result}. New tools registered; removed tools require restart.`,
+              text: `TDEI config reloaded: ${status}. New tools registered; removed tools require restart.` +
+                (problems.length > 0 ? `\nRejected:\n- ${problems.join("\n- ")}` : ""),
             },
           ],
         };
@@ -285,12 +287,25 @@ export async function createServer(
   return server;
 }
 
-const entryPoint = process.argv[1];
+// npx launches the bin through a symlink (node_modules/.bin/tdei-mcp), so
+// compare real paths — comparing argv[1] to import.meta.url directly fails.
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
 
-if (
-  entryPoint &&
-  import.meta.url === pathToFileURL(entryPoint).href
-) {
-  console.error("[tdei-mcp] Starting MCP server");
-  await serveStdio(() => createServer());
+if (isEntryPoint()) {
+  const sub = process.argv[2];
+  if (sub === "init" || sub === "switch") {
+    // `npx -y tdei-mcp init` / `node dist/index.js init`
+    await import("./init.js");
+  } else {
+    console.error("[tdei-mcp] Starting MCP server");
+    await serveStdio(() => createServer());
+  }
 }

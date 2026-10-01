@@ -30,6 +30,25 @@ const ConfigFileSchema = z.object({
   $schema: z.string().optional(),
   endpoints: EndpointsSchema.default({ mode: "all", allow: [], deny: [] }),
   workflows: z.array(WorkflowSchema).default([]),
+}).superRefine((cfg, ctx) => {
+  const names = new Map<string, number>();
+  cfg.workflows.forEach((w, wi) => {
+    const firstName = names.get(w.name);
+    if (firstName !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["workflows", wi, "name"], message: `duplicate workflow name "${w.name}" (first defined at workflows[${firstName}])` });
+    } else {
+      names.set(w.name, wi);
+    }
+    const ids = new Map<string, number>();
+    w.steps.forEach((s, si) => {
+      const firstId = ids.get(s.id);
+      if (firstId !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["workflows", wi, "steps", si, "id"], message: `duplicate step id "${s.id}" in workflow "${w.name}" (first defined at steps[${firstId}])` });
+      } else {
+        ids.set(s.id, si);
+      }
+    });
+  });
 });
 
 export interface EndpointFilter { mode: "all" | "allow" | "deny"; allow: string[]; deny: string[]; }
@@ -37,10 +56,14 @@ export interface WorkflowStepDef { id: string; tool: string; ask?: string[]; inp
 export interface WorkflowDef { name: string; description?: string; steps: WorkflowStepDef[]; }
 export interface LoadedConfig { path: string; exists: boolean; filter: EndpointFilter; workflows: WorkflowDef[]; warnings: string[]; }
 
-export const DEFAULT_CONFIG_JSON = JSON.stringify(
-  { $schema: "./tdei.config.schema.json", endpoints: { mode: "all", allow: [], deny: [] }, workflows: [] },
-  null, 2,
-) + "\n";
+export function defaultConfigJson(schemaRef?: string): string {
+  return JSON.stringify(
+    { ...(schemaRef ? { $schema: schemaRef } : {}), endpoints: { mode: "all", allow: [], deny: [] }, workflows: [] },
+    null, 2,
+  ) + "\n";
+}
+
+export const DEFAULT_CONFIG_JSON = defaultConfigJson("./tdei.config.schema.json");
 
 export function resolveConfigPath(): string {
   const explicit = process.env.TDEI_CONFIG_PATH?.trim();
@@ -75,16 +98,6 @@ export function loadConfigFile(explicitPath?: string): LoadedConfig {
   }
   if (endpoints.mode === "deny" && endpoints.deny.length === 0) {
     return fallback(path, true, `[tdei-config] schema violation in ${path}: endpoints.mode is "deny" but endpoints.deny is empty — using allow-all, no workflows`);
-  }
-  const names = new Set<string>();
-  for (const w of workflows) {
-    if (names.has(w.name)) return fallback(path, true, `[tdei-config] schema violation in ${path}: workflows: duplicate workflow name "${w.name}" — using allow-all, no workflows`);
-    names.add(w.name);
-    const stepIds = new Set<string>();
-    for (const s of w.steps) {
-      if (stepIds.has(s.id)) return fallback(path, true, `[tdei-config] schema violation in ${path}: workflows.${w.name}.steps: duplicate step id "${s.id}" — using allow-all, no workflows`);
-      stepIds.add(s.id);
-    }
   }
   return { path, exists: true, filter: { mode: endpoints.mode, allow: [...endpoints.allow], deny: [...endpoints.deny] }, workflows: workflows as WorkflowDef[], warnings: [] };
 }

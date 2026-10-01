@@ -1,17 +1,30 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { runInit, runSwitch } from "./init/commands.js";
+import { runInit, runSwitch, type LocalCheckout } from "./init/commands.js";
 import { CLIENTS, type ClientName } from "./init/clients.js";
+
+// dist/init.js -> package root. A git checkout has src/; the published npm
+// package ships only dist/, so its absence means "run via npx".
+function detectCheckout(): LocalCheckout | undefined {
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  if (!existsSync(join(root, "src", "index.ts"))) return undefined;
+  const indexPath = join(root, "dist", "index.js");
+  if (!existsSync(indexPath)) throw new Error("dist/index.js not found — run `npm run build` first");
+  return { root, indexPath };
+}
 
 function usage(): string {
   return [
     "Usage:",
-    "  tdei-mcp-init init [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode|custom] [--port <n>]",
-    "  tdei-mcp-init switch base-url [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode]",
+    "  tdei-mcp init [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode|custom] [--port <n>]",
+    "  tdei-mcp switch base-url [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode]",
     "",
-    "First setup: tdei-mcp-init init. Change environment: tdei-mcp-init switch base-url.",
+    "First setup: init. Change environment: switch base-url.",
   ].join("\n");
 }
 
@@ -63,6 +76,7 @@ try {
         url: flag(rest, "--url"),
         client: flag(rest, "--client") as ClientName | undefined,
         port: portFlag === undefined ? undefined : Number(portFlag),
+        local: detectCheckout(),
       });
     } finally {
       prompter.close();
@@ -74,6 +88,7 @@ try {
         env: flag(rest, "--env"),
         url: flag(rest, "--url"),
         client: flag(rest, "--client") as ClientName | undefined,
+        local: detectCheckout(),
       });
     } finally {
       prompter.close();

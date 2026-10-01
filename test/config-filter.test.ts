@@ -47,3 +47,19 @@ test("mode:all registers everything except connector-managed auth", async () => 
   assert.equal(result.registered, 1);
   assert.equal(result.skipped, 1);
 });
+
+test("direct call to a denied tool reports the tool is not present", async () => {
+  const server = new McpServer({ name: "t", version: "1.0.0" });
+  await registerAwsTools(server as never, fakeClient(["listServices", "cloneDataset"]) as never, { mode: "deny", allow: [], deny: ["cloneDataset"] });
+  const client = new Client({ name: "filter-test", version: "1.0.0" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    let message = "";
+    try {
+      const res = await client.callTool({ name: "cloneDataset", arguments: {} });
+      message = JSON.stringify(res);
+    } catch (error) { message = String(error); }
+    assert.match(message, /not found|not present|unknown tool/i);
+  } finally { await client.close(); }
+});

@@ -10,6 +10,11 @@ export function buildServerEntry(npxPath: string, env: Record<string, string>): 
   return { command: npxPath, args: ["-y", "tdei-mcp"], env: { ...env } };
 }
 
+// Checkout mode: run the locally built server with the absolute node path.
+export function buildLocalEntry(nodePath: string, indexJsPath: string, env: Record<string, string>): ServerEntry {
+  return { command: nodePath, args: [indexJsPath], env: { ...env } };
+}
+
 // npx ships beside node (same bin dir on all platforms). The client entry
 // must launch npx — NOT node — because args ["-y", "tdei-mcp"] are npx flags.
 export function npxPathFor(nodeExecPath: string): string {
