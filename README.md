@@ -12,7 +12,23 @@ npx -y tdei-mcp init
 
 `init` asks for your TDEI base URL (for example `https://api.tdei.us`; only the host is used; `--env stage|prod` or `--url <https-url>` skips the prompt) and your client (`codex`, `claude`, `vscode`, or `custom`), then writes the `tdei` MCP entry into that client's config and creates a default `~/.tdei-mcp/tdei.config.json`.
 
-Restart your MCP client, then ask it:
+Setup uses absolute Node and installed-server paths and verifies MCP initialization
+and `tools/list` before changing client settings. It captures the setup PATH so
+Codex can find `uvx`, honors `CODEX_HOME`, backs up existing settings to
+`config.toml.tdei.bak`, writes atomically, and reads back the result.
+When run through npx, setup copies its runtime to
+`$CODEX_HOME/tdei-runtime/<version>` (default `~/.codex/tdei-runtime/<version>`)
+so npm cache cleanup does not break the connection.
+
+The default callback port stays at 8765. A busy port fails with recovery
+instructions instead of selecting an unregistered SSO callback. Pass `--port`
+only for a callback URI registered by your SSO administrator. Environment
+switching preserves command, arguments, working directory, and Codex server
+settings. Unknown CLI arguments print usage and exit rather than starting stdio.
+The legacy `tdei-mcp-init` binary remains supported.
+
+Configuration verification does not mean an existing chat refreshed its tools
+or that SSO succeeded. Restart or reconnect your MCP client, then ask it:
 
 > Call tdei_sso_login and give me the loginUrl. After browser login, check tdei_auth_status and call listServices.
 

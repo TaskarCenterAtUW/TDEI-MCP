@@ -301,7 +301,7 @@ function isEntryPoint(): boolean {
 
 if (isEntryPoint()) {
   const sub = process.argv[2];
-  if (sub === "init" || sub === "switch") {
+  if (sub !== undefined) {
     // `npx -y tdei-mcp init` / `node dist/index.js init`
     await import("./init.js");
   } else {

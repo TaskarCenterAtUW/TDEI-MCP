@@ -4,10 +4,10 @@ import { runInit, runSwitch } from "../src/init/commands.js";
 import { assertPort, findFreePort, portInUseHint } from "../src/init/ports.js";
 import { assertCallbackUrl, assertHttpsUrl, resolveApiUrl } from "../src/init/envs.js";
 
-const exec = async (cmd: string) => ({ stdout: cmd === "node" ? "v22.0.0\n" : "uvx 0.1\n" });
+const exec = async (cmd: string) => ({ stdout: cmd === "node" || cmd === process.execPath ? "v22.0.0\n" : "uvx 0.1\n" });
 const mem = () => ({ readFile: async () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); }, writeFile: async () => {}, mkdir: async () => {} });
 const prompter = { chooseEnv: async () => ({ env: "prod" }), chooseClient: async () => "custom" as const, confirm: async () => false };
-const baseObj = (isPortFree: (p: number) => Promise<boolean> = async () => true) => ({ exec, ...mem(), prompter, log: () => {}, isPortFree });
+const baseObj = (isPortFree: (p: number) => Promise<boolean> = async () => true) => ({ exec, verify: async () => {}, ...mem(), prompter, log: () => {}, isPortFree });
 const base = (isPortFree?: (p: number) => Promise<boolean>) => baseObj(isPortFree) as never;
 
 test("URL errors name the src/config.ts rule and echo the bad value", () => {
@@ -27,9 +27,8 @@ test("--port validation and in-use messages tell the user how to free the port",
   await assert.rejects(findFreePort(9000, async () => false), /No free loopback port found in 9000-9099/);
 });
 
-test("init auto-picks the next free port when none is given", async () => {
-  const r = await runInit(base(async (p) => p !== 8765), { url: "https://api.tdei.us", client: "custom", home: "/h" });
-  assert.equal(r.callbackUrl, "http://127.0.0.1:8766/callback");
+test("init rejects busy default callback instead of choosing an unregistered port", async () => {
+  await assert.rejects(runInit(base(async (p) => p !== 8765), { url: "https://api.tdei.us", client: "custom", home: "/h" }), /Port 8765 is in use/);
 });
 
 test("unknown --client is rejected by init and switch", async () => {

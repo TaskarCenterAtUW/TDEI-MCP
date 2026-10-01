@@ -9,6 +9,7 @@ export interface PreflightOptions {
   log?: (message: string) => void;
   platform?: string;
   home?: string;
+  nodePath?: string;
 }
 
 const UV_DOCS = "https://docs.astral.sh/uv/getting-started/installation/";
@@ -37,7 +38,7 @@ export async function checkPreflight(
   const platform = opts.platform ?? process.platform;
   const log = opts.log ?? (() => undefined);
 
-  const nodeOut = await probe(exec, "node");
+  const nodeOut = await probe(exec, opts.nodePath ?? "node");
   if (nodeOut === undefined) {
     throw new Error("node not found on PATH. Install Node.js >=22 from https://nodejs.org/ and re-run init.");
   }
@@ -72,6 +73,7 @@ export async function checkPreflight(
     const candidate = join(dir, exe);
     const version = await probe(exec, candidate);
     if (version !== undefined) {
+      process.env.PATH = `${dir}${platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`;
       log(`uv installed at ${dir}, which is not on this shell's PATH. Open a new terminal and fully restart your MCP client so it can find uvx.`);
       return { nodeVersion: nodeOut, uvxVersion: version };
     }

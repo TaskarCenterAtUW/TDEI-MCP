@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, cp } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { assertPort } from "./init/ports.js";
 import { runInit, runSwitch, type LocalCheckout } from "./init/commands.js";
@@ -67,17 +68,44 @@ const [, , sub, ...rest] = process.argv;
 const depsBase = {
   exec: execFn,
   readFile: (p: string) => readFile(p, "utf8"),
-  writeFile: (p: string, c: string) => writeFile(p, c, "utf8"),
+  writeFile: async (p: string, c: string) => {
+    const temporary = `${p}.${process.pid}.tmp`;
+    await writeFile(temporary, c, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, p);
+  },
   mkdir: (p: string) => mkdir(p, { recursive: true }).then(() => undefined),
   log: (m: string) => console.error(m),
 };
 
 try {
+  if (sub === "init" || sub === "switch") {
+    const flags = sub === "switch" ? rest.slice(1) : rest;
+    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port"] : [])]);
+    for (let i = 0; i < flags.length; i++) {
+      if (sub === "init" && ["--install-uv", "--no-install-uv"].includes(flags[i]!)) continue;
+      if (!valued.has(flags[i]!)) throw new Error(`unknown option ${flags[i]}; run tdei-mcp --help`);
+      if (!flags[i + 1] || flags[i + 1]!.startsWith("--")) throw new Error(`missing value for ${flags[i]}`);
+      i++;
+    }
+  }
   if (sub === "init") {
     const prompter = await interactivePrompter();
     try {
       const portFlag = flag(rest, "--port");
+      // npx cache paths are disposable. Keep a self-contained versioned runtime.
+      let serverPath = fileURLToPath(new URL("./index.js", import.meta.url));
+      if (serverPath.split(/[\\/]/).includes("_npx")) {
+        const packageRoot = dirname(dirname(serverPath));
+        const { version } = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+        const runtime = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "tdei-runtime", version);
+        await mkdir(runtime, { recursive: true });
+        await cp(join(packageRoot, "dist"), join(runtime, "dist"), { recursive: true });
+        await cp(dirname(packageRoot), join(runtime, "node_modules"), { recursive: true });
+        await cp(join(packageRoot, "package.json"), join(runtime, "package.json"));
+        serverPath = join(runtime, "dist", "index.js");
+      }
       await runInit({ ...depsBase, prompter }, {
+        serverPath,
         env: flag(rest, "--env"),
         url: flag(rest, "--url"),
         client: flag(rest, "--client") as ClientName | undefined,
