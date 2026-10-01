@@ -3,8 +3,17 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { pathToFileURL } from "node:url";
 
 import { createServer } from "./server.js";
+import { loadConfig, TdeiConfigError } from "./config.js";
 
 export { createServer, type ServerDependencies } from "./server.js";
+
+function failFastConfig(error: unknown): never {
+  const errors = error instanceof TdeiConfigError
+    ? error.errors
+    : [{ var: "unknown", rule: String(error), example: "" }];
+  console.error(JSON.stringify({ code: "TDEI_CONFIG_INVALID", errors }));
+  process.exit(1);
+}
 
 const entryPoint = process.argv[1];
 
@@ -23,7 +32,12 @@ if (
   const transportFlag = flagValue("--transport")?.toLowerCase();
   const portFlag = flagValue("--port");
   const hostFlag = flagValue("--host");
-  const transport = transportFlag ?? process.env.TDEI_TRANSPORT?.trim().toLowerCase() ?? "stdio";
+
+  // Fail fast on bad env before serving anything. loadConfig() reads env
+  // fresh so CLI --port/--host overrides below still apply afterwards.
+  const envCheck = loadConfig();
+  if (!envCheck.ok) failFastConfig(new TdeiConfigError(envCheck.errors));
+  const transport = transportFlag ?? envCheck.config.transport;
 
   if (transport === "http") {
     const overrides: { port?: number; host?: string } = {};

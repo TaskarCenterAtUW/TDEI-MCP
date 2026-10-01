@@ -1,7 +1,7 @@
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 
-import { config } from "./config.js";
+import { getConfig, TdeiConfigError } from "./config.js";
 import { injectAccessToken } from "./auth/auth-manager.js";
 import { AwsMcpClient } from "./aws/aws-mcp-client.js";
 import { createServer, type ServerDependencies } from "./server.js";
@@ -18,20 +18,20 @@ export interface HttpServeOverrides {
 
 interface ResolvedHttpOptions {
   createAwsClient: (token: string) => AwsMcpClient;
-  fetchImpl?: typeof fetch;
+  fetchImpl: typeof fetch | undefined;
 }
 
 function buildLoginUrl(): string {
-  const loginUrl = new URL("/api/v1/sso-redirect", `${config.apiUrl}/`);
-  loginUrl.searchParams.set("redirect_uri", config.ssoCallbackUrl);
-  loginUrl.searchParams.set("client_id", config.ssoClientId);
+  const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
+  loginUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
+  loginUrl.searchParams.set("client_id", getConfig().ssoClientId);
   return loginUrl.toString();
 }
 
 function buildLogoutUrl(): string {
-  const logoutUrl = new URL("/api/v1/sso-logout", `${config.apiUrl}/`);
-  logoutUrl.searchParams.set("redirect_uri", config.ssoCallbackUrl);
-  logoutUrl.searchParams.set("client_id", config.ssoClientId);
+  const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
+  logoutUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
+  logoutUrl.searchParams.set("client_id", getConfig().ssoClientId);
   return logoutUrl.toString();
 }
 
@@ -56,7 +56,7 @@ function unauthorized(response: ServerResponse, code: string, message: string, e
 function checkCors(request: IncomingMessage, response: ServerResponse): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
-  if (config.corsOrigins.includes(origin)) {
+  if (getConfig().corsOrigins.includes(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
     return true;
@@ -84,7 +84,7 @@ function toWebRequest(request: IncomingMessage, bodyText: string, host: string):
   return new Request(url, {
     method: request.method ?? "GET",
     headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : bodyText,
+    ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: bodyText }),
   });
 }
 
@@ -170,12 +170,12 @@ async function handleMcpRequest(
     getTokenVersion: () => ephemeralAuth.getTokenVersion(),
     startSsoLogin: async () => ({
       loginUrl: buildLoginUrl(),
-      callbackUrl: config.ssoCallbackUrl,
+      callbackUrl: getConfig().ssoCallbackUrl,
       completion: Promise.resolve(),
     }),
     logout: async () => ({
       logoutUrl: buildLogoutUrl(),
-      callbackUrl: config.ssoCallbackUrl,
+      callbackUrl: getConfig().ssoCallbackUrl,
       completion: Promise.resolve(),
     }),
   };
@@ -221,13 +221,24 @@ export async function serveHttp(
     createAwsClient: options.createAwsClient ?? ((token: string) => new AwsMcpClient(async () => token)),
     fetchImpl: options.fetchImpl,
   };
-  const host = overrides.host ?? config.httpHost;
-  const port = overrides.port ?? config.httpPort;
+  let httpConfig;
+  try {
+    httpConfig = getConfig();
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "TDEI_CONFIG_INVALID",
+      errors: error instanceof TdeiConfigError ? error.errors : [{ var: "unknown", rule: String(error), example: "" }],
+    }));
+    process.exit(1);
+  }
+  const host = overrides.host ?? httpConfig.httpHost;
+  const port = overrides.port ?? httpConfig.httpPort;
+  const basePath = httpConfig.httpBasePath;
   const server: Server = createHttpServer((request, response) => {
     void (async () => {
       try {
         const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
-        if (url.pathname !== config.httpBasePath) {
+        if (url.pathname !== basePath) {
           sendJson(response, 404, { code: "TDEI_NOT_FOUND", message: `Unknown path ${url.pathname}.` });
           return;
         }
@@ -253,7 +264,7 @@ export async function serveHttp(
     server.listen(port, host);
   });
 
-  console.error(`[tdei-mcp] Serving MCP (http) on ${host}:${port}${config.httpBasePath}`);
+  console.error(`[tdei-mcp] Serving MCP (http) on ${host}:${port}${basePath}`);
 
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;

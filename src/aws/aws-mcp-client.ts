@@ -2,16 +2,16 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { authManager } from "../auth/auth-manager.js";
-import { config } from "../config.js";
+import { getConfig } from "../config.js";
 
 const DISCOVERY_TOKEN = "tdei-schema-discovery";
 type ConnectionMode = "discovery" | "authenticated";
 
 export class AwsMcpClient {
-  private client?: Client;
-  private transport?: StdioClientTransport;
-  private connectedMode?: ConnectionMode;
-  private connectedTokenVersion?: number;
+  private client: Client | undefined;
+  private transport: StdioClientTransport | undefined;
+  private connectedMode: ConnectionMode | undefined;
+  private connectedTokenVersion: number | undefined;
 
   constructor(private readonly tokenProvider?: () => Promise<string>) {}
   private async connectForDiscovery(): Promise<void> {
@@ -66,13 +66,13 @@ export class AwsMcpClient {
     const transport = new StdioClientTransport({
       command: "uvx",
       args: [
-        config.awsMcpPackage,
+        getConfig().awsMcpPackage,
         "--api-name",
         "tdei-gateway-dev",
         "--api-url",
-        config.apiUrl,
+        getConfig().apiUrl,
         "--spec-url",
-        config.specUrl,
+        getConfig().specUrl,
         "--auth-type",
         "bearer",
         "--auth-token",

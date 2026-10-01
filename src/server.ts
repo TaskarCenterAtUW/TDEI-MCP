@@ -13,7 +13,7 @@ import { errorResult } from "./mcp/responses.js";
 import { log } from "./mcp/log.js";
 import { registerAwsTools } from "./aws/register-aws-tools.js";
 import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
-import { config } from "./config.js";
+import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 
 export interface HealthProbes {
@@ -62,13 +62,13 @@ export async function checkHealth(
   const specStart = Date.now();
   try {
     const response = await Promise.race([
-      fetchImpl(config.specUrl, { method: "GET" }),
+      fetchImpl(getConfig().specUrl, { method: "GET" }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
     ]);
     await response.body?.cancel().catch(() => undefined);
-    spec = { url: config.specUrl, reachable: response.ok, latencyMs: Date.now() - specStart };
+    spec = { url: getConfig().specUrl, reachable: response.ok, latencyMs: Date.now() - specStart };
   } catch {
-    spec = { url: config.specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
+    spec = { url: getConfig().specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
   }
 
   let uvx: HealthReport["uvx"];
@@ -81,18 +81,18 @@ export async function checkHealth(
 
   let callback: HealthReport["callback"];
   try {
-    const url = new URL(config.ssoCallbackUrl);
+    const url = new URL(getConfig().ssoCallbackUrl);
     if (url.protocol === "https:") {
-      callback = { url: config.ssoCallbackUrl, portFree: "n/a", hint: "https callback terminates remotely; no local bind applies." };
+      callback = { url: getConfig().ssoCallbackUrl, portFree: "n/a", hint: "https callback terminates remotely; no local bind applies." };
     } else {
       const port = Number(url.port);
       const free = await (probes.canBind ?? defaultCanBind)(port, url.hostname);
       callback = free
-        ? { url: config.ssoCallbackUrl, portFree: true }
-        : { url: config.ssoCallbackUrl, portFree: false, hint: `Port ${port} is in use; stop the occupying process before SSO login.` };
+        ? { url: getConfig().ssoCallbackUrl, portFree: true }
+        : { url: getConfig().ssoCallbackUrl, portFree: false, hint: `Port ${port} is in use; stop the occupying process before SSO login.` };
     }
   } catch {
-    callback = { url: config.ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
+    callback = { url: getConfig().ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
   }
 
   const ok = spec.reachable && uvx.found && callback.portFree !== false;
@@ -103,7 +103,7 @@ export async function checkHealth(
     spec,
     uvx,
     callback,
-    config: { transport: config.transport, mode: loadConfigFile().filter.mode },
+    config: { transport: getConfig().transport, mode: loadConfigFile().filter.mode },
   };
 }
 

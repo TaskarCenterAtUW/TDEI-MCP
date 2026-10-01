@@ -8,7 +8,37 @@ const DEFAULT_AWS_MCP_PACKAGE =
 
 const DEFAULT_SSO_CALLBACK_URL = "http://127.0.0.1:8765/callback";
 
-function readHttpsUrl(name: string, fallback: string): string {
+export type Transport = "stdio" | "http";
+
+export interface ConfigError {
+  var: string;
+  rule: string;
+  example: string;
+}
+
+export interface ResolvedConfig {
+  apiUrl: string;
+  specUrl: string;
+  ssoClientId: string;
+  ssoCallbackUrl: string;
+  transport: Transport;
+  httpHost: string;
+  httpPort: number;
+  httpBasePath: string;
+  corsOrigins: string[];
+  tlsCert: string | undefined;
+  tlsKey: string | undefined;
+  awsMcpPackage: string;
+}
+
+export class TdeiConfigError extends Error {
+  constructor(public readonly errors: ConfigError[]) {
+    super(`TDEI_CONFIG_INVALID: ${errors.map((e) => `${e.var} (${e.rule})`).join("; ")}`);
+    this.name = "TdeiConfigError";
+  }
+}
+
+function readHttpsUrl(name: string, fallback: string, example: string): { value: string } | { error: ConfigError } {
   const value = process.env[name]?.trim() || fallback;
 
   let url: URL;
@@ -16,27 +46,30 @@ function readHttpsUrl(name: string, fallback: string): string {
   try {
     url = new URL(value);
   } catch {
-    throw new Error(`${name} must be a valid absolute URL`);
+    return { error: { var: name, rule: "must be a valid absolute URL", example } };
   }
 
   if (url.protocol !== "https:") {
-    throw new Error(`${name} must use HTTPS`);
+    return { error: { var: name, rule: "must use HTTPS", example } };
   }
 
-  return url.toString().replace(/\/+$/, "");
+  return { value: url.toString().replace(/\/+$/, "") };
 }
 
-export type Transport = "stdio" | "http";
-
-export function resolveTransport(): Transport {
+function resolveTransport(): { value: Transport } | { error: ConfigError } {
   const raw = process.env.TDEI_TRANSPORT?.trim().toLowerCase();
-  if (raw === "http") return "http";
-  if (!raw || raw === "stdio") return "stdio";
-  throw new Error('TDEI_TRANSPORT must be "stdio" or "http"');
+  if (raw === "http") return { value: "http" };
+  if (!raw || raw === "stdio") return { value: "stdio" };
+  return { error: { var: "TDEI_TRANSPORT", rule: 'must be "stdio" or "http"', example: "stdio" } };
 }
 
-export function validateSsoCallbackUrl(value: string, transport: Transport): string {
-  const url = new URL(value);
+function checkSsoCallbackUrl(value: string, transport: Transport): ConfigError | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return { var: "TDEI_SSO_CALLBACK_URL", rule: "must be a valid absolute URL", example: "http://127.0.0.1:8765/callback" };
+  }
   const isLoopback =
     url.protocol === "http:" &&
     url.hostname === "127.0.0.1" &&
@@ -44,24 +77,30 @@ export function validateSsoCallbackUrl(value: string, transport: Transport): str
     url.pathname === "/callback";
   if (transport === "stdio") {
     if (!isLoopback) {
-      throw new Error("TDEI_SSO_CALLBACK_URL must use http://127.0.0.1:<port>/callback");
+      return { var: "TDEI_SSO_CALLBACK_URL", rule: "must use http://127.0.0.1:<port>/callback", example: "http://127.0.0.1:8765/callback" };
     }
-    return url.toString();
+    return undefined;
   }
   const isHttps = url.protocol === "https:";
   if (!isHttps && !isLoopback) {
-    throw new Error("TDEI_SSO_CALLBACK_URL must use https:// in http mode (http://127.0.0.1:<port>/callback allowed for local dev)");
+    return { var: "TDEI_SSO_CALLBACK_URL", rule: "must use https:// in http mode (http://127.0.0.1:<port>/callback allowed for local dev)", example: "https://mcp.example.com/callback" };
   }
-  return url.toString();
+  return undefined;
 }
 
-function readHttpPort(): number {
+export function validateSsoCallbackUrl(value: string, transport: Transport): string {
+  const error = checkSsoCallbackUrl(value, transport);
+  if (error) throw new Error(`TDEI_SSO_CALLBACK_URL ${error.rule}`);
+  return new URL(value).toString();
+}
+
+function readHttpPort(): { value: number } | { error: ConfigError } {
   const raw = process.env.TDEI_HTTP_PORT?.trim() || "3000";
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error("TDEI_HTTP_PORT must be an integer 1-65535");
+    return { error: { var: "TDEI_HTTP_PORT", rule: "must be an integer 1-65535", example: "3000" } };
   }
-  return port;
+  return { value: port };
 }
 
 function readBasePath(): string {
@@ -70,44 +109,61 @@ function readBasePath(): string {
   return path.replace(/\/+$/, "") || "/";
 }
 
-const transport = resolveTransport();
+export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false; errors: ConfigError[] } {
+  const errors: ConfigError[] = [];
 
-export const config = {
-  apiUrl: readHttpsUrl(
-    "TDEI_API_URL",
-    DEFAULT_API_URL,
-  ),
+  const apiUrl = readHttpsUrl("TDEI_API_URL", DEFAULT_API_URL, DEFAULT_API_URL);
+  if ("error" in apiUrl) errors.push(apiUrl.error);
 
-  specUrl: readHttpsUrl(
-    "TDEI_SPEC_URL",
-    DEFAULT_SPEC_URL,
-  ),
+  const specUrl = readHttpsUrl("TDEI_SPEC_URL", DEFAULT_SPEC_URL, DEFAULT_SPEC_URL);
+  if ("error" in specUrl) errors.push(specUrl.error);
 
-  ssoClientId: process.env.TDEI_SSO_CLIENT_ID?.trim() || "tdei-mcp",
+  const transport = resolveTransport();
+  if ("error" in transport) errors.push(transport.error);
 
-  ssoCallbackUrl: validateSsoCallbackUrl(
-    process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL,
-    transport,
-  ),
+  const port = readHttpPort();
+  if ("error" in port) errors.push(port.error);
 
-  transport,
+  // Skip the callback check when transport itself is invalid (one error, not two).
+  if (!("error" in transport)) {
+    const callbackError = checkSsoCallbackUrl(
+      process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL,
+      transport.value,
+    );
+    if (callbackError) errors.push(callbackError);
+  }
 
-  httpHost: process.env.TDEI_HTTP_HOST?.trim() || "127.0.0.1",
+  if (errors.length > 0) return { ok: false, errors };
 
-  httpPort: readHttpPort(),
+  const goodTransport = (transport as { value: Transport }).value;
+  return {
+    ok: true,
+    config: {
+      apiUrl: (apiUrl as { value: string }).value,
+      specUrl: (specUrl as { value: string }).value,
+      ssoClientId: process.env.TDEI_SSO_CLIENT_ID?.trim() || "tdei-mcp",
+      ssoCallbackUrl: new URL(process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL).toString(),
+      transport: goodTransport,
+      httpHost: process.env.TDEI_HTTP_HOST?.trim() || "127.0.0.1",
+      httpPort: (port as { value: number }).value,
+      httpBasePath: readBasePath(),
+      corsOrigins: (process.env.TDEI_CORS_ORIGINS ?? "")
+        .split(",")
+        .map((origin) => origin.trim().replace(/\/+$/, ""))
+        .filter(Boolean),
+      tlsCert: process.env.TDEI_TLS_CERT?.trim() || undefined,
+      tlsKey: process.env.TDEI_TLS_KEY?.trim() || undefined,
+      awsMcpPackage: process.env.TDEI_AWS_MCP_PACKAGE?.trim() || DEFAULT_AWS_MCP_PACKAGE,
+    },
+  };
+}
 
-  httpBasePath: readBasePath(),
+let memoized: ResolvedConfig | undefined;
 
-  corsOrigins: (process.env.TDEI_CORS_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim().replace(/\/+$/, ""))
-    .filter(Boolean),
-
-  tlsCert: process.env.TDEI_TLS_CERT?.trim() || undefined,
-
-  tlsKey: process.env.TDEI_TLS_KEY?.trim() || undefined,
-
-  awsMcpPackage:
-    process.env.TDEI_AWS_MCP_PACKAGE?.trim() ||
-    DEFAULT_AWS_MCP_PACKAGE,
-};
+export function getConfig(): ResolvedConfig {
+  if (memoized) return memoized;
+  const result = loadConfig();
+  if (!result.ok) throw new TdeiConfigError(result.errors);
+  memoized = result.config;
+  return memoized;
+}
