@@ -12,6 +12,9 @@ test("common semantic tools are discoverable and callable", async () => {
     operations: {
       async searchDatasets() { return []; },
       async listServices() { return []; },
+      async listProjectGroups() {
+        return [{ tdei_project_group_id: "group-1", name: "Accessible Seattle" }];
+      },
     },
     places: {
       async forwardGeocode() { return []; },
@@ -33,11 +36,24 @@ test("common semantic tools are discoverable and callable", async () => {
       "tdei_find_datasets",
       "tdei_list_my_project_groups",
       "tdei_list_services",
+      "tdei_resolve_intent",
       "tdei_upload_dataset",
       "tdei_validate_dataset",
     ]);
     const find = listed.tools.find((tool) => tool.name === "tdei_find_datasets");
     assert.match(find?.description ?? "", /latest dataset for Seattle/i);
+
+    const resolution = await client.callTool({
+      name: "tdei_resolve_intent",
+      arguments: { request: "Which organizations can I access?" },
+    });
+    const resolutionFirst = resolution.content[0];
+    const resolutionBody = JSON.parse(
+      resolutionFirst?.type === "text" ? resolutionFirst.text : "{}",
+    );
+    assert.equal(resolutionBody.status, "complete");
+    assert.equal(resolutionBody.data.tool, "tdei_list_my_project_groups");
+    assert.equal(resolutionBody.data.apiOperation, "listProjectGroups");
 
     const membership = await client.callTool({
       name: "tdei_list_my_project_groups",
@@ -45,7 +61,10 @@ test("common semantic tools are discoverable and callable", async () => {
     });
     const first = membership.content[0];
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
-    assert.equal(body.status, "unsupported");
+    assert.equal(body.status, "complete");
+    assert.equal(body.data.accessScope, "authenticated_user");
+    assert.match(body.data.scopeExplanation, /authenticated TDEI login/i);
+    assert.equal(body.data.projectGroups[0].tdei_project_group_id, "group-1");
 
     const upload = await client.callTool({
       name: "tdei_upload_dataset",

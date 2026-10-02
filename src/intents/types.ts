@@ -25,6 +25,7 @@ export type IntentResult<T> =
   }
   | {
     status: "ambiguous";
+    question?: string;
     candidates: Array<Record<string, unknown>>;
     accepted: Record<string, unknown>;
   }
@@ -70,6 +71,19 @@ export interface ListServicesInput {
 export interface ListServicesData {
   services: TdeiService[];
   appliedFilters: ListServicesInput;
+}
+
+export interface ListProjectGroupsInput {
+  searchText?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListProjectGroupsData {
+  projectGroups: ProjectGroup[];
+  appliedFilters: ListProjectGroupsInput;
+  accessScope: "authenticated_user";
+  scopeExplanation: string;
 }
 
 export type DatasetAsset =

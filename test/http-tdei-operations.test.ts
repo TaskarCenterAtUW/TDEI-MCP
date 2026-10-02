@@ -56,6 +56,28 @@ test("HTTP adapter keeps service request tokens isolated", async () => {
   assert.deepEqual(authorizations, ["Bearer bearer-A", "Bearer bearer-B"]);
 });
 
+test("HTTP adapter falls back to authenticated project-groups endpoint", async () => {
+  let request: Request | undefined;
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async (input, init) => {
+      request = new Request(input, init);
+      return new Response(JSON.stringify({
+        project_groups: [{ tdei_project_group_id: "group-1" }],
+      }), { status: 200 });
+    },
+  );
+
+  const groups = await adapter.listProjectGroups({
+    page: 1,
+    pageSize: 50,
+  }, { accessToken: "bearer-A" });
+
+  assert.deepEqual(groups, [{ tdei_project_group_id: "group-1" }]);
+  assert.equal(request?.headers.get("Authorization"), "Bearer bearer-A");
+  assert.equal(request?.url, "https://api.example.test/api/v1/project-groups?page_no=1&page_size=50");
+});
+
 test("HTTP adapter submits inline validation assets as multipart", async () => {
   let request: Request | undefined;
   const adapter = new HttpTdeiOperations(

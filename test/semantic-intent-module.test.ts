@@ -14,9 +14,11 @@ function createHarness(
     bbox: [number, number, number, number];
   }>> = [],
   serviceResponses: Array<Array<Record<string, unknown>>> = [],
+  projectGroupResponses: Array<Array<Record<string, unknown>>> = [],
 ) {
   const searches: Array<Record<string, unknown>> = [];
   const serviceSearches: Array<Record<string, unknown>> = [];
+  const projectGroupSearches: Array<Record<string, unknown>> = [];
   const operations: TdeiOperations = {
     async searchDatasets(input) {
       searches.push(input as unknown as Record<string, unknown>);
@@ -25,6 +27,10 @@ function createHarness(
     async listServices(input) {
       serviceSearches.push(input as unknown as Record<string, unknown>);
       return serviceResponses.shift() ?? [];
+    },
+    async listProjectGroups(input, context) {
+      projectGroupSearches.push({ ...input, accessToken: context.accessToken });
+      return projectGroupResponses.shift() ?? [];
     },
   };
   const geocodes: string[] = [];
@@ -39,6 +45,7 @@ function createHarness(
     module: new SemanticIntentModule({ operations, places }),
     searches,
     serviceSearches,
+    projectGroupSearches,
     geocodes,
   };
 }
@@ -201,16 +208,29 @@ test("service listing returns normalized filters and results", async () => {
   }]);
 });
 
-test("project-group membership reports the missing upstream capability", async () => {
-  const harness = createHarness([]);
+test("project-group membership lists groups visible to the authenticated login", async () => {
+  const groups = [{ tdei_project_group_id: "group-1", name: "Accessible Seattle" }];
+  const harness = createHarness([], [], [], [groups]);
 
-  const result = await harness.module.listMyProjectGroups();
+  const result = await harness.module.listMyProjectGroups(
+    {},
+    { accessToken: "authenticated-login" },
+  );
 
   assert.deepEqual(result, {
-    status: "unsupported",
-    reason: "The published TDEI API can list all project groups but cannot list only the authenticated user's memberships.",
-    requiredCapability: "GET /api/v1/me/project-groups or GET /api/v1/project-groups?include_my_groups=true",
+    status: "complete",
+    data: {
+      projectGroups: groups,
+      appliedFilters: { page: 1, pageSize: 50 },
+      accessScope: "authenticated_user",
+      scopeExplanation: "These are all project groups available to your authenticated TDEI login.",
+    },
   });
   assert.deepEqual(harness.searches, []);
   assert.deepEqual(harness.serviceSearches, []);
+  assert.deepEqual(harness.projectGroupSearches, [{
+    page: 1,
+    pageSize: 50,
+    accessToken: "authenticated-login",
+  }]);
 });

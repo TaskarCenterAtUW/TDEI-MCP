@@ -12,6 +12,8 @@ import type {
   Dataset,
   RequestContext,
   TdeiService,
+  ProjectGroup,
+  ListProjectGroupsInput,
 } from "../intents/types.js";
 
 export type AwsToolCaller = (
@@ -80,6 +82,17 @@ export class AwsTdeiOperations implements TdeiOperations {
         ? { tdei_project_group_id: input.projectGroupId }
         : {}),
       ...(input.serviceType ? { service_type: input.serviceType } : {}),
+      page_no: input.page,
+      page_size: input.pageSize,
+    });
+  }
+
+  async listProjectGroups(
+    input: Required<Pick<ListProjectGroupsInput, "page" | "pageSize">> & Pick<ListProjectGroupsInput, "searchText">,
+    _context: RequestContext,
+  ): Promise<ProjectGroup[]> {
+    return this.callRecords("listProjectGroups", {
+      ...(input.searchText ? { searchText: input.searchText } : {}),
       page_no: input.page,
       page_size: input.pageSize,
     });

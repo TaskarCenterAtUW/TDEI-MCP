@@ -13,6 +13,8 @@ import type {
   DataType,
   RequestContext,
   TdeiService,
+  ProjectGroup,
+  ListProjectGroupsInput,
 } from "../intents/types.js";
 
 function appendIfDefined(
@@ -31,7 +33,7 @@ function recordsFrom(value: unknown): Array<Record<string, unknown>> {
     );
   }
   if (typeof value === "object" && value !== null) {
-    for (const key of ["data", "datasets", "results", "services"]) {
+    for (const key of ["data", "datasets", "results", "services", "project_groups", "projectGroups"]) {
       const nested = (value as Record<string, unknown>)[key];
       if (Array.isArray(nested)) return recordsFrom(nested);
     }
@@ -88,6 +90,17 @@ export class HttpTdeiOperations implements TdeiOperations {
     appendIfDefined(params, "page_no", input.page);
     appendIfDefined(params, "page_size", input.pageSize);
     return this.getRecords("api/v1/services", params, context);
+  }
+
+  async listProjectGroups(
+    input: Required<Pick<ListProjectGroupsInput, "page" | "pageSize">> & Pick<ListProjectGroupsInput, "searchText">,
+    context: RequestContext,
+  ): Promise<ProjectGroup[]> {
+    const params = new URLSearchParams();
+    appendIfDefined(params, "searchText", input.searchText);
+    appendIfDefined(params, "page_no", input.page);
+    appendIfDefined(params, "page_size", input.pageSize);
+    return this.getRecords("api/v1/project-groups", params, context);
   }
 
   async validateDataset(

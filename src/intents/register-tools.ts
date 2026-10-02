@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 
 import { formatError, truncateText } from "../mcp/errors.js";
 import { SEMANTIC_TOOL_DESCRIPTIONS } from "./descriptions.js";
+import { resolveUserIntent } from "./intent-resolver.js";
 import type { SemanticIntentModule } from "./semantic-intent-module.js";
 import type { RequestContext } from "./types.js";
 
@@ -20,10 +21,20 @@ const findDatasetsSchema = z.object({
   limit: z.number().int().min(1).max(50).optional(),
 });
 
+const resolveIntentSchema = z.object({
+  request: z.string().trim().min(1),
+});
+
 const listServicesSchema = z.object({
   searchText: z.string().trim().min(1).optional(),
   projectGroupId: z.string().trim().min(1).optional(),
   serviceType: z.enum(["all", "osw", "flex", "pathways"]).optional(),
+  page: z.number().int().min(1).optional(),
+  pageSize: z.number().int().min(1).max(50).optional(),
+});
+
+const listProjectGroupsSchema = z.object({
+  searchText: z.string().trim().min(1).optional(),
   page: z.number().int().min(1).optional(),
   pageSize: z.number().int().min(1).max(50).optional(),
 });
@@ -100,6 +111,15 @@ export function registerSemanticTools(
   };
 
   register(
+    "tdei_resolve_intent",
+    {
+      description: SEMANTIC_TOOL_DESCRIPTIONS.resolveIntent,
+      inputSchema: resolveIntentSchema.shape,
+    },
+    async (args) => jsonIntentResult(resolveUserIntent(String(args.request))),
+  );
+
+  register(
     "tdei_find_datasets",
     {
       description: SEMANTIC_TOOL_DESCRIPTIONS.findDatasets,
@@ -118,9 +138,15 @@ export function registerSemanticTools(
     "tdei_list_my_project_groups",
     {
       description: SEMANTIC_TOOL_DESCRIPTIONS.listMyProjectGroups,
-      inputSchema: z.object({}).shape,
+      inputSchema: listProjectGroupsSchema.shape,
     },
-    async () => jsonIntentResult(await module.listMyProjectGroups()),
+    async (args) => {
+      try {
+        return jsonIntentResult(await module.listMyProjectGroups(args, contextProvider()));
+      } catch (error) {
+        return formatError(error);
+      }
+    },
   );
 
   register(
