@@ -54,19 +54,22 @@ export function resolveUserIntent(request: string): IntentResult<IntentRoute> {
   const normalized = request.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, " ").trim();
   const routes: IntentRoute[] = [];
   const wantsUpload = contains(normalized, /\b(upload|submit|ingest)\b/);
-  const wantsValidation = contains(normalized, /\b(validate|validation|verify|check)\b/)
-    && contains(normalized, /\b(dataset|data|file|zip|osw|gtfs|pathways|flex)\b/);
+  const validationAction = contains(normalized, /\b(validate|validation|verify|check)\b/);
+  const validationObject = contains(normalized, /\b(dataset|data|file|zip|osw|gtfs|pathways|flex)\b/);
+  const wantsValidation = validationAction && validationObject;
   const wantsServices = contains(normalized, /\bservices?\b/);
   const wantsDatasets = contains(normalized, /\b(datasets?|data files?|osw|gtfs|sidewalk data)\b/);
   const wantsProjectGroups = contains(normalized, /\b(project groups?|projects?|organizations?|organisations?|orgs?|groups?)\b/);
-  const explicitlyCombinesProjects = /\b(projects?|organizations?|organisations?|orgs?|groups?)\b.*\band\b.*\b(services?|datasets?)\b/.test(normalized)
-    || /\b(services?|datasets?)\b.*\band\b.*\b(projects?|organizations?|organisations?|orgs?|groups?)\b/.test(normalized);
+  const explicitlyCombinesIntents = /\b(and|then|also)\b/.test(normalized);
+  const explicitlyRetrievesDatasets = /\b(find|list|show|get|search|download)(?:\s+\w+){0,3}\s+(datasets?|data files?|osw|gtfs|sidewalk data)\b/.test(normalized);
 
-  if (wantsValidation) routes.push(ROUTES.validate);
+  if (wantsValidation || (explicitlyCombinesIntents && validationAction)) routes.push(ROUTES.validate);
   if (wantsUpload) routes.push(ROUTES.upload);
-  if (!wantsValidation && !wantsUpload && wantsServices) routes.push(ROUTES.services);
-  if (!wantsValidation && !wantsUpload && !wantsServices && wantsDatasets) routes.push(ROUTES.datasets);
-  if (wantsProjectGroups && (routes.length === 0 || explicitlyCombinesProjects)) {
+  if (wantsServices && (routes.length === 0 || explicitlyCombinesIntents)) routes.push(ROUTES.services);
+  if (wantsDatasets && (routes.length === 0 || (explicitlyCombinesIntents && explicitlyRetrievesDatasets))) {
+    routes.push(ROUTES.datasets);
+  }
+  if (wantsProjectGroups && (routes.length === 0 || explicitlyCombinesIntents)) {
     routes.push(ROUTES.projectGroups);
   }
 
