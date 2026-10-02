@@ -20,14 +20,14 @@ test("package entry routes setup commands without starting a transport", async (
   await assert.rejects(
     exec(
       process.execPath,
-      ["--import", "tsx", "src/index.ts", "init", "--env", "invalid", "--client", "codex"],
+      ["--import", "tsx", "src/index.ts", "init", "--unknown-option"],
       { timeout: 10_000, env: childEnv },
     ),
     (error: unknown) => {
       const result = error as { code: number; stdout: string; stderr: string };
       const output = `${result.stdout}\n${result.stderr}`;
       assert.equal(result.code, 1);
-      assert.match(output, /unknown environment/);
+      assert.match(output, /unknown option --unknown-option/);
       assert.doesNotMatch(output, /Starting MCP server|Serving MCP/);
       return true;
     },
