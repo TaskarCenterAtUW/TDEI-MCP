@@ -2,17 +2,18 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { authManager } from "../auth/auth-manager.js";
-import { config } from "../config.js";
+import { getConfig } from "../config.js";
 
 const DISCOVERY_TOKEN = "tdei-schema-discovery";
 type ConnectionMode = "discovery" | "authenticated";
 
 export class AwsMcpClient {
-  private client?: Client;
-  private transport?: StdioClientTransport;
-  private connectedMode?: ConnectionMode;
-  private connectedTokenVersion?: number;
+  private client: Client | undefined;
+  private transport: StdioClientTransport | undefined;
+  private connectedMode: ConnectionMode | undefined;
+  private connectedTokenVersion: number | undefined;
 
+  constructor(private readonly tokenProvider?: () => Promise<string>) {}
   private async connectForDiscovery(): Promise<void> {
     if (this.client) return;
 
@@ -21,6 +22,18 @@ export class AwsMcpClient {
   }
 
   private async connectAuthenticated(): Promise<void> {
+    if (this.tokenProvider) {
+      // Stateless per-request path: always start a fresh child with the
+      // request Bearer, then the caller closes it after the response.
+      if (this.client) {
+        await this.close();
+      }
+      console.error("[aws-mcp] starting per-request AWS OpenAPI MCP server");
+      const accessToken = await this.tokenProvider();
+      await this.startChild(accessToken, "authenticated");
+      return;
+    }
+
     const accessToken = await authManager.getAccessToken();
     const tokenVersion = authManager.getTokenVersion();
 
@@ -45,7 +58,7 @@ export class AwsMcpClient {
     await this.startChild(accessToken, "authenticated", tokenVersion);
   }
 
-  private async startChild(
+  protected async startChild(
     accessToken: string,
     mode: ConnectionMode,
     tokenVersion?: number,
@@ -53,13 +66,13 @@ export class AwsMcpClient {
     const transport = new StdioClientTransport({
       command: "uvx",
       args: [
-        config.awsMcpPackage,
+        getConfig().awsMcpPackage,
         "--api-name",
         "tdei-gateway-dev",
         "--api-url",
-        config.apiUrl,
+        getConfig().apiUrl,
         "--spec-url",
-        config.specUrl,
+        getConfig().specUrl,
         "--auth-type",
         "bearer",
         "--auth-token",
@@ -88,6 +101,10 @@ export class AwsMcpClient {
   }
 
   async listTools() {
+    if (this.tokenProvider) {
+      await this.connectAuthenticated();
+      return this.client!.listTools();
+    }
     if (authManager.getStatus().authenticated) {
       await this.connectAuthenticated();
     } else {

@@ -1,0 +1,17 @@
+{
+  "$schema": "./tdei.config.schema.json",
+  "endpoints": { "mode": "all", "allow": [], "deny": [] },
+  "workflows": [
+    {
+      "name": "download_osw_dataset_bundle",
+      "description": "List project groups and datasets, fetch the OSW file, then locate and download the job output (all GET, no uploads).",
+      "steps": [
+        { "id": "pick_group", "tool": "listProjectGroups", "ask": [], "input": {} },
+        { "id": "pick_dataset", "tool": "listDatasetFiles", "ask": ["tdei_project_group_id"], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
+        { "id": "fetch_osw", "tool": "getOswFile", "ask": ["tdei_dataset_id"], "input": { "tdei_dataset_id": "{{user.tdei_dataset_id}}" } },
+        { "id": "find_job", "tool": "listJobs", "ask": [], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
+        { "id": "download_output", "tool": "job-download", "ask": ["job_id"], "input": { "job_id": "{{user.job_id}}" } }
+      ]
+    }
+  ]
+}

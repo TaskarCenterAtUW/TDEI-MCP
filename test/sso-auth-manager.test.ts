@@ -59,3 +59,40 @@ test("browser callback exchanges code and state for tokens", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("MCP callback completion exchanges code when the browser cannot reach loopback", async () => {
+  const originalFetch = globalThis.fetch;
+  let exchangeBody: Record<string, unknown> | undefined;
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.pathname === "/api/v1/sso-login") {
+      exchangeBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        access_token: "relayed-access-token",
+        refresh_token: "relayed-refresh-token",
+        expires_in: 3600,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+
+  const auth = new AuthManager();
+  try {
+    const login = await auth.startSsoLogin();
+    await auth.completeSsoLogin(
+      "http://127.0.0.1:18765/callback?code=relayed-code&state=relayed-state",
+    );
+    await login.completion;
+
+    assert.deepEqual(exchangeBody, {
+      code: "relayed-code",
+      state: "relayed-state",
+      clientId: "tdei-mcp",
+    });
+    assert.equal(auth.getStatus().state, "authenticated");
+    assert.equal(await auth.getAccessToken(), "relayed-access-token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

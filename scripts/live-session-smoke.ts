@@ -30,6 +30,19 @@ try {
     .join("\n");
   console.log("Open the loginUrl below in your browser:\n");
   console.log(loginMessage);
+  console.log("If the browser cannot reach the loopback callback, paste its final callback URL here and press Enter.\n");
+
+  process.stdin.setEncoding("utf8");
+  process.stdin.once("data", (value) => {
+    const callbackUrl = value.trim();
+    if (!callbackUrl) return;
+    void client.callTool({
+      name: "tdei_sso_complete",
+      arguments: { callbackUrl },
+    }).catch((error) => {
+      console.error("[auth] callback relay failed:", error instanceof Error ? error.message : String(error));
+    });
+  });
 
   const loginDeadline = Date.now() + 5 * 60_000;
   while (Date.now() < loginDeadline) {

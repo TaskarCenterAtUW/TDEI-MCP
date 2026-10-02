@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 
-import { config } from "../config.js";
+import { getConfig } from "../config.js";
 import type {
   AuthStatus,
   SsoLoginStart,
@@ -14,6 +14,7 @@ const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface PendingLogin extends SsoLoginStart {
   server: Server;
+  resolve: () => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
@@ -25,13 +26,14 @@ interface PendingLogout extends SsoLogoutStart {
 }
 
 export class AuthManager {
-  private accessToken?: string;
-  private refreshToken?: string;
-  private expiresAt?: number;
+  private accessToken: string | undefined;
+  private refreshToken: string | undefined;
+  private expiresAt: number | undefined;
   private tokenVersion = 0;
-  private pendingLogin?: PendingLogin;
-  private pendingLogout?: PendingLogout;
-  private refreshPromise?: Promise<void>;
+  private pendingLogin: PendingLogin | undefined;
+  private pendingLogout: PendingLogout | undefined;
+  private refreshPromise: Promise<void> | undefined;
+  private loginExchangePromise: Promise<void> | undefined;
 
   getTokenVersion(): number {
     return this.tokenVersion;
@@ -40,7 +42,7 @@ export class AuthManager {
   getStatus(): AuthStatus {
     const authenticated = this.hasUsableAccessToken();
     return {
-      configured: Boolean(config.ssoClientId && config.ssoCallbackUrl),
+      configured: Boolean(getConfig().ssoClientId && getConfig().ssoCallbackUrl),
       authenticated,
       state: authenticated
         ? "authenticated"
@@ -62,7 +64,7 @@ export class AuthManager {
       reject(new Error("TDEI SSO logout cancelled by a new login"));
     }
 
-    const callbackUrl = new URL(config.ssoCallbackUrl);
+    const callbackUrl = new URL(getConfig().ssoCallbackUrl);
     let resolveCompletion!: () => void;
     let rejectCompletion!: (error: Error) => void;
     const completion = new Promise<void>((resolve, reject) => {
@@ -71,7 +73,6 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
-    let exchanging = false;
     const server = createServer(async (request, response) => {
       const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
@@ -80,38 +81,13 @@ export class AuthManager {
         response.end("Not found");
         return;
       }
-      if (exchanging) {
-        response.writeHead(409, { "Content-Type": "text/plain" });
-        response.end("TDEI SSO login is already being completed.");
-        return;
-      }
-      exchanging = true;
-
       try {
-        const providerError = requestUrl.searchParams.get("error");
-        if (providerError) throw new Error(`TDEI SSO failed: ${providerError}`);
-
-        const code = requestUrl.searchParams.get("code");
-        const state = requestUrl.searchParams.get("state");
-        if (!code || !state) {
-          throw new Error("TDEI SSO callback is missing code or state");
-        }
-
-        const tokens = await this.requestTokens(
-          "/api/v1/sso-login",
-          { code, state, clientId: config.ssoClientId },
-          "TDEI SSO login",
-        );
-        this.storeTokens(tokens);
-        this.finishPendingLogin();
-        resolveCompletion();
+        await this.completeSsoLogin(requestUrl.toString());
 
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
       } catch (error) {
         const loginError = error instanceof Error ? error : new Error(String(error));
-        this.finishPendingLogin();
-        rejectCompletion(loginError);
         response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
         response.end(loginError.message);
       }
@@ -135,9 +111,9 @@ export class AuthManager {
       throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const loginUrl = new URL("/api/v1/sso-redirect", `${config.apiUrl}/`);
+    const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
     loginUrl.searchParams.set("redirect_uri", callbackUrl.toString());
-    loginUrl.searchParams.set("client_id", config.ssoClientId);
+    loginUrl.searchParams.set("client_id", getConfig().ssoClientId);
 
     const timeout = setTimeout(() => {
       const error = new Error("TDEI SSO login timed out");
@@ -152,10 +128,47 @@ export class AuthManager {
       callbackUrl: callbackUrl.toString(),
       completion,
       server,
+      resolve: resolveCompletion,
       reject: rejectCompletion,
       timeout,
     };
     return this.publicLogin(this.pendingLogin);
+  }
+
+  async completeSsoLogin(callback: string): Promise<void> {
+    const pending = this.pendingLogin;
+    if (!pending) throw new Error("No TDEI SSO login is pending");
+
+    const expected = new URL(getConfig().ssoCallbackUrl);
+    const received = new URL(callback);
+    if (received.origin !== expected.origin || received.pathname !== expected.pathname) {
+      throw new Error("TDEI SSO callback URL does not match the configured callback");
+    }
+
+    const providerError = received.searchParams.get("error");
+    if (providerError) throw new Error(`TDEI SSO failed: ${providerError}`);
+    const code = received.searchParams.get("code");
+    const state = received.searchParams.get("state");
+    if (!code || !state) throw new Error("TDEI SSO callback is missing code or state");
+
+    if (this.loginExchangePromise) return this.loginExchangePromise;
+    this.loginExchangePromise = this.requestTokens(
+      "/api/v1/sso-login",
+      { code, state, clientId: getConfig().ssoClientId },
+      "TDEI SSO login",
+    ).then((tokens) => {
+      this.storeTokens(tokens);
+      this.finishPendingLogin();
+      pending.resolve();
+    }).catch((error: unknown) => {
+      const loginError = error instanceof Error ? error : new Error(String(error));
+      this.finishPendingLogin();
+      pending.reject(loginError);
+      throw loginError;
+    }).finally(() => {
+      this.loginExchangePromise = undefined;
+    });
+    return this.loginExchangePromise;
   }
 
   async getAccessToken(): Promise<string> {
@@ -175,6 +188,42 @@ export class AuthManager {
     throw new Error("TDEI_SSO_REQUIRED");
   }
 
+  /** Seed a Bearer received over HTTP. Internal: use injectAccessToken(). */
+  seedInjectedToken(token: string, expiresInSeconds?: number): void {
+    this.accessToken = token;
+    this.refreshToken = undefined;
+    this.tokenVersion += 1;
+    const lifetime =
+      typeof expiresInSeconds === "number" && expiresInSeconds >= 0
+        ? expiresInSeconds
+        : DEFAULT_TOKEN_LIFETIME_SECONDS;
+    this.expiresAt = Date.now() + lifetime * 1000;
+  }
+
+  /**
+   * Stateless validation for an injected Bearer: local expiry check first
+   * (never attempts refresh — the server holds no refresh_token), then one
+   * lightweight TDEI probe. Throws TDEI_TOKEN_EXPIRED / TDEI_TOKEN_INVALID.
+   */
+  async validateToken(): Promise<void> {
+    if (!this.hasUsableAccessToken()) {
+      throw new Error("TDEI_TOKEN_EXPIRED");
+    }
+    let response: Response;
+    try {
+      response = await fetch(new URL("/api/v1/project-groups", `${getConfig().apiUrl}/`), {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${this.accessToken}` },
+      });
+    } catch {
+      throw new Error("TDEI_TOKEN_INVALID");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("TDEI_TOKEN_INVALID");
+    }
+    await response.body?.cancel().catch(() => undefined);
+  }
+
   async logout(): Promise<SsoLogoutStart> {
     if (this.pendingLogout) return this.publicLogout(this.pendingLogout);
 
@@ -185,7 +234,7 @@ export class AuthManager {
     }
     this.clearTokens();
 
-    const callbackUrl = new URL(config.ssoCallbackUrl);
+    const callbackUrl = new URL(getConfig().ssoCallbackUrl);
     let resolveCompletion!: () => void;
     let rejectCompletion!: (error: Error) => void;
     const completion = new Promise<void>((resolve, reject) => {
@@ -237,9 +286,9 @@ export class AuthManager {
       throw new Error(`Unable to start TDEI SSO logout callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const logoutUrl = new URL("/api/v1/sso-logout", `${config.apiUrl}/`);
+    const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
     logoutUrl.searchParams.set("redirect_uri", callbackUrl.toString());
-    logoutUrl.searchParams.set("client_id", config.ssoClientId);
+    logoutUrl.searchParams.set("client_id", getConfig().ssoClientId);
 
     const timeout = setTimeout(() => {
       const error = new Error("TDEI SSO logout timed out");
@@ -266,7 +315,7 @@ export class AuthManager {
 
     this.refreshPromise = this.requestTokens(
       "/api/v1/refresh-token",
-      { refreshToken: this.refreshToken, clientId: config.ssoClientId },
+      { refreshToken: this.refreshToken, clientId: getConfig().ssoClientId },
       "TDEI token refresh",
     ).then((tokens) => {
       this.storeTokens(tokens);
@@ -278,7 +327,7 @@ export class AuthManager {
   }
 
   private async requestTokens(path: string, body: unknown, action: string): Promise<TokenResponse> {
-    const response = await fetch(new URL(path, `${config.apiUrl}/`), {
+    const response = await fetch(new URL(path, `${getConfig().apiUrl}/`), {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -338,6 +387,13 @@ export class AuthManager {
     this.refreshToken = undefined;
     this.expiresAt = undefined;
   }
+}
+
+export function injectAccessToken(token: string, expiresInSeconds?: number): AuthManager {
+  if (!token) throw new Error("TDEI_TOKEN_INVALID");
+  const manager = new AuthManager();
+  manager.seedInjectedToken(token, expiresInSeconds);
+  return manager;
 }
 
 export const authManager = new AuthManager();
