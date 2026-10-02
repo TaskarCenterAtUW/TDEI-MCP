@@ -32,6 +32,7 @@ test("runInit writes codex entry end to end", async () => {
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.client, "codex");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
+  assert.match(logs.join("\n"), /Fully restart Codex, then start a new chat/);
   assert.match(logs.join("\n"), /tdei_sso_login/);
 });
 

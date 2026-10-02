@@ -3,6 +3,16 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import type { ServerEntry } from "./clients.js";
 
+const REQUIRED_TOOLS = ["tdei_sso_login", "tdei_auth_status", "listServices"] as const;
+
+export function assertRequiredTools(toolNames: readonly string[]): void {
+  const available = new Set(toolNames);
+  const missing = REQUIRED_TOOLS.filter((name) => !available.has(name));
+  if (missing.length > 0) {
+    throw new Error(`tools/list did not expose required tools: ${missing.join(", ")}`);
+  }
+}
+
 export async function verifyServer(entry: ServerEntry): Promise<void> {
   const transport = new StdioClientTransport({ ...entry, stderr: "pipe" });
   const client = new Client({ name: "tdei-setup", version: "0.1.0" });
@@ -13,9 +23,7 @@ export async function verifyServer(entry: ServerEntry): Promise<void> {
       (async () => {
         await client.connect(transport);
         const result = await client.listTools();
-        if (!result.tools.some((tool) => tool.name === "tdei_sso_login")) {
-          throw new Error("tools/list did not expose tdei_sso_login");
-        }
+        assertRequiredTools(result.tools.map((tool) => tool.name));
       })(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(

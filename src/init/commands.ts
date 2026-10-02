@@ -225,7 +225,9 @@ export async function runInit(
   if (await deps.readFile(path) !== updated) {
     throw new Error(`configuration readback failed: ${path}`);
   }
-  deps.log("Configuration verified (MCP initialize and tools/list passed). Restart or reconnect your MCP client; SSO is still required.");
+  deps.log(client === "codex"
+    ? "Configuration verified (MCP initialize and required tools/list passed). Fully restart Codex, then start a new chat so it loads the updated MCP tool catalogue; SSO is still required."
+    : `Configuration verified (MCP initialize and required tools/list passed). Fully restart ${client} so it loads the updated MCP tool catalogue; SSO is still required.`);
   deps.log(`wrote ${client} MCP entry for ${apiUrl} to ${path}`);
   deps.log(VERIFY_PROMPT);
   return { client, apiUrl, callbackUrl };
