@@ -10,11 +10,14 @@ The default configuration uses the **TDEI development environment**. You need an
 npx -y tdei-mcp init
 ```
 
-This checks Node.js ≥22 and `uvx`, asks for your TDEI environment
-(dev / stage / prod / custom URL — one per setup), picks a free local port for
-the SSO callback, and writes the `tdei` entry into your MCP client config
-(Codex / Claude Desktop / VSCode / Custom-manual). Re-run any time; only the
-`tdei` entry is touched. To move an existing setup to another environment:
+This checks Node.js ≥22 and `uvx`, offers to install `uv` when it is missing,
+asks for your TDEI environment (dev / stage / prod / custom URL — one per
+setup), verifies the MCP server, and writes the `tdei` entry into your MCP
+client config (Codex / Claude Desktop / VSCode / Custom-manual). The default
+SSO callback uses registered port 8765; if it is busy, setup stops with recovery
+instructions instead of silently choosing an unregistered callback. Re-run any
+time; only the `tdei` entry is touched and an existing client config is backed
+up before replacement. To move an existing setup to another environment:
 
 ```bash
 npx -y tdei-mcp switch base-url
@@ -47,12 +50,14 @@ Run these commands from the folder containing `package.json`:
 
 ```bash
 npm ci
-cp .env.example .env
 ```
 
-In Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
-
-`npm ci` installs the dependency versions recorded in `package-lock.json`. Create `.env` only on initial setup; copying the example again overwrites your existing configuration. Keep `.env` private; it is excluded by `.gitignore`. The callback URL must exactly match the URI registered for the `tdei-mcp` client, and its port must be free locally.
+`npm ci` installs the dependency versions recorded in `package-lock.json`.
+The recommended init flow below writes the required environment into the MCP
+client config, so it does not need a `.env` file. For the manual fallback only,
+copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell),
+edit it once, and keep it private. The callback URL must exactly match the URI
+registered for the `tdei-mcp` client, and its port must be free locally.
 
 ## 2. Build (checkout only — `init` users skip this)
 
@@ -60,11 +65,26 @@ In Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
 npm run build
 ```
 
-This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for checkout runs — `init` users already have them inline in the client config.
+This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for the manual fallback — `init` writes them inline in the client config.
 
 ## 3. Connect your MCP client
 
-Configure your client to start the connector with Node.js and explicitly load `.env`. The application does not load `.env` on its own; `npm start` and `npm run dev` use only the environment already supplied to their process.
+The recommended checkout setup uses the same verified init flow as the npm package:
+
+```bash
+node dist/index.js init --client codex --env dev
+```
+
+Use `--env stage`, `--env prod`, or `--url https://your-tdei-host` as needed.
+The command detects the checkout, verifies `dist/index.js` through MCP
+`initialize` and `tools/list`, writes a default ignored `tdei.config.json` when
+missing, backs up an existing Codex config to `config.toml.tdei.bak`, and then
+writes an absolute Node + `dist/index.js` stdio entry. Restart Codex afterward.
+
+The manual configuration below is a fallback. Configure your client to start
+the connector with Node.js and explicitly load `.env`. The application does not
+load `.env` on its own; `npm start` and `npm run dev` use only the environment
+already supplied to their process.
 
 ### Codex
 

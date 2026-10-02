@@ -1,3 +1,15 @@
+import { portInUseHint } from "../port-hint.js";
+
+export { portInUseHint };
+
+export function assertPort(value: unknown): number {
+  const port = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error(`--port must be an integer between 1024 and 65535 (got "${String(value)}")`);
+  }
+  return port;
+}
+
 export async function findFreePort(
   fromPort = 8765,
   tryPort: (port: number) => Promise<boolean> = defaultTryPort,
@@ -5,10 +17,10 @@ export async function findFreePort(
   for (let port = fromPort; port < fromPort + 100; port += 1) {
     if (await tryPort(port)) return port;
   }
-  throw new Error(`no free loopback port found starting at ${fromPort} (tried 100 ports). Stop the process holding port ${fromPort} and re-run tdei-mcp-init`);
+  throw new Error(`No free loopback port found in ${fromPort}-${fromPort + 99}. ${portInUseHint(fromPort)}`);
 }
 
-async function defaultTryPort(port: number): Promise<boolean> {
+export async function defaultTryPort(port: number): Promise<boolean> {
   const { createServer } = await import("node:net");
   return new Promise((resolve) => {
     const server = createServer();
