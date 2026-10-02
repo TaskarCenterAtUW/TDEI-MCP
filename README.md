@@ -1,6 +1,6 @@
 # TDEI-MCP
 
-Connect an MCP-compatible AI client to the TDEI API. This local server authenticates with your TDEI account, launches the AWS Labs OpenAPI MCP server, and exposes the API tools generated from the TDEI OpenAPI specification through one MCP connection.
+Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode retains the AWS Labs OpenAPI MCP server for raw API coverage. Hosted Streamable HTTP mode is a stateless Node server that calls TDEI directly with the access token supplied on every request.
 
 The default configuration uses the **TDEI development environment**. You need an account with access to that environment; downloading the repository does not create an account or grant API permissions.
 
@@ -26,7 +26,7 @@ documented under Advanced below.
 ## Requirements
 
 - **Node.js 22** and npm. Check with `node --version` and `npm --version`.
-- **uv**, which provides `uvx`. Follow the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/), then check with `uvx --version`.
+- **uv**, which provides `uvx`, for local stdio mode only. Follow the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/), then check with `uvx --version`. Hosted HTTP deployments do not need Python, uv, or the AWS child.
 - An MCP client that can launch a local **stdio** server, such as Codex. Generated API tool definitions are loaded during MCP initialization so clients see them in the initial catalogue; invoking them still requires SSO.
 - Access to TDEI through its browser-based SSO login.
 - Internet access to install dependencies, download the AWS child package and OpenAPI specification, and contact TDEI.
@@ -121,11 +121,11 @@ Example:
 
     curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer <token>" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
-Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request spawns the AWS child fresh (v1 trade-off); the child is closed after the response.
+Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request gets an ephemeral MCP server and direct TDEI HTTP adapter; no AWS child or MCP session is created.
 
 ### Docker deployment
 
-Build the image (multi-stage; ships compiled `dist/` plus Node 22, Python 3, and `uvx` for the AWS child — no source or dev dependencies):
+Build the image (multi-stage; ships compiled `dist/` plus Node 22 only—no Python, `uvx`, source, or development dependencies):
 
     docker build -t tdei-mcp:http .
 
@@ -143,7 +143,21 @@ Smoke check from the host (expect `401 TDEI_SSO_REQUIRED` — proof the server i
 
 ## 4. Verify and use the connection
 
-The connector exposes five built-in tools while signed out:
+Both transports expose the common semantic tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
+| `tdei_list_services` | List services by text, project group, or service type. |
+| `tdei_list_my_project_groups` | Reports the missing membership capability until TDEI exposes a complete current-user groups operation. |
+| `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
+| `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
+
+Hosted validation/upload accepts `inline_base64` assets up to 10MB. Client-local paths are intentionally unavailable to a remote server. Local stdio validation/upload accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token; these file mutations bypass the AWS child.
+
+The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
+
+Local stdio mode also exposes these connector-management tools while signed out:
 
 | Tool | Purpose |
 | --- | --- |
@@ -189,6 +203,8 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_API_URL` | No | `https://api-dev.tdei.us` |
 | `TDEI_SPEC_URL` | No | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
 | `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` |
+| `TDEI_GEOCODER_URL` | No | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback |
+| `TDEI_GEOCODER_USER_AGENT` | No | Identifies this connector; set an operator contact when required by the provider |
 | `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
 | `TDEI_HTTP_HOST` | No | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides) |
 | `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
@@ -225,7 +241,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | Callback port is already in use | Stop the process using port 8765, then retry login. |
 | SSO redirect returns 400 | Confirm the client ID and callback URL exactly match the backend registration. |
 | `uvx` cannot be launched / `ENOENT` | Install uv and make sure `uvx` is on the MCP client's `PATH`, then restart the client. A desktop app may have a different `PATH` from your terminal. |
-| Only the five built-in tools appear | Initial schema discovery failed. Inspect the server logs, check `uvx`, network access, and the specification URL, then restart the MCP client. |
+| Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, check `uvx`, network access, and the specification URL, then restart the MCP client. |
 | First load times out | Check network access and allow time for `uvx` downloads. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
 | URL validation fails | Ensure `TDEI_API_URL` and `TDEI_SPEC_URL` are valid absolute URLs beginning with `https://`. |

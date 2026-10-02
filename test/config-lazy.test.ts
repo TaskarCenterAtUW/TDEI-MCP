@@ -44,6 +44,25 @@ test("valid env yields ok:true with defaults", () => {
   });
 });
 
+test("optional geocoder configuration requires HTTPS and preserves identity", () => {
+  withEnv({
+    TDEI_GEOCODER_URL: "https://geo.example.test/search",
+    TDEI_GEOCODER_USER_AGENT: "tdei-mcp/example-contact",
+  }, () => {
+    const result = loadConfig();
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.config.geocoderUrl, "https://geo.example.test/search");
+    assert.equal(result.config.geocoderUserAgent, "tdei-mcp/example-contact");
+  });
+  withEnv({ TDEI_GEOCODER_URL: "http://geo.example.test/search" }, () => {
+    const result = loadConfig();
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.ok(result.errors.some((error) => error.var === "TDEI_GEOCODER_URL"));
+  });
+});
+
 test("getConfig throws TdeiConfigError carrying errors", () => {
   withEnv({ TDEI_HTTP_PORT: "banana" }, () => {
     assert.throws(() => getConfig(), (error: unknown) => {

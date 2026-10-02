@@ -15,6 +15,11 @@ import { registerAwsTools } from "./aws/register-aws-tools.js";
 import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
+import { AwsTdeiOperations } from "./adapters/aws-tdei-operations.js";
+import { registerSemanticTools } from "./intents/register-tools.js";
+import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
+import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
+import { DirectMultipartTdeiMutations } from "./adapters/direct-multipart-tdei-mutations.js";
 
 export interface HealthProbes {
   fetchImpl?: typeof fetch;
@@ -139,6 +144,19 @@ export async function createServer(
     awsClient,
     dependencies.registerAwsTools,
   );
+  const semanticModule = new SemanticIntentModule({
+    operations: new AwsTdeiOperations(
+      (tool, input) => awsToolsLifecycle.callTool(tool, input),
+      (tool) => awsToolsLifecycle.isDenied(tool),
+      new DirectMultipartTdeiMutations({
+        baseUrl: getConfig().apiUrl,
+        tokenProvider: () => auth.getAccessToken(),
+        allowedAssetKinds: new Set(["local_path"]),
+      }),
+    ),
+    places: createConfiguredPlaceResolver(getConfig()),
+  });
+  registerSemanticTools(server, semanticModule);
 
   server.registerTool(
     "tdei_sso_login",

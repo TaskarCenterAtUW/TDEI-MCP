@@ -85,6 +85,7 @@ export class AwsToolsLifecycle {
     string,
     { description?: string | undefined; inputSchema: unknown }
   >();
+  private denied = new Set<string>();
 
   constructor(
     private readonly server: McpServer,
@@ -177,6 +178,7 @@ export class AwsToolsLifecycle {
     }
 
     const denied = deniedFor(effectiveFilter, discoveredNames);
+    this.denied = denied;
     // Workflow steps route through the version gate too. This closure only
     // fires post-load (when MCP clients invoke workflow tools and the
     // serialize() queue is idle), so it cannot self-deadlock.
@@ -218,6 +220,10 @@ export class AwsToolsLifecycle {
 
   isLoaded(): boolean {
     return this.state === "loaded";
+  }
+
+  isDenied(tool: string): boolean {
+    return this.denied.has(tool);
   }
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {

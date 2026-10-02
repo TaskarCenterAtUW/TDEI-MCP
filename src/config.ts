@@ -29,6 +29,8 @@ export interface ResolvedConfig {
   tlsCert: string | undefined;
   tlsKey: string | undefined;
   awsMcpPackage: string;
+  geocoderUrl: string | undefined;
+  geocoderUserAgent: string;
 }
 
 export class TdeiConfigError extends Error {
@@ -124,6 +126,18 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   const port = readHttpPort();
   if ("error" in port) errors.push(port.error);
 
+  let geocoderUrl: string | undefined;
+  const rawGeocoderUrl = process.env.TDEI_GEOCODER_URL?.trim();
+  if (rawGeocoderUrl) {
+    const geocoder = readHttpsUrl(
+      "TDEI_GEOCODER_URL",
+      rawGeocoderUrl,
+      "https://nominatim.example.org/search",
+    );
+    if ("error" in geocoder) errors.push(geocoder.error);
+    else geocoderUrl = geocoder.value;
+  }
+
   // Skip the callback check when transport itself is invalid (one error, not two).
   if (!("error" in transport)) {
     const callbackError = checkSsoCallbackUrl(
@@ -154,6 +168,9 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
       tlsCert: process.env.TDEI_TLS_CERT?.trim() || undefined,
       tlsKey: process.env.TDEI_TLS_KEY?.trim() || undefined,
       awsMcpPackage: process.env.TDEI_AWS_MCP_PACKAGE?.trim() || DEFAULT_AWS_MCP_PACKAGE,
+      geocoderUrl,
+      geocoderUserAgent: process.env.TDEI_GEOCODER_USER_AGENT?.trim() ||
+        "tdei-mcp/0.1 (https://github.com/TaskarCenterAtUW/TDEI-MCP)",
     },
   };
 }

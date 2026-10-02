@@ -162,7 +162,7 @@ test("http.ts import has no side effects on singletons", async () => {
 });
 
 test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
-  const handle = await serveHttp({ createAwsClient: () => { throw new Error("must not spawn"); } }, { port: TEST_PORT });
+  const handle = await serveHttp({}, { port: TEST_PORT });
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(response.status, 401);
@@ -175,8 +175,7 @@ test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
   }
 });
 
-test("POST /mcp with bad bearer returns 401 without spawning child", async () => {
-  let spawned = 0;
+test("POST /mcp with bad bearer returns 401 before creating an MCP server", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -186,15 +185,12 @@ test("POST /mcp with bad bearer returns 401 without spawning child", async () =>
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
   try {
-    const handle = await serveHttp({
-      createAwsClient: () => { spawned += 1; throw new Error("must not spawn"); },
-    }, { port: TEST_PORT });
+    const handle = await serveHttp({}, { port: TEST_PORT });
     try {
       const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
       assert.equal(response.status, 401);
       const body = (await response.json()) as Record<string, unknown>;
       assert.equal(body.code, "TDEI_TOKEN_INVALID");
-      assert.equal(spawned, 0);
     } finally {
       await handle.close();
     }
@@ -203,7 +199,7 @@ test("POST /mcp with bad bearer returns 401 without spawning child", async () =>
   }
 });
 
-test("good bearer serves tools/list and calls; bearers isolated", async () => {
+test("good bearer serves semantic tools and request bearers stay isolated", async () => {
   const originalFetch = globalThis.fetch;
   const seenTokens: string[] = [];
   globalThis.fetch = (async (input: unknown, init?: { headers?: Record<string, string> } & RequestInit) => {
@@ -215,22 +211,15 @@ test("good bearer serves tools/list and calls; bearers isolated", async () => {
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
   try {
-    const closed: string[] = [];
-    const handle = await serveHttp({
-      createAwsClient: (token: string) => {
-        const stub = new StubAwsMcpClient(async () => token);
-        const origClose = stub.close.bind(stub);
-        stub.close = async () => { closed.push(token); await origClose(); };
-        return stub as unknown as AwsMcpClient;
-      },
-    }, { port: TEST_PORT });
+    const handle = await serveHttp({}, { port: TEST_PORT });
     try {
       const list = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "good-A");
       assert.equal(list.status, 200);
+      assert.match(await list.text(), /tdei_find_datasets/);
       const second = await postMcp(`${handle.url}/mcp`, mcpBody(2, "tools/list"), "good-B");
       assert.equal(second.status, 200);
+      assert.match(await second.text(), /tdei_list_services/);
       assert.deepEqual(seenTokens, ["Bearer good-A", "Bearer good-B"]);
-      assert.deepEqual(closed, ["good-A", "good-B"]);
     } finally {
       await handle.close();
     }

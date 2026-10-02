@@ -3,11 +3,11 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { getConfig, TdeiConfigError } from "./config.js";
 import { injectAccessToken } from "./auth/auth-manager.js";
-import { AwsMcpClient } from "./aws/aws-mcp-client.js";
-import { createServer, type ServerDependencies } from "./server.js";
+import { createHttpSemanticServer } from "./http-semantic-server.js";
+import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
+import type { PlaceResolver } from "./intents/place-resolver.js";
 
 export interface HttpServeOptions {
-  createAwsClient?: (token: string) => AwsMcpClient;
   fetchImpl?: typeof fetch;
 }
 
@@ -17,8 +17,8 @@ export interface HttpServeOverrides {
 }
 
 interface ResolvedHttpOptions {
-  createAwsClient: (token: string) => AwsMcpClient;
   fetchImpl: typeof fetch | undefined;
+  places: PlaceResolver;
 }
 
 function buildLoginUrl(): string {
@@ -26,13 +26,6 @@ function buildLoginUrl(): string {
   loginUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
   loginUrl.searchParams.set("client_id", getConfig().ssoClientId);
   return loginUrl.toString();
-}
-
-function buildLogoutUrl(): string {
-  const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
-  logoutUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
-  logoutUrl.searchParams.set("client_id", getConfig().ssoClientId);
-  return logoutUrl.toString();
 }
 
 function sendJson(response: ServerResponse, status: number, data: unknown): void {
@@ -160,56 +153,33 @@ async function handleMcpRequest(
     globalThis.fetch = originalFetch;
   }
 
-  // Stateless adapters: same tool surface, but never open a loopback
-  // listener in HTTP mode. getAccessToken() on the ephemeral manager returns
-  // the injected Bearer while unexpired, else throws TDEI_SSO_REQUIRED (it
-  // holds no refresh token, so it never refreshes — correct statelessly).
-  const httpAuth: ServerDependencies["authManager"] = {
-    getStatus: () => ephemeralAuth.getStatus(),
-    getAccessToken: () => ephemeralAuth.getAccessToken(),
-    getTokenVersion: () => ephemeralAuth.getTokenVersion(),
-    startSsoLogin: async () => ({
-      loginUrl: buildLoginUrl(),
-      callbackUrl: getConfig().ssoCallbackUrl,
-      completion: Promise.resolve(),
-    }),
-    logout: async () => ({
-      logoutUrl: buildLogoutUrl(),
-      callbackUrl: getConfig().ssoCallbackUrl,
-      completion: Promise.resolve(),
-    }),
-  };
-  const awsClient = options.createAwsClient(bearer);
+  const server = createHttpSemanticServer({
+    accessToken: bearer,
+    apiUrl: getConfig().apiUrl,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    places: options.places,
+  });
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
-    const server = await createServer({
-      authManager: httpAuth,
-      awsMcpClient: awsClient,
-      registerAwsTools: (await import("./aws/register-aws-tools.js")).registerAwsTools,
-    });
-    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);
-    try {
-      const bodyText = request.method === "GET" || request.method === "HEAD" ? "" : await readBody(request);
-      let parsed: unknown;
-      if (bodyText) {
-        try {
-          parsed = JSON.parse(bodyText);
-        } catch {
-          sendJson(response, 400, { code: "TDEI_BAD_REQUEST", message: "Request body must be JSON." });
-          return;
-        }
+    const bodyText = request.method === "GET" || request.method === "HEAD" ? "" : await readBody(request);
+    let parsed: unknown;
+    if (bodyText) {
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        sendJson(response, 400, { code: "TDEI_BAD_REQUEST", message: "Request body must be JSON." });
+        return;
       }
-      const webResponse = await transport.handleRequest(
-        toWebRequest(request, bodyText, host),
-        parsed === undefined ? undefined : { parsedBody: parsed },
-      );
-      await sendWebResponse(response, webResponse);
-    } finally {
-      await transport.close().catch(() => undefined);
     }
-    await server.close().catch(() => undefined);
+    const webResponse = await transport.handleRequest(
+      toWebRequest(request, bodyText, host),
+      parsed === undefined ? undefined : { parsedBody: parsed },
+    );
+    await sendWebResponse(response, webResponse);
   } finally {
-    await awsClient.close().catch(() => undefined);
+    await transport.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
   }
 }
 
@@ -217,10 +187,6 @@ export async function serveHttp(
   options: HttpServeOptions = {},
   overrides: HttpServeOverrides = {},
 ): Promise<{ close(): Promise<void>; url: string }> {
-  const resolved: ResolvedHttpOptions = {
-    createAwsClient: options.createAwsClient ?? ((token: string) => new AwsMcpClient(async () => token)),
-    fetchImpl: options.fetchImpl,
-  };
   let httpConfig;
   try {
     httpConfig = getConfig();
@@ -231,6 +197,10 @@ export async function serveHttp(
     }));
     process.exit(1);
   }
+  const resolved: ResolvedHttpOptions = {
+    fetchImpl: options.fetchImpl,
+    places: createConfiguredPlaceResolver(httpConfig, options.fetchImpl),
+  };
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;
   const basePath = httpConfig.httpBasePath;
