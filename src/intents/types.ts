@@ -72,6 +72,19 @@ export interface ListServicesData {
   appliedFilters: ListServicesInput;
 }
 
+export interface ListProjectGroupsInput {
+  searchText?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListProjectGroupsData {
+  projectGroups: ProjectGroup[];
+  appliedFilters: ListProjectGroupsInput;
+  accessScope: "authenticated_user";
+  scopeExplanation: string;
+}
+
 export type DatasetAsset =
   | { kind: "local_path"; path: string; name?: string }
   | {

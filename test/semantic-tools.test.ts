@@ -12,6 +12,9 @@ test("common semantic tools are discoverable and callable", async () => {
     operations: {
       async searchDatasets() { return []; },
       async listServices() { return []; },
+      async listProjectGroups() {
+        return [{ tdei_project_group_id: "group-1", name: "Accessible Seattle" }];
+      },
     },
     places: {
       async forwardGeocode() { return []; },
@@ -45,7 +48,10 @@ test("common semantic tools are discoverable and callable", async () => {
     });
     const first = membership.content[0];
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
-    assert.equal(body.status, "unsupported");
+    assert.equal(body.status, "complete");
+    assert.equal(body.data.accessScope, "authenticated_user");
+    assert.match(body.data.scopeExplanation, /authenticated TDEI login/i);
+    assert.equal(body.data.projectGroups[0].tdei_project_group_id, "group-1");
 
     const upload = await client.callTool({
       name: "tdei_upload_dataset",

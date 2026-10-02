@@ -192,7 +192,7 @@ Both transports expose the common semantic tools:
 | --- | --- |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
 | `tdei_list_services` | List services by text, project group, or service type. |
-| `tdei_list_my_project_groups` | Reports the missing membership capability until TDEI exposes a complete current-user groups operation. |
+| `tdei_list_my_project_groups` | Lists project groups available to the authenticated TDEI login via `listProjectGroups` / `GET /api/v1/project-groups`. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
 

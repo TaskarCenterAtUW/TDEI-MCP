@@ -65,3 +65,23 @@ test("AWS adapter maps service filters", async () => {
   }]);
   assert.deepEqual(services, [{ tdei_service_id: "service-1" }]);
 });
+
+test("AWS adapter maps authenticated project-group listing", async () => {
+  const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
+  const adapter = new AwsTdeiOperations(async (tool, input) => {
+    calls.push({ tool, input });
+    return [{ tdei_project_group_id: "group-1" }];
+  });
+
+  const groups = await adapter.listProjectGroups({
+    searchText: "Seattle",
+    page: 1,
+    pageSize: 50,
+  }, {});
+
+  assert.deepEqual(calls, [{
+    tool: "listProjectGroups",
+    input: { searchText: "Seattle", page_no: 1, page_size: 50 },
+  }]);
+  assert.deepEqual(groups, [{ tdei_project_group_id: "group-1" }]);
+});

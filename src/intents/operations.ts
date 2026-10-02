@@ -7,6 +7,8 @@ import type {
   DatasetStatus,
   RequestContext,
   TdeiService,
+  ProjectGroup,
+  ListProjectGroupsInput,
 } from "./types.js";
 
 export interface DatasetSearch {
@@ -39,6 +41,10 @@ export interface TdeiOperations {
     input: ServiceSearch,
     context: RequestContext,
   ): Promise<TdeiService[]>;
+  listProjectGroups(
+    input: Required<Pick<ListProjectGroupsInput, "page" | "pageSize">> & Pick<ListProjectGroupsInput, "searchText">,
+    context: RequestContext,
+  ): Promise<ProjectGroup[]>;
   validateDataset?(
     input: { dataType: DataType; asset: DatasetAsset },
     context: RequestContext,

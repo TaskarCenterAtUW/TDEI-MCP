@@ -28,6 +28,12 @@ const listServicesSchema = z.object({
   pageSize: z.number().int().min(1).max(50).optional(),
 });
 
+const listProjectGroupsSchema = z.object({
+  searchText: z.string().trim().min(1).optional(),
+  page: z.number().int().min(1).optional(),
+  pageSize: z.number().int().min(1).max(50).optional(),
+});
+
 const assetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("local_path"),
@@ -118,9 +124,15 @@ export function registerSemanticTools(
     "tdei_list_my_project_groups",
     {
       description: SEMANTIC_TOOL_DESCRIPTIONS.listMyProjectGroups,
-      inputSchema: z.object({}).shape,
+      inputSchema: listProjectGroupsSchema.shape,
     },
-    async () => jsonIntentResult(await module.listMyProjectGroups()),
+    async (args) => {
+      try {
+        return jsonIntentResult(await module.listMyProjectGroups(args, contextProvider()));
+      } catch (error) {
+        return formatError(error);
+      }
+    },
   );
 
   register(

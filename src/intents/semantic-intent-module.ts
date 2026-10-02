@@ -6,6 +6,8 @@ import type {
   IntentResult,
   ListServicesData,
   ListServicesInput,
+  ListProjectGroupsData,
+  ListProjectGroupsInput,
   RequestContext,
   AcceptedJob,
   UploadDatasetInput,
@@ -162,11 +164,23 @@ export class SemanticIntentModule {
     };
   }
 
-  async listMyProjectGroups(): Promise<IntentResult<never>> {
+  async listMyProjectGroups(
+    input: ListProjectGroupsInput = {},
+    context: RequestContext = {},
+  ): Promise<IntentResult<ListProjectGroupsData>> {
+    const appliedFilters = {
+      ...(input.searchText ? { searchText: input.searchText } : {}),
+      page: Math.max(input.page ?? 1, 1),
+      pageSize: Math.min(Math.max(input.pageSize ?? 50, 1), 50),
+    };
     return {
-      status: "unsupported",
-      reason: "The published TDEI API can list all project groups but cannot list only the authenticated user's memberships.",
-      requiredCapability: "GET /api/v1/me/project-groups or GET /api/v1/project-groups?include_my_groups=true",
+      status: "complete",
+      data: {
+        projectGroups: await this.dependencies.operations.listProjectGroups(appliedFilters, context),
+        appliedFilters,
+        accessScope: "authenticated_user",
+        scopeExplanation: "These are all project groups available to your authenticated TDEI login.",
+      },
     };
   }
 
