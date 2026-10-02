@@ -123,6 +123,7 @@ export interface ServerDependencies {
     "callTool" | "close" | "listTools" | "isConnected"
   >;
   registerAwsTools: typeof registerAwsTools;
+  binaryDownloads?: Pick<BinaryTdeiDownloads, "download">;
 }
 
 export async function createServer(
@@ -144,10 +145,11 @@ export async function createServer(
     auth,
     awsClient,
     dependencies.registerAwsTools,
-    new BinaryTdeiDownloads({
-      baseUrl: getConfig().apiUrl,
-      tokenProvider: () => auth.getAccessToken(),
-    }),
+    dependencies.binaryDownloads ??
+      new BinaryTdeiDownloads({
+        baseUrl: getConfig().apiUrl,
+        tokenProvider: () => auth.getAccessToken(),
+      }),
   );
   const semanticModule = new SemanticIntentModule({
     operations: new AwsTdeiOperations(
