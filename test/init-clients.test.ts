@@ -17,6 +17,16 @@ test("server entry launches its build with absolute Node", () => {
   assert.deepEqual(entry.args, ["/project/dist/index.js"]);
 });
 
+test("server entry loads an absolute environment file before its build", () => {
+  const entry = buildServerEntry(
+    "/usr/bin/node",
+    { PATH: "/usr/bin" },
+    "/project/dist/index.js",
+    "/project/.env.dev",
+  );
+  assert.deepEqual(entry.args, ["--env-file=/project/.env.dev", "/project/dist/index.js"]);
+});
+
 test("codex writer upserts tdei block, reader finds env", () => {
   const entry = buildServerEntry("/usr/bin/node", ENV, "/project/dist/index.js");
   const first = writeCodexEntry("", entry, ENV);

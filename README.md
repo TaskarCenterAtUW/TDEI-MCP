@@ -81,6 +81,29 @@ The command detects the checkout, verifies `dist/index.js` through MCP
 missing, backs up an existing Codex config to `config.toml.tdei.bak`, and then
 writes an absolute Node + `dist/index.js` stdio entry. Restart Codex afterward.
 
+To keep separate source-checkout settings for each environment, create three
+ignored local files from the example:
+
+```bash
+cp .env.example .env.dev
+cp .env.example .env.staging
+cp .env.example .env.prod
+```
+
+Set `TDEI_API_URL` to `https://api-dev.tdei.us`,
+`https://api-stage.tdei.us`, and `https://api.tdei.us`, respectively. Keep
+`TDEI_TRANSPORT=stdio` and the public `TDEI_SPEC_URL` from `.env.example`.
+Then select the file Codex should use:
+
+```bash
+node dist/index.js init --client codex --env-file .env.dev
+```
+
+The generated entry stores the absolute file path and launches Node with
+`--env-file` before `dist/index.js`. To change environments, rerun `init` with
+`.env.staging` or `.env.prod`, then restart Codex. The `.env.*` files are
+excluded by `.gitignore`; do not commit them.
+
 The manual configuration below is a fallback. Configure your client to start
 the connector with Node.js and explicitly load `.env`. The application does not
 load `.env` on its own; `npm start` and `npm run dev` use only the environment

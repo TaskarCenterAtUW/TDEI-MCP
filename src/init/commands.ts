@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parseEnv } from "node:util";
 import { DEFAULT_CONFIG_JSON } from "../config-file.js";
-import { DEFAULT_SPEC_URL, assertCallbackUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
+import { DEFAULT_SPEC_URL, assertCallbackUrl, assertHttpsUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
 import { checkPreflight, type ExecFn } from "./preflight.js";
 import { assertPort, defaultTryPort, portInUseHint } from "./ports.js";
 import { verifyServer } from "./verify.js";
@@ -67,6 +68,41 @@ async function scaffoldConfig(
   deps.log(`wrote default ${path} (all endpoints enabled, no workflows)`);
 }
 
+async function loadEnvironmentFile(
+  deps: Deps,
+  path: string,
+): Promise<{ values: Record<string, string>; apiUrl: string; callbackUrl: string; port: number }> {
+  if (!isAbsolute(path)) {
+    throw new Error(`--env-file must resolve to an absolute path (received ${path})`);
+  }
+  let source: string;
+  try {
+    source = await deps.readFile(path);
+  } catch (error) {
+    throw new Error(`cannot read --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let values: Record<string, string>;
+  try {
+    values = Object.fromEntries(
+      Object.entries(parseEnv(source)).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    );
+  } catch (error) {
+    throw new Error(`invalid --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!values["TDEI_API_URL"]?.trim()) {
+    throw new Error(`--env-file ${path} must define TDEI_API_URL`);
+  }
+  if (values["TDEI_TRANSPORT"] && values["TDEI_TRANSPORT"].trim().toLowerCase() !== "stdio") {
+    throw new Error(`--env-file ${path} must use TDEI_TRANSPORT=stdio for an MCP client setup`);
+  }
+  const apiUrl = resolveApiUrl({ url: values["TDEI_API_URL"] });
+  if (values["TDEI_SPEC_URL"]) assertHttpsUrl(values["TDEI_SPEC_URL"], "TDEI_SPEC_URL");
+  const callbackUrl = assertCallbackUrl(values["TDEI_SSO_CALLBACK_URL"] ?? buildCallbackUrl(8765));
+  return { values, apiUrl, callbackUrl, port: Number(new URL(callbackUrl).port) };
+}
+
 export const VERIFY_PROMPT = "Verify: Call tdei_sso_login and give me the loginUrl. After browser login, check tdei_auth_status and call listServices.";
 
 function clientPaths(client: ClientName, home: string, cwd: string): string {
@@ -115,9 +151,13 @@ export async function runInit(
     cwd?: string;
     local?: LocalCheckout;
     installUv?: boolean;
+    envFile?: string;
   },
 ): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
   if (opts.client !== undefined) assertClient(opts.client);
+  if (opts.envFile && (opts.env || opts.url || opts.port !== undefined)) {
+    throw new Error("--env-file cannot be combined with --env, --url, or --port");
+  }
   const nodeExecPath = opts.nodePath ?? process.execPath;
   const confirmInstall = opts.installUv === undefined
     ? deps.prompter.confirm
@@ -129,28 +169,44 @@ export async function runInit(
     log: deps.log,
     ...(confirmInstall ? { confirmInstall } : {}),
   });
-  const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
-  const apiUrl = resolveApiUrl(choice);
-  const port = assertPort(opts.port ?? 8765);
+  const fileEnvironment = opts.envFile
+    ? await loadEnvironmentFile(deps, opts.envFile)
+    : undefined;
+  const choice = fileEnvironment
+    ? undefined
+    : opts.env ?? opts.url
+      ? { env: opts.env, url: opts.url }
+      : await deps.prompter.chooseEnv();
+  const apiUrl = fileEnvironment?.apiUrl ?? resolveApiUrl(choice ?? {});
+  const port = assertPort(fileEnvironment?.port ?? opts.port ?? 8765);
   if (!(await (deps.isPortFree ?? defaultTryPort)(port))) {
     throw new Error(`${portInUseHint(port)} Use another port only if its callback URI is registered with SSO.`);
   }
-  const callbackUrl = assertCallbackUrl(buildCallbackUrl(port));
+  const callbackUrl = fileEnvironment?.callbackUrl ?? assertCallbackUrl(buildCallbackUrl(port));
   const client = opts.client ?? (await deps.prompter.chooseClient());
   const home = opts.home ?? process.env.HOME ?? "";
-  const tdeiConfigPath = configPath(opts.local, home);
-  const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "",
-    TDEI_API_URL: apiUrl,
-    TDEI_SPEC_URL: DEFAULT_SPEC_URL,
-    TDEI_SSO_CLIENT_ID: "tdei-mcp",
-    TDEI_SSO_CALLBACK_URL: callbackUrl,
-    TDEI_CONFIG_PATH: tdeiConfigPath,
-  };
+  const defaultConfigPath = configPath(opts.local, home);
+  const tdeiConfigPath = fileEnvironment?.values["TDEI_CONFIG_PATH"]
+    ? resolve(opts.local?.root ?? opts.cwd ?? process.cwd(), fileEnvironment.values["TDEI_CONFIG_PATH"])
+    : defaultConfigPath;
+  const env: Record<string, string> = fileEnvironment
+    ? {
+        PATH: process.env.PATH ?? "",
+        ...(fileEnvironment.values["TDEI_CONFIG_PATH"] ? {} : { TDEI_CONFIG_PATH: tdeiConfigPath }),
+      }
+    : {
+        PATH: process.env.PATH ?? "",
+        TDEI_API_URL: apiUrl,
+        TDEI_SPEC_URL: DEFAULT_SPEC_URL,
+        TDEI_SSO_CLIENT_ID: "tdei-mcp",
+        TDEI_SSO_CALLBACK_URL: callbackUrl,
+        TDEI_CONFIG_PATH: tdeiConfigPath,
+      };
   const entry = buildServerEntry(
     nodeExecPath,
     env,
     opts.local?.indexPath ?? opts.serverPath ?? fileURLToPath(new URL("../index.js", import.meta.url)),
+    opts.envFile,
   );
   await scaffoldConfig(deps, tdeiConfigPath, opts.local);
   await (deps.verify ?? verifyServer)(entry);
@@ -196,6 +252,9 @@ export async function runSwitch(
   const apiUrl = resolveApiUrl(choice);
   if (!existing.command || !existing.args?.length) {
     throw new Error("existing launch configuration is incomplete; run init again");
+  }
+  if (existing.args.some((argument) => argument.startsWith("--env-file="))) {
+    throw new Error('this MCP entry uses --env-file; select another file by re-running "tdei-mcp init --client <client> --env-file <path>"');
   }
   const specUrl = existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== DEFAULT_SPEC_URL
     ? existing.env["TDEI_SPEC_URL"]!

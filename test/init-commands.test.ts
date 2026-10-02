@@ -35,6 +35,61 @@ test("runInit writes codex entry end to end", async () => {
   assert.match(logs.join("\n"), /tdei_sso_login/);
 });
 
+test("runInit configures Codex to launch with the selected environment file", async () => {
+  const envFile = [
+    "TDEI_API_URL=https://api-dev.tdei.us",
+    "TDEI_SPEC_URL=https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
+    "TDEI_SSO_CLIENT_ID=tdei-mcp",
+    "TDEI_SSO_CALLBACK_URL=http://127.0.0.1:8765/callback",
+    "TDEI_TRANSPORT=stdio",
+    "",
+  ].join("\n");
+  const fs = memFs({ "/repo/.env.dev": envFile });
+  let verifiedEntry: { args: string[]; env: Record<string, string> } | undefined;
+  const d = {
+    ...deps(fs, {
+      chooseEnv: async () => { throw new Error("environment prompt should not run"); },
+      chooseClient: async () => "codex" as const,
+    }),
+    verify: async (entry: { args: string[]; env: Record<string, string> }) => { verifiedEntry = entry; },
+  };
+
+  const summary = await runInit(d as never, {
+    client: "codex",
+    envFile: "/repo/.env.dev",
+    home: "/h",
+    local: { root: "/repo", indexPath: "/repo/dist/index.js" },
+    nodePath: "/usr/bin/node",
+  } as never);
+
+  assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
+  assert.equal(summary.callbackUrl, "http://127.0.0.1:8765/callback");
+  assert.deepEqual(verifiedEntry?.args, ["--env-file=/repo/.env.dev", "/repo/dist/index.js"]);
+  assert.equal(verifiedEntry?.env.TDEI_API_URL, undefined);
+  const toml = fs.files.get("/h/.codex/config.toml") ?? "";
+  assert.match(toml, /--env-file=\/repo\/\.env\.dev/);
+  assert.doesNotMatch(toml, /TDEI_API_URL/);
+  await assert.rejects(
+    runSwitch(d as never, { client: "codex", env: "stage", home: "/h" }),
+    /uses --env-file/,
+  );
+});
+
+test("runInit rejects conflicting env-file selection flags", async () => {
+  const fs = memFs({ "/repo/.env.dev": "TDEI_API_URL=https://api-dev.tdei.us\n" });
+  await assert.rejects(
+    runInit(deps(fs, {}) as never, {
+      client: "codex",
+      env: "dev",
+      envFile: "/repo/.env.dev",
+      home: "/h",
+      serverPath: "/repo/dist/index.js",
+      nodePath: "/usr/bin/node",
+    } as never),
+    /--env-file cannot be combined with --env, --url, or --port/,
+  );
+});
+
 test("runInit custom prints manual and writes nothing", async () => {
   const fs = memFs();
   const summary = await runInit(deps(fs, { chooseEnv: async () => ({ url: "https://example.com/" }), chooseClient: async () => "custom" as const }) as never, { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 9999 });

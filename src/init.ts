@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { runInit, runSwitch, type LocalCheckout } from "./init/commands.js";
@@ -23,7 +23,7 @@ function detectCheckout(): LocalCheckout | undefined {
 function usage(): string {
   return [
     "Usage:",
-    "  tdei-mcp init [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode|custom] [--port <n>] [--install-uv|--no-install-uv]",
+    "  tdei-mcp init [--env dev|stage|prod | --url <https-url> | --env-file <path>] [--client codex|claude|vscode|custom] [--port <n>] [--install-uv|--no-install-uv]",
     "  tdei-mcp switch base-url [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode]",
     "",
     "First setup: tdei-mcp init. Change environment: tdei-mcp switch base-url.",
@@ -81,7 +81,7 @@ const depsBase = {
 try {
   if (sub === "init" || sub === "switch") {
     const flags = sub === "switch" ? rest.slice(1) : rest;
-    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port"] : [])]);
+    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port", "--env-file"] : [])]);
     for (let index = 0; index < flags.length; index += 1) {
       if (sub === "init" && ["--install-uv", "--no-install-uv"].includes(flags[index] as string)) continue;
       if (!valued.has(flags[index] as string)) throw new Error(`unknown option ${flags[index]}; run tdei-mcp --help`);
@@ -98,6 +98,7 @@ try {
       const envFlag = flag(rest, "--env");
       const urlFlag = flag(rest, "--url");
       const clientFlag = flag(rest, "--client");
+      const envFileFlag = flag(rest, "--env-file");
       const local = detectCheckout();
       let serverPath = fileURLToPath(new URL("./index.js", import.meta.url));
       if (serverPath.split(/[\\/]/).includes("_npx")) {
@@ -115,6 +116,7 @@ try {
         serverPath,
         ...(envFlag ? { env: envFlag } : {}),
         ...(urlFlag ? { url: urlFlag } : {}),
+        ...(envFileFlag ? { envFile: resolve(envFileFlag) } : {}),
         ...(clientFlag ? { client: clientFlag as ClientName } : {}),
         ...(portFlag === undefined ? {} : { port: assertPort(portFlag) }),
         ...(rest.includes("--install-uv")

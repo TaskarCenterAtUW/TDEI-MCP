@@ -15,10 +15,11 @@ export function buildServerEntry(
   nodePath: string,
   env: Record<string, string>,
   serverPath: string,
+  envFile?: string,
 ): ServerEntry {
   return {
     command: nodePath,
-    args: [serverPath],
+    args: [...(envFile ? [`--env-file=${envFile}`] : []), serverPath],
     cwd: dirname(dirname(serverPath)),
     env: { ...env },
   };
