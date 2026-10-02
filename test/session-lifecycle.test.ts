@@ -62,6 +62,10 @@ test("SSO login loads API tools and supports calls and logout", async () => {
           completion: completion.then(() => { authenticated = true; }),
         };
       },
+      async completeSsoLogin(callbackUrl: string) {
+        assert.match(callbackUrl, /^http:\/\/127\.0\.0\.1:8765\/callback\?/);
+        completeLogin();
+      },
       async getAccessToken() {
         if (!authenticated) throw new Error("TDEI_SSO_REQUIRED");
         return "test-token";
@@ -101,7 +105,11 @@ test("SSO login loads API tools and supports calls and logout", async () => {
 
     const login = await client.callTool({ name: "tdei_sso_login", arguments: {} });
     assert.match(login.content[0]?.type === "text" ? login.content[0].text : "", /loginUrl/);
-    completeLogin();
+    const completion = await client.callTool({
+      name: "tdei_sso_complete",
+      arguments: { callbackUrl: "http://127.0.0.1:8765/callback?code=test&state=test" },
+    });
+    assert.match(completion.content[0]?.type === "text" ? completion.content[0].text : "", /completed/);
 
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {
@@ -141,6 +149,7 @@ test("signed-out server remains available for SSO login", async () => {
           completion: neverCompletes,
         };
       },
+      async completeSsoLogin() { throw new Error("No TDEI SSO login is pending"); },
       async getAccessToken() { throw new Error("TDEI_SSO_REQUIRED"); },
       getStatus: signedOutStatus,
       getTokenVersion: () => 1,

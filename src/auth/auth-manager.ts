@@ -14,6 +14,7 @@ const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface PendingLogin extends SsoLoginStart {
   server: Server;
+  resolve: () => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
@@ -32,6 +33,7 @@ export class AuthManager {
   private pendingLogin: PendingLogin | undefined;
   private pendingLogout: PendingLogout | undefined;
   private refreshPromise: Promise<void> | undefined;
+  private loginExchangePromise: Promise<void> | undefined;
 
   getTokenVersion(): number {
     return this.tokenVersion;
@@ -71,7 +73,6 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
-    let exchanging = false;
     const server = createServer(async (request, response) => {
       const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
@@ -80,38 +81,13 @@ export class AuthManager {
         response.end("Not found");
         return;
       }
-      if (exchanging) {
-        response.writeHead(409, { "Content-Type": "text/plain" });
-        response.end("TDEI SSO login is already being completed.");
-        return;
-      }
-      exchanging = true;
-
       try {
-        const providerError = requestUrl.searchParams.get("error");
-        if (providerError) throw new Error(`TDEI SSO failed: ${providerError}`);
-
-        const code = requestUrl.searchParams.get("code");
-        const state = requestUrl.searchParams.get("state");
-        if (!code || !state) {
-          throw new Error("TDEI SSO callback is missing code or state");
-        }
-
-        const tokens = await this.requestTokens(
-          "/api/v1/sso-login",
-          { code, state, clientId: getConfig().ssoClientId },
-          "TDEI SSO login",
-        );
-        this.storeTokens(tokens);
-        this.finishPendingLogin();
-        resolveCompletion();
+        await this.completeSsoLogin(requestUrl.toString());
 
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
       } catch (error) {
         const loginError = error instanceof Error ? error : new Error(String(error));
-        this.finishPendingLogin();
-        rejectCompletion(loginError);
         response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
         response.end(loginError.message);
       }
@@ -152,10 +128,47 @@ export class AuthManager {
       callbackUrl: callbackUrl.toString(),
       completion,
       server,
+      resolve: resolveCompletion,
       reject: rejectCompletion,
       timeout,
     };
     return this.publicLogin(this.pendingLogin);
+  }
+
+  async completeSsoLogin(callback: string): Promise<void> {
+    const pending = this.pendingLogin;
+    if (!pending) throw new Error("No TDEI SSO login is pending");
+
+    const expected = new URL(getConfig().ssoCallbackUrl);
+    const received = new URL(callback);
+    if (received.origin !== expected.origin || received.pathname !== expected.pathname) {
+      throw new Error("TDEI SSO callback URL does not match the configured callback");
+    }
+
+    const providerError = received.searchParams.get("error");
+    if (providerError) throw new Error(`TDEI SSO failed: ${providerError}`);
+    const code = received.searchParams.get("code");
+    const state = received.searchParams.get("state");
+    if (!code || !state) throw new Error("TDEI SSO callback is missing code or state");
+
+    if (this.loginExchangePromise) return this.loginExchangePromise;
+    this.loginExchangePromise = this.requestTokens(
+      "/api/v1/sso-login",
+      { code, state, clientId: getConfig().ssoClientId },
+      "TDEI SSO login",
+    ).then((tokens) => {
+      this.storeTokens(tokens);
+      this.finishPendingLogin();
+      pending.resolve();
+    }).catch((error: unknown) => {
+      const loginError = error instanceof Error ? error : new Error(String(error));
+      this.finishPendingLogin();
+      pending.reject(loginError);
+      throw loginError;
+    }).finally(() => {
+      this.loginExchangePromise = undefined;
+    });
+    return this.loginExchangePromise;
   }
 
   async getAccessToken(): Promise<string> {

@@ -115,7 +115,7 @@ export async function checkHealth(
 export interface ServerDependencies {
   authManager: Pick<
     AuthManager,
-    "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
+    "completeSsoLogin" | "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
   >;
   awsMcpClient: Pick<
     AwsMcpClient,
@@ -202,6 +202,28 @@ export async function createServer(
               }, null, 2),
             },
           ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "tdei_sso_complete",
+    {
+      description:
+        "Complete a pending TDEI SSO login using the final callback URL when the browser cannot reach the local callback listener.",
+      inputSchema: z.object({
+        callbackUrl: z.string().url().describe("The complete final http://127.0.0.1 callback URL from the browser address bar."),
+      }),
+    },
+    async ({ callbackUrl }) => {
+      try {
+        await auth.completeSsoLogin(callbackUrl);
+        await awsToolsLifecycle.load();
+        return {
+          content: [{ type: "text", text: "TDEI SSO login completed." }],
         };
       } catch (error) {
         return errorResult(error);
