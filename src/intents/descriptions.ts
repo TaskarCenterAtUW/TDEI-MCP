@@ -1,4 +1,6 @@
 export const SEMANTIC_TOOL_DESCRIPTIONS = {
+  resolveIntent:
+    "Deterministically map a plain-language TDEI request to a supported semantic tool and underlying API operation. Use first when the request uses broad terms or aliases such as projects, organizations, orgs, or groups, or could match more than one TDEI domain. Returns a structured clarification instead of guessing when multiple intents are explicit.",
   findDatasets:
     "Find TDEI datasets from a natural-language place or bounding box. Use for requests such as 'get me the latest dataset for Seattle'. Searches dataset name first, then city, then forward-geocodes the place for a bbox search. Returns ambiguity instead of guessing a place.",
   listMyProjectGroups:

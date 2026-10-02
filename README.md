@@ -190,6 +190,7 @@ Both transports expose the common semantic tools:
 
 | Tool | Purpose |
 | --- | --- |
+| `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
 | `tdei_list_services` | List services by text, project group, or service type. |
 | `tdei_list_my_project_groups` | Lists project groups available to the authenticated TDEI login via `listProjectGroups` / `GET /api/v1/project-groups`. |

@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 
 import { formatError, truncateText } from "../mcp/errors.js";
 import { SEMANTIC_TOOL_DESCRIPTIONS } from "./descriptions.js";
+import { resolveUserIntent } from "./intent-resolver.js";
 import type { SemanticIntentModule } from "./semantic-intent-module.js";
 import type { RequestContext } from "./types.js";
 
@@ -18,6 +19,10 @@ const findDatasetsSchema = z.object({
   projectGroupId: z.string().trim().min(1).optional(),
   latest: z.boolean().optional(),
   limit: z.number().int().min(1).max(50).optional(),
+});
+
+const resolveIntentSchema = z.object({
+  request: z.string().trim().min(1),
 });
 
 const listServicesSchema = z.object({
@@ -104,6 +109,15 @@ export function registerSemanticTools(
     server.registerTool(name, definition, handler);
     registered.add(name);
   };
+
+  register(
+    "tdei_resolve_intent",
+    {
+      description: SEMANTIC_TOOL_DESCRIPTIONS.resolveIntent,
+      inputSchema: resolveIntentSchema.shape,
+    },
+    async (args) => jsonIntentResult(resolveUserIntent(String(args.request))),
+  );
 
   register(
     "tdei_find_datasets",

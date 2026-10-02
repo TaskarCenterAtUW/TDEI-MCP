@@ -36,11 +36,24 @@ test("common semantic tools are discoverable and callable", async () => {
       "tdei_find_datasets",
       "tdei_list_my_project_groups",
       "tdei_list_services",
+      "tdei_resolve_intent",
       "tdei_upload_dataset",
       "tdei_validate_dataset",
     ]);
     const find = listed.tools.find((tool) => tool.name === "tdei_find_datasets");
     assert.match(find?.description ?? "", /latest dataset for Seattle/i);
+
+    const resolution = await client.callTool({
+      name: "tdei_resolve_intent",
+      arguments: { request: "Which organizations can I access?" },
+    });
+    const resolutionFirst = resolution.content[0];
+    const resolutionBody = JSON.parse(
+      resolutionFirst?.type === "text" ? resolutionFirst.text : "{}",
+    );
+    assert.equal(resolutionBody.status, "complete");
+    assert.equal(resolutionBody.data.tool, "tdei_list_my_project_groups");
+    assert.equal(resolutionBody.data.apiOperation, "listProjectGroups");
 
     const membership = await client.callTool({
       name: "tdei_list_my_project_groups",

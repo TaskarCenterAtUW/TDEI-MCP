@@ -25,6 +25,7 @@ export type IntentResult<T> =
   }
   | {
     status: "ambiguous";
+    question?: string;
     candidates: Array<Record<string, unknown>>;
     accepted: Record<string, unknown>;
   }

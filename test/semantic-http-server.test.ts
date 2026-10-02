@@ -28,6 +28,7 @@ test("hosted semantic server calls TDEI directly with its request bearer", async
       "tdei_find_datasets",
       "tdei_list_my_project_groups",
       "tdei_list_services",
+      "tdei_resolve_intent",
       "tdei_upload_dataset",
       "tdei_validate_dataset",
     ]);
