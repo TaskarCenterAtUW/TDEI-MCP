@@ -15,6 +15,26 @@ export interface RunWorkflowResult {
   transcript: StepResult[];
 }
 
+function unwrapMcpTextJson(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("content" in value)) {
+    return value;
+  }
+  const content = (value as { content?: unknown }).content;
+  if (!Array.isArray(content)) return value;
+  const text = content.find(
+    (block): block is { type: "text"; text: string } =>
+      typeof block === "object" && block !== null &&
+      (block as { type?: unknown }).type === "text" &&
+      typeof (block as { text?: unknown }).text === "string",
+  )?.text;
+  if (text === undefined) return value;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 function declaresFileUpload(schema: unknown): boolean {
   const visit = (node: unknown): boolean => {
     if (node === null || node === undefined) return false;
@@ -96,7 +116,11 @@ export async function runWorkflow(
     }
 
     try {
-      const output = await deps.callTool(step.tool, resolved);
+      const raw = await deps.callTool(step.tool, resolved);
+      // Lifecycle-wrapped download steps return MCP text content carrying a
+      // JSON file descriptor ({tool, path, bytes}); unwrap it so template
+      // refs like {{steps.fetch_osw.output.path}} resolve to the file path.
+      const output = unwrapMcpTextJson(raw);
       transcript.push({ id: step.id, tool: step.tool, input: resolved, output });
       outputs[step.id] = output;
       stepsCtx[step.id] = { output };

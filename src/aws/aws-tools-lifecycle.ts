@@ -12,14 +12,19 @@ import {
   type EndpointFilter,
 } from "../config-file.js";
 import { registerWorkflows } from "../workflows/register.js";
+import { BinaryTdeiDownloads } from "../adapters/binary-tdei-downloads.js";
+import { getConfig } from "../config.js";
 
-type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion">;
+type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion"> & {
+  getAccessToken?: () => Promise<string>;
+};
 type AwsSession = Pick<
   AwsMcpClient,
   "close" | "listTools" | "callTool"
 >;
 type AwsToolRegistrar = typeof registerAwsTools;
 type RegistrarClient = Parameters<AwsToolRegistrar>[1];
+type DownloadHandler = Pick<BinaryTdeiDownloads, "download">;
 
 const ALLOW_ALL: EndpointFilter = { mode: "all", allow: [], deny: [] };
 
@@ -51,6 +56,20 @@ function unknownFilterIds(
   }
 
   return [];
+}
+
+type McpCallResult = Awaited<ReturnType<AwsSession["callTool"]>>;
+
+function toMcpResult(value: unknown): McpCallResult {
+  if (
+    typeof value === "object" && value !== null && "content" in value &&
+    Array.isArray((value as { content: unknown }).content)
+  ) {
+    return value as McpCallResult;
+  }
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
+  };
 }
 
 function deniedFor(
@@ -92,6 +111,7 @@ export class AwsToolsLifecycle {
     private readonly authSession: AuthSession,
     private readonly awsSession: AwsSession,
     private readonly registrar: AwsToolRegistrar,
+    private readonly downloads?: DownloadHandler,
   ) {}
 
   load(): Promise<"loaded" | "already-loaded"> {
@@ -113,9 +133,22 @@ export class AwsToolsLifecycle {
     });
   }
 
-  callTool(tool: string, input: Record<string, unknown>): ReturnType<AwsSession["callTool"]> {
+  callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
       await this.ensureFreshLocked(this.authSession.getTokenVersion());
+      // Binary downloads bypass the AWS child: FastMCP decodes every
+      // response body as UTF-8 (response.json() catching only
+      // JSONDecodeError), so octet-stream ZIPs crash it with
+      // "'utf-8' codec can't decode byte 0x83". Route those locally.
+      if (BinaryTdeiDownloads.isDownloadTool(tool)) {
+        const downloads = this.downloads ?? new BinaryTdeiDownloads({
+          baseUrl: getConfig().apiUrl,
+          ...(this.authSession.getAccessToken
+            ? { tokenProvider: () => this.authSession.getAccessToken!() }
+            : {}),
+        });
+        return downloads.download(tool, input, {});
+      }
       return this.awsSession.callTool(tool, input);
     });
   }
@@ -166,7 +199,7 @@ export class AwsToolsLifecycle {
       this.server,
       discoveryClient,
       effectiveFilter,
-      (tool, input) => this.callTool(tool, input),
+      async (tool, input) => toMcpResult(await this.callTool(tool, input)),
     );
 
     // Per-call toolSchemas cover newly registered tools only,
@@ -182,8 +215,10 @@ export class AwsToolsLifecycle {
     // Workflow steps route through the version gate too. This closure only
     // fires post-load (when MCP clients invoke workflow tools and the
     // serialize() queue is idle), so it cannot self-deadlock.
-    const callTool = (tool: string, input: Record<string, unknown>) =>
-      this.callTool(tool, input);
+    // Download results are wrapped as MCP text content so template refs
+    // (e.g. {{steps.fetch_osw.output.path}}) resolve against the file path.
+    const callTool = async (tool: string, input: Record<string, unknown>) =>
+      toMcpResult(await this.callTool(tool, input));
 
     // Offending workflows are skipped one by one; the rest register.
     for (const workflow of cfg.workflows) {

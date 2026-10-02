@@ -16,6 +16,7 @@ import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 import { AwsTdeiOperations } from "./adapters/aws-tdei-operations.js";
+import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
@@ -143,6 +144,10 @@ export async function createServer(
     auth,
     awsClient,
     dependencies.registerAwsTools,
+    new BinaryTdeiDownloads({
+      baseUrl: getConfig().apiUrl,
+      tokenProvider: () => auth.getAccessToken(),
+    }),
   );
   const semanticModule = new SemanticIntentModule({
     operations: new AwsTdeiOperations(
