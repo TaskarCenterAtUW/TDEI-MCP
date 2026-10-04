@@ -4,7 +4,17 @@ Connect an MCP-compatible AI client to the TDEI API using natural-language-orien
 
 The default configuration uses the **TDEI development environment**. You need an account with access to that environment; downloading the repository does not create an account or grant API permissions.
 
-## Quickstart (npx)
+## Installation
+
+Choose one of the two paths:
+
+1. [Path 1 — NPX (after publishing, recommended)](#path-1-npx) — no clone needed; `npx -y tdei-mcp init` configures your MCP client.
+2. [Path 2 — Checkout-based installation (from source)](#path-2-checkout) — clone/download the repo, `npm ci`, build, and connect manually.
+
+<a id="path-1-npx"></a>
+## Path 1 — NPX (recommended)
+
+### Quickstart (npx)
 
 ```bash
 npx -y tdei-mcp init
@@ -36,7 +46,10 @@ documented under Advanced below.
 
 The AWS child package is pinned to `awslabs.openapi-mcp-server@1.1.2`, the version tested with this connector. `uvx` manages that Python tool separately from the npm dependencies; its first launch may take longer while dependencies download.
 
-## Advanced: manual setup from a checkout (developers only)
+<a id="path-2-checkout"></a>
+## Path 2 — Checkout-based installation (developers only)
+
+### Advanced: manual setup from a checkout
 
 If you installed via `npx -y tdei-mcp init`, skip this section — `init` already
 wrote your client config with the environment inline and there is no `.env` to
@@ -142,10 +155,18 @@ The client process must be able to find `uvx` on its `PATH`. Restart the client 
 
 ### Manual startup check
 
-From the project folder, you can check that the compiled server starts:
+From the project folder, run the non-blocking stdio check (handshakes, lists tools, then exits and returns your terminal):
 
 ```bash
-node --env-file=.env dist/index.js
+npm run check:stdio
+```
+
+Expect `[tdei-mcp] stdio check OK: server started, handshake succeeded, N tool(s) listed.` A bad config exits non-zero with `TDEI_CONFIG_INVALID` instead of hanging.
+
+The raw server command below is blocking by design — it waits for MCP messages on stdin, so you must press Ctrl+C to get your terminal back. Prefer `check:stdio` above for a quick health check:
+
+```bash
+node --env-file=.env dist/index.js --transport=stdio
 ```
 
 Expect `[tdei-mcp] Starting MCP server` on stderr. The process waits for MCP messages on stdin and starts signed out. This is a stdio server, so there is no browser page or HTTP port. Manual startup alone does not verify authentication or tool calls; an MCP client must send the initialization request. Press Ctrl+C to stop. For normal use, let your MCP client launch the process.
