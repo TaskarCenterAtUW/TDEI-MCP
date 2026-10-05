@@ -140,15 +140,11 @@ Use your client's stdio server settings with these values:
 
 The client process must be able to find `uvx` on its `PATH`. Restart the client after installing uv or changing its environment.
 
-### Manual startup check
+### STDIO vs manual start
 
-From the project folder, you can check that the compiled server starts:
+**STDIO** is started automatically by your MCP client (Codex, Claude Desktop, VS Code, etc.) after `init` writes the client config. Do not run `node dist/index.js` yourself for stdio — with a terminal attached it exits and tells you to use HTTP or `init`.
 
-```bash
-node --env-file=.env dist/index.js
-```
-
-Expect `[tdei-mcp] Starting MCP server` on stderr. The process waits for MCP messages on stdin and starts signed out. This is a stdio server, so there is no browser page or HTTP port. Manual startup alone does not verify authentication or tool calls; an MCP client must send the initialization request. Press Ctrl+C to stop. For normal use, let your MCP client launch the process.
+**Manual start** is only for Streamable HTTP (see below).
 
 ### HTTP mode (Streamable HTTP, stateless)
 
