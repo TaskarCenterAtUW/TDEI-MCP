@@ -49,7 +49,28 @@ test("valid env yields ok:true with defaults", () => {
       assert.equal(result.config.ssoClientId, "tdei-mcp");
       assert.equal(result.config.transport, "stdio");
       assert.equal(result.config.httpPort, 3000);
+      assert.equal(
+        result.config.specUrl,
+        "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
+      );
+      assert.equal(result.config.ssoCallbackUrl, "http://127.0.0.1:8765/callback");
+      assert.equal(result.config.awsMcpPackage, "awslabs.openapi-mcp-server@1.1.2");
     }
+  });
+});
+
+test("spec URL follows TDEI_API_URL when TDEI_SPEC_URL is unset", () => {
+  withEnv({
+    TDEI_API_URL: "https://api-stage.tdei.us",
+    TDEI_SPEC_URL: undefined,
+  }, () => {
+    const result = loadConfig();
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      result.config.specUrl,
+      "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway.json",
+    );
   });
 });
 

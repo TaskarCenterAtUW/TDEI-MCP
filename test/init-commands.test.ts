@@ -32,6 +32,9 @@ test("runInit writes codex entry end to end", async () => {
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.client, "codex");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SPEC_URL/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SSO_CLIENT_ID/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SSO_CALLBACK_URL/);
   assert.match(logs.join("\n"), /TDEI-MCP  ·  Codex Desktop  ·  ready/);
   assert.match(logs.join("\n"), /Fully quit and reopen Codex Desktop/);
   assert.match(logs.join("\n"), /tdei_sso_login/);
@@ -41,13 +44,7 @@ test("runInit writes codex entry end to end", async () => {
 });
 
 test("runInit configures Codex to launch with the selected environment file", async () => {
-  const envFile = [
-    "TDEI_API_URL=https://api-dev.tdei.us",
-    "TDEI_SPEC_URL=https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
-    "TDEI_SSO_CALLBACK_URL=http://127.0.0.1:8765/callback",
-    "TDEI_TRANSPORT=stdio",
-    "",
-  ].join("\n");
+  const envFile = "TDEI_API_URL=https://api-dev.tdei.us\n";
   const fs = memFs({ "/repo/.env.dev": envFile });
   let verifiedEntry: { args: string[]; env: Record<string, string> } | undefined;
   const d = {
@@ -131,7 +128,7 @@ test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   const summary = await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
   assert.equal(summary.apiUrl, "https://api-stage.tdei.us");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-stage\.tdei\.us/);
-  assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /127\.0\.0\.1:8765/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SPEC_URL/);
   assert.match(logs.join("\n"), /TDEI-MCP  ·  Codex Desktop  ·  environment updated/);
   assert.match(logs.join("\n"), /may rewrite ~\/\.codex\/config\.toml/);
   await assert.rejects(runSwitch(deps(fs, {}) as never, { client: "claude", env: "prod", home: "/h" }), /no tdei entry found/);
@@ -196,6 +193,8 @@ test("checkout init writes absolute Node launch config and scaffolds tdei config
   assert.match(toml, /command = "\/usr\/bin\/node"/);
   assert.match(toml, /args = \["\/repo\/dist\/index\.js"\]/);
   assert.match(toml, /TDEI_CONFIG_PATH = "\/repo\/tdei\.config\.json"/);
+  assert.doesNotMatch(toml, /TDEI_SPEC_URL/);
+  assert.doesNotMatch(toml, /TDEI_SSO_CALLBACK_URL/);
   assert.match(fs.files.get("/repo/tdei.config.json") ?? "", /"mode": "all"/);
 });
 

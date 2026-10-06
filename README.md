@@ -81,18 +81,16 @@ The command detects the checkout, verifies `dist/index.js` through MCP
 missing, backs up an existing Codex config to `config.toml.tdei.bak`, and then
 writes an absolute Node + `dist/index.js` stdio entry. Restart Codex afterward.
 
-To keep separate source-checkout settings for each environment, create three
-ignored local files from the example:
+To keep separate source-checkout settings for each environment, create ignored
+local files that set only the API origin (spec URL, SSO callback, and AWS
+package use built-in defaults):
 
 ```bash
-cp .env.example .env.dev
-cp .env.example .env.staging
-cp .env.example .env.prod
+printf 'TDEI_API_URL=https://api-dev.tdei.us\n' > .env.dev
+printf 'TDEI_API_URL=https://api-stage.tdei.us\n' > .env.staging
+printf 'TDEI_API_URL=https://api.tdei.us\n' > .env.prod
 ```
 
-Set `TDEI_API_URL` to `https://api-dev.tdei.us`,
-`https://api-stage.tdei.us`, and `https://api.tdei.us`, respectively. Keep
-`TDEI_TRANSPORT=stdio` and the public `TDEI_SPEC_URL` from `.env.example`.
 Then select the file Codex should use:
 
 ```bash
@@ -276,10 +274,10 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 
 | Variable | Required | Default / purpose |
 | --- | --- | --- |
+| `TDEI_API_URL` | No | `https://api-dev.tdei.us` (the only value a typical stdio setup needs) |
+| `TDEI_SPEC_URL` | No | Derived from `TDEI_API_URL` (`dev` / `stage` / `main` OpenAPI JSON on GitHub) |
 | `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var) |
-| `TDEI_API_URL` | No | `https://api-dev.tdei.us` |
-| `TDEI_SPEC_URL` | No | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
-| `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` |
+| `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` (stdio OpenAPI child only; unused in HTTP mode) |
 | `TDEI_GEOCODER_URL` | No | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback |
 | `TDEI_GEOCODER_USER_AGENT` | No | Identifies this connector; set an operator contact when required by the provider |
 | `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
@@ -289,7 +287,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 
-The API and specification URLs must use HTTPS. The local SSO callback must exactly match the registered HTTP loopback URL. When selecting another environment, use a matching API URL, OpenAPI specification, and account. Keep the AWS package pinned to an exact version that you have tested with this connector.
+The API URL must use HTTPS. Spec URL, SSO callback, and AWS package are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it. Keep the AWS package pin only if you need a version other than the default, and only for stdio.
 
 ## Endpoint filtering and workflows (tdei.config.json)
 
@@ -321,7 +319,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, check `uvx`, network access, and the specification URL, then restart the MCP client. |
 | First load times out | Check network access and allow time for `uvx` downloads. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
-| URL validation fails | Ensure `TDEI_API_URL` and `TDEI_SPEC_URL` are valid absolute URLs beginning with `https://`. |
+| URL validation fails | Ensure `TDEI_API_URL` (and any `TDEI_SPEC_URL` override) is a valid absolute URL beginning with `https://`. |
 | `TDEI_SSO_REQUIRED` | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | `TDEI_TOKEN_EXPIRED` | Refresh via `POST /api/v1/refresh-token` or re-run SSO login. |
 | `TDEI_TOKEN_INVALID` | Call `tdei_sso_login` again; do not reuse the old Bearer. |

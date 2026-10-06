@@ -1,12 +1,15 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { assertCallbackUrl, buildCallbackUrl, resolveApiUrl } from "../src/init/envs.js";
+import { assertCallbackUrl, buildCallbackUrl, resolveApiUrl, specUrlForApiUrl } from "../src/init/envs.js";
 import { checkPreflight } from "../src/init/preflight.js";
 
 test("resolveApiUrl maps env names, requires explicit choice, normalizes pasted URLs", () => {
   assert.equal(resolveApiUrl({ env: "dev" }), "https://api-dev.tdei.us");
   assert.equal(resolveApiUrl({ env: "stage" }), "https://api-stage.tdei.us");
   assert.equal(resolveApiUrl({ env: "prod" }), "https://api.tdei.us");
+  assert.equal(specUrlForApiUrl("https://api-dev.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json");
+  assert.equal(specUrlForApiUrl("https://api-stage.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway.json");
+  assert.equal(specUrlForApiUrl("https://api.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway.json");
   assert.equal(resolveApiUrl({ url: "https://example.com/api/" }), "https://example.com");
   assert.equal(resolveApiUrl({ url: "https://api-dev.tdei.us/api/v1/authenticate" }), "https://api-dev.tdei.us");
   assert.throws(() => resolveApiUrl({}), /no environment given/);

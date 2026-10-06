@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { DEFAULT_CONFIG_JSON } from "../config-file.js";
-import { DEFAULT_SPEC_URL, assertCallbackUrl, assertHttpsUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
+import { specUrlForApiUrl, assertCallbackUrl, assertHttpsUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
 import { checkPreflight, type ExecFn } from "./preflight.js";
 import { assertPort, defaultTryPort, portInUseHint } from "./ports.js";
 import { verifyServer } from "./verify.js";
@@ -13,7 +13,7 @@ import {
   type ClientName, type ServerEntry,
 } from "./clients.js";
 
-export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CALLBACK_URL"];
+export const TDEI_ENV_KEYS = ["TDEI_API_URL"];
 
 export interface Prompter {
   chooseEnv(): Promise<{ env?: string | undefined; url?: string | undefined }>;
@@ -273,9 +273,8 @@ export async function runInit(
     : {
         PATH: process.env.PATH ?? "",
         TDEI_API_URL: apiUrl,
-        TDEI_SPEC_URL: DEFAULT_SPEC_URL,
-        TDEI_SSO_CALLBACK_URL: callbackUrl,
         TDEI_CONFIG_PATH: tdeiConfigPath,
+        ...(port === 8765 ? {} : { TDEI_SSO_CALLBACK_URL: callbackUrl }),
       };
   const entry = buildServerEntry(
     nodeExecPath,
@@ -334,17 +333,21 @@ export async function runSwitch(
   if (existing.args.some((argument) => argument.startsWith("--env-file="))) {
     throw new Error('this MCP entry uses --env-file; select another file by re-running "tdei-mcp init --client <client> --env-file <path>"');
   }
-  const specUrl = existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== DEFAULT_SPEC_URL
-    ? existing.env["TDEI_SPEC_URL"]!
-    : DEFAULT_SPEC_URL;
+  const derivedSpec = specUrlForApiUrl(existing.env["TDEI_API_URL"] ?? apiUrl);
+  const customSpec = existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== derivedSpec
+    ? existing.env["TDEI_SPEC_URL"]
+    : undefined;
   const env: Record<string, string> = {
     ...existing.env,
     TDEI_API_URL: apiUrl,
-    TDEI_SPEC_URL: specUrl,
-    TDEI_SSO_CALLBACK_URL: existing.env["TDEI_SSO_CALLBACK_URL"] ?? buildCallbackUrl(8765),
     TDEI_CONFIG_PATH: existing.env["TDEI_CONFIG_PATH"] ?? configPath(undefined, home),
   };
   delete env.TDEI_SSO_CLIENT_ID;
+  if (customSpec) env.TDEI_SPEC_URL = customSpec;
+  else delete env.TDEI_SPEC_URL;
+  if (!existing.env["TDEI_SSO_CALLBACK_URL"] || existing.env["TDEI_SSO_CALLBACK_URL"] === buildCallbackUrl(8765)) {
+    delete env.TDEI_SSO_CALLBACK_URL;
+  }
   const entry: ServerEntry = {
     command: existing.command,
     args: existing.args,

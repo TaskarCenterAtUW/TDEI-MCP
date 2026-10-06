@@ -1,7 +1,6 @@
-const DEFAULT_API_URL = "https://api-dev.tdei.us";
+import { specUrlForApiUrl } from "./init/envs.js";
 
-const DEFAULT_SPEC_URL =
-  "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json";
+const DEFAULT_API_URL = "https://api-dev.tdei.us";
 
 const DEFAULT_AWS_MCP_PACKAGE =
   "awslabs.openapi-mcp-server@1.1.2";
@@ -120,7 +119,8 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   const apiUrl = readHttpsUrl("TDEI_API_URL", DEFAULT_API_URL, DEFAULT_API_URL);
   if ("error" in apiUrl) errors.push(apiUrl.error);
 
-  const specUrl = readHttpsUrl("TDEI_SPEC_URL", DEFAULT_SPEC_URL, DEFAULT_SPEC_URL);
+  const derivedSpec = "error" in apiUrl ? specUrlForApiUrl(DEFAULT_API_URL) : specUrlForApiUrl(apiUrl.value);
+  const specUrl = readHttpsUrl("TDEI_SPEC_URL", derivedSpec, derivedSpec);
   if ("error" in specUrl) errors.push(specUrl.error);
 
   const transport = resolveTransport();

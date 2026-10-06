@@ -1,12 +1,31 @@
+const SPEC_REPO = "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs";
+const SPEC_FILE = "tdei-api-gateway.json";
+
 export const ENVS = {
-  dev: { apiUrl: "https://api-dev.tdei.us", label: "Development (api-dev.tdei.us)" },
-  stage: { apiUrl: "https://api-stage.tdei.us", label: "Stage (api-stage.tdei.us)" },
-  prod: { apiUrl: "https://api.tdei.us", label: "Production (api.tdei.us)" },
+  dev: { apiUrl: "https://api-dev.tdei.us", specBranch: "dev", label: "Development (api-dev.tdei.us)" },
+  stage: { apiUrl: "https://api-stage.tdei.us", specBranch: "stage", label: "Stage (api-stage.tdei.us)" },
+  prod: { apiUrl: "https://api.tdei.us", specBranch: "main", label: "Production (api.tdei.us)" },
 } as const;
 export type EnvName = keyof typeof ENVS;
 
-export const DEFAULT_SPEC_URL =
-  "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json";
+export function specUrlForBranch(branch: string): string {
+  return `${SPEC_REPO}/${branch}/${SPEC_FILE}`;
+}
+
+/** OpenAPI spec for a known TDEI API origin; unknown hosts use the dev spec. */
+export function specUrlForApiUrl(apiUrl: string): string {
+  try {
+    const origin = new URL(apiUrl).origin;
+    for (const env of Object.values(ENVS)) {
+      if (env.apiUrl === origin) return specUrlForBranch(env.specBranch);
+    }
+  } catch {
+    // Invalid URL — caller validates TDEI_API_URL separately.
+  }
+  return specUrlForBranch("dev");
+}
+
+export const DEFAULT_SPEC_URL = specUrlForBranch("dev");
 
 export function assertHttpsUrl(value: string, name: string): string {
   let url: URL;
