@@ -13,7 +13,7 @@ import {
   type ClientName, type ServerEntry,
 } from "./clients.js";
 
-export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CLIENT_ID", "TDEI_SSO_CALLBACK_URL"];
+export const TDEI_ENV_KEYS = ["TDEI_API_URL", "TDEI_SPEC_URL", "TDEI_SSO_CALLBACK_URL"];
 
 export interface Prompter {
   chooseEnv(): Promise<{ env?: string | undefined; url?: string | undefined }>;
@@ -103,7 +103,83 @@ async function loadEnvironmentFile(
   return { values, apiUrl, callbackUrl, port: Number(new URL(callbackUrl).port) };
 }
 
-export const VERIFY_PROMPT = "Verify: Call tdei_sso_login and give me the loginUrl. After browser login, check tdei_auth_status and call listServices.";
+const RULE = "─".repeat(58);
+
+function clientDisplayName(client: ClientName): string {
+  if (client === "codex") return "Codex Desktop";
+  if (client === "claude") return "Claude Desktop";
+  if (client === "vscode") return "VS Code";
+  return "your MCP client";
+}
+
+function indentBlock(text: string, prefix: string): string {
+  return text.split("\n").map((line) => (line ? prefix + line : prefix.trimEnd())).join("\n");
+}
+
+export function clientConfigDropHint(client: ClientName): string {
+  const examples = [
+    `tdei-mcp init --client ${client} --env dev`,
+    `node dist/index.js init --client ${client} --env-file .env.dev`,
+  ];
+  if (client === "custom") {
+    return [
+      "Re-apply the command, args, working directory, and env printed above.",
+      "Then restart the client and run tdei_sso_login again (tokens are in-memory).",
+    ].join("\n");
+  }
+  if (client === "vscode") {
+    return [
+      "The tdei server may be missing from .vscode/mcp.json.",
+      "Restore it with the same init command, reload the window, then tdei_sso_login (tokens are in-memory):",
+      ...examples.map((command) => `  ${command}`),
+    ].join("\n");
+  }
+  const name = clientDisplayName(client);
+  const config = client === "codex" ? "~/.codex/config.toml" : "claude_desktop_config.json";
+  return [
+    `${name} may rewrite ${config} and drop the tdei MCP server.`,
+    "That rewrite cannot be blocked from this connector.",
+    "Restore with the same init command, fully quit the app, start a new chat, then tdei_sso_login (tokens are in-memory):",
+    ...examples.map((command) => `  ${command}`),
+  ].join("\n");
+}
+
+export function formatSetupReport(opts: {
+  status: string;
+  client: ClientName;
+  apiUrl: string;
+  configPath?: string;
+}): string {
+  const name = clientDisplayName(opts.client);
+  const next = opts.client === "vscode"
+    ? [
+        "    1. Reload the VS Code window",
+        "    2. Call tdei_sso_login and open the loginUrl",
+        "    3. After browser login: tdei_auth_status, then listServices",
+      ]
+    : [
+        `    1. Fully quit and reopen ${name}`,
+        "    2. Start a new chat",
+        "    3. Call tdei_sso_login and open the loginUrl",
+        "    4. After browser login: tdei_auth_status, then listServices",
+      ];
+  return [
+    "",
+    `  TDEI-MCP  ·  ${name}  ·  ${opts.status}`,
+    `  ${RULE}`,
+    `  API      ${opts.apiUrl}`,
+    ...(opts.configPath ? [`  Config   ${opts.configPath}`] : []),
+    "  Check    MCP initialize and tools/list passed",
+    "",
+    "  Next",
+    ...next,
+    "",
+    "  If tools disappear later",
+    indentBlock(clientConfigDropHint(opts.client), "    "),
+    `  ${RULE}`,
+    "",
+  ].join("\n");
+}
 
 function clientPaths(client: ClientName, home: string, cwd: string): string {
   if (client === "codex") return codexConfigPath(home);
@@ -198,7 +274,6 @@ export async function runInit(
         PATH: process.env.PATH ?? "",
         TDEI_API_URL: apiUrl,
         TDEI_SPEC_URL: DEFAULT_SPEC_URL,
-        TDEI_SSO_CLIENT_ID: "tdei-mcp",
         TDEI_SSO_CALLBACK_URL: callbackUrl,
         TDEI_CONFIG_PATH: tdeiConfigPath,
       };
@@ -212,7 +287,7 @@ export async function runInit(
   await (deps.verify ?? verifyServer)(entry);
   if (client === "custom") {
     deps.log(formatManual(entry, env));
-    deps.log(VERIFY_PROMPT);
+    deps.log(formatSetupReport({ status: "manual setup", client, apiUrl }));
     return { client, apiUrl, callbackUrl };
   }
   const cwd = opts.cwd ?? process.cwd();
@@ -225,11 +300,12 @@ export async function runInit(
   if (await deps.readFile(path) !== updated) {
     throw new Error(`configuration readback failed: ${path}`);
   }
-  deps.log(client === "codex"
-    ? "Configuration verified (MCP initialize and required tools/list passed). Fully restart Codex, then start a new chat so it loads the updated MCP tool catalogue; SSO is still required."
-    : `Configuration verified (MCP initialize and required tools/list passed). Fully restart ${client} so it loads the updated MCP tool catalogue; SSO is still required.`);
-  deps.log(`wrote ${client} MCP entry for ${apiUrl} to ${path}`);
-  deps.log(VERIFY_PROMPT);
+  deps.log(formatSetupReport({
+    status: "ready",
+    client,
+    apiUrl,
+    configPath: path,
+  }));
   return { client, apiUrl, callbackUrl };
 }
 
@@ -265,10 +341,10 @@ export async function runSwitch(
     ...existing.env,
     TDEI_API_URL: apiUrl,
     TDEI_SPEC_URL: specUrl,
-    TDEI_SSO_CLIENT_ID: existing.env["TDEI_SSO_CLIENT_ID"] ?? "tdei-mcp",
     TDEI_SSO_CALLBACK_URL: existing.env["TDEI_SSO_CALLBACK_URL"] ?? buildCallbackUrl(8765),
     TDEI_CONFIG_PATH: existing.env["TDEI_CONFIG_PATH"] ?? configPath(undefined, home),
   };
+  delete env.TDEI_SSO_CLIENT_ID;
   const entry: ServerEntry = {
     command: existing.command,
     args: existing.args,
@@ -284,6 +360,11 @@ export async function runSwitch(
   if (await deps.readFile(path) !== updated) {
     throw new Error(`configuration readback failed: ${path}`);
   }
-  deps.log(`restart your MCP client to reconnect to ${apiUrl} (tokens are in-memory)`);
+  deps.log(formatSetupReport({
+    status: "environment updated",
+    client,
+    apiUrl,
+    configPath: path,
+  }));
   return { client, apiUrl };
 }

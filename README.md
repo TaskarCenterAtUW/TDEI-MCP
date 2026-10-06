@@ -128,6 +128,44 @@ Codex also supports a project-scoped `.codex/config.toml` for trusted projects. 
 
 Restart your Codex session after saving the configuration. In the Codex terminal interface, use `/mcp` to check the connection.
 
+#### Codex Desktop drops the tdei tools
+
+Codex Desktop can rewrite `~/.codex/config.toml` on startup or settings changes and remove custom MCP servers, including `tdei`. This connector cannot prevent that rewrite.
+
+If `/mcp` no longer lists `tdei`, or a chat says tdei-mcp tools are unavailable:
+
+1. Re-run the **same** init command you used originally, for example:
+
+   ```bash
+   tdei-mcp init --client codex --env dev
+   node dist/index.js init --client codex --env-file .env.dev
+   ```
+
+   Use `--env-file .env.staging` or `.env.prod` when that is how this checkout was configured.
+
+2. Fully quit and reopen Codex, then start a **new** chat so it reloads the MCP catalogue.
+3. Call `tdei_sso_login` again. Access tokens live in server memory and do not survive a Desktop rewrite or restart.
+
+#### Claude Desktop drops the tdei tools
+
+Claude Desktop can rewrite `claude_desktop_config.json` on startup, settings changes, or connector sync and remove custom MCP servers, including `tdei`. This connector cannot prevent that rewrite.
+
+If the tdei tools disappear:
+
+1. Re-run the **same** init command you used originally, for example:
+
+   ```bash
+   tdei-mcp init --client claude --env dev
+   node dist/index.js init --client claude --env-file .env.dev
+   ```
+
+2. Fully quit and reopen Claude Desktop, then start a **new** chat.
+3. Call `tdei_sso_login` again. Tokens are in-memory.
+
+#### VS Code drops the tdei tools
+
+If the tdei tools disappear from VS Code, the workspace entry in `.vscode/mcp.json` may be missing. Restore it with the same init command (`--client vscode`), reload the window, and run `tdei_sso_login` again.
+
 ### Other local MCP clients
 
 Use your client's stdio server settings with these values:
@@ -189,7 +227,7 @@ Both transports expose the common semantic tools:
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
 | `tdei_list_services` | List services by text, project group, or service type. |
-| `tdei_list_my_project_groups` | Lists project groups available to the authenticated TDEI login via `listProjectGroups` / `GET /api/v1/project-groups`. |
+| `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer (same path as curl), not the AWS OpenAPI child. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
 
@@ -238,8 +276,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 
 | Variable | Required | Default / purpose |
 | --- | --- | --- |
-| `TDEI_SSO_CLIENT_ID` | No | `tdei-mcp` |
-| `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` |
+| `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var) |
 | `TDEI_API_URL` | No | `https://api-dev.tdei.us` |
 | `TDEI_SPEC_URL` | No | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
 | `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` |
