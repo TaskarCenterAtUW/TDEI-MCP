@@ -8,6 +8,9 @@ const DEFAULT_AWS_MCP_PACKAGE =
 
 const DEFAULT_SSO_CALLBACK_URL = "http://127.0.0.1:8765/callback";
 
+/** Fixed OAuth client for this MCP connector. Not configurable — never use portal/web/API client ids. */
+export const TDEI_SSO_CLIENT_ID = "tdei-mcp" as const;
+
 export type Transport = "stdio" | "http";
 
 export interface ConfigError {
@@ -155,7 +158,7 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
     config: {
       apiUrl: (apiUrl as { value: string }).value,
       specUrl: (specUrl as { value: string }).value,
-      ssoClientId: process.env.TDEI_SSO_CLIENT_ID?.trim() || "tdei-mcp",
+      ssoClientId: TDEI_SSO_CLIENT_ID,
       ssoCallbackUrl: new URL(process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL).toString(),
       transport: goodTransport,
       httpHost: process.env.TDEI_HTTP_HOST?.trim() || "127.0.0.1",

@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
+import { TDEI_SSO_CLIENT_ID } from "./helpers/sso-client.js";
+
 process.env.TDEI_SSO_CALLBACK_URL = "http://127.0.0.1:18765/callback";
 const { AuthManager } = await import("../src/auth/auth-manager.js");
 
@@ -26,7 +28,7 @@ test("browser callback exchanges code and state for tokens", async () => {
     const login = await auth.startSsoLogin();
     const loginUrl = new URL(login.loginUrl);
     assert.equal(loginUrl.pathname, "/api/v1/sso-redirect");
-    assert.equal(loginUrl.searchParams.get("client_id"), "tdei-mcp");
+    assert.equal(loginUrl.searchParams.get("client_id"), TDEI_SSO_CLIENT_ID);
     assert.equal(loginUrl.searchParams.get("redirect_uri"), "http://127.0.0.1:18765/callback");
     assert.equal(auth.getStatus().state, "login_pending");
 
@@ -39,7 +41,7 @@ test("browser callback exchanges code and state for tokens", async () => {
     assert.deepEqual(exchangeBody, {
       code: "test-code",
       state: "test-state",
-      clientId: "tdei-mcp",
+      clientId: TDEI_SSO_CLIENT_ID,
     });
     assert.equal(auth.getStatus().state, "authenticated");
     assert.equal(await auth.getAccessToken(), "sso-access-token");
@@ -47,7 +49,7 @@ test("browser callback exchanges code and state for tokens", async () => {
     const logout = await auth.logout();
     const logoutUrl = new URL(logout.logoutUrl);
     assert.equal(logoutUrl.pathname, "/api/v1/sso-logout");
-    assert.equal(logoutUrl.searchParams.get("client_id"), "tdei-mcp");
+    assert.equal(logoutUrl.searchParams.get("client_id"), TDEI_SSO_CLIENT_ID);
     assert.equal(logoutUrl.searchParams.get("redirect_uri"), "http://127.0.0.1:18765/callback");
     assert.equal(auth.getStatus().state, "logout_pending");
 
@@ -88,7 +90,7 @@ test("MCP callback completion exchanges code when the browser cannot reach loopb
     assert.deepEqual(exchangeBody, {
       code: "relayed-code",
       state: "relayed-state",
-      clientId: "tdei-mcp",
+      clientId: TDEI_SSO_CLIENT_ID,
     });
     assert.equal(auth.getStatus().state, "authenticated");
     assert.equal(await auth.getAccessToken(), "relayed-access-token");

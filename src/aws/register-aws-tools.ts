@@ -14,6 +14,7 @@ import {
 } from "@modelcontextprotocol/server";
 
 import { awsMcpClient } from "./aws-mcp-client.js";
+import { normalizeAwsToolResult } from "../adapters/aws-result-decoder.js";
 import { formatError, truncateText } from "../mcp/errors.js";
 import { isToolAllowed, type EndpointFilter } from "../config-file.js";
 
@@ -159,7 +160,9 @@ export async function registerAwsTools(
               awsTool.name,
               args,
             ));
-          return truncateResult(raw);
+          // Keep GET JSON bodies as valid API JSON for the LLM (unwrap fences /
+          // double-encoding) without reshaping objects into empty lists.
+          return truncateResult(normalizeAwsToolResult(raw));
         } catch (error) {
           return formatError(error);
         }

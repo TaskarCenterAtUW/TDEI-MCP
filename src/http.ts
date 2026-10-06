@@ -1,7 +1,7 @@
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 
-import { getConfig, TdeiConfigError } from "./config.js";
+import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
 import { injectAccessToken } from "./auth/auth-manager.js";
 import { createHttpSemanticServer } from "./http-semantic-server.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
@@ -24,7 +24,7 @@ interface ResolvedHttpOptions {
 function buildLoginUrl(): string {
   const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
   loginUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
-  loginUrl.searchParams.set("client_id", getConfig().ssoClientId);
+  loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
   return loginUrl.toString();
 }
 

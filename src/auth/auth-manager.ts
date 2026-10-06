@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 
-import { getConfig } from "../config.js";
+import { getConfig, TDEI_SSO_CLIENT_ID } from "../config.js";
 import type {
   AuthStatus,
   SsoLoginStart,
@@ -42,7 +42,7 @@ export class AuthManager {
   getStatus(): AuthStatus {
     const authenticated = this.hasUsableAccessToken();
     return {
-      configured: Boolean(getConfig().ssoClientId && getConfig().ssoCallbackUrl),
+      configured: Boolean(TDEI_SSO_CLIENT_ID && getConfig().ssoCallbackUrl),
       authenticated,
       state: authenticated
         ? "authenticated"
@@ -113,7 +113,7 @@ export class AuthManager {
 
     const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
     loginUrl.searchParams.set("redirect_uri", callbackUrl.toString());
-    loginUrl.searchParams.set("client_id", getConfig().ssoClientId);
+    loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
 
     const timeout = setTimeout(() => {
       const error = new Error("TDEI SSO login timed out");
@@ -154,7 +154,7 @@ export class AuthManager {
     if (this.loginExchangePromise) return this.loginExchangePromise;
     this.loginExchangePromise = this.requestTokens(
       "/api/v1/sso-login",
-      { code, state, clientId: getConfig().ssoClientId },
+      { code, state, clientId: TDEI_SSO_CLIENT_ID },
       "TDEI SSO login",
     ).then((tokens) => {
       this.storeTokens(tokens);
@@ -288,7 +288,7 @@ export class AuthManager {
 
     const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
     logoutUrl.searchParams.set("redirect_uri", callbackUrl.toString());
-    logoutUrl.searchParams.set("client_id", getConfig().ssoClientId);
+    logoutUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
 
     const timeout = setTimeout(() => {
       const error = new Error("TDEI SSO logout timed out");
@@ -315,7 +315,7 @@ export class AuthManager {
 
     this.refreshPromise = this.requestTokens(
       "/api/v1/refresh-token",
-      { refreshToken: this.refreshToken, clientId: getConfig().ssoClientId },
+      { refreshToken: this.refreshToken, clientId: TDEI_SSO_CLIENT_ID },
       "TDEI token refresh",
     ).then((tokens) => {
       this.storeTokens(tokens);

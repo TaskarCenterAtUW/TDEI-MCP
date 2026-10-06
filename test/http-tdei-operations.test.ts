@@ -78,6 +78,45 @@ test("HTTP adapter falls back to authenticated project-groups endpoint", async (
   assert.equal(request?.url, "https://api.example.test/api/v1/project-groups?page_no=1&page_size=50");
 });
 
+test("HTTP adapter uses tokenProvider when request context has no bearer", async () => {
+  let request: Request | undefined;
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async (input, init) => {
+      request = new Request(input, init);
+      return new Response(JSON.stringify([
+        { tdei_project_group_id: "group-1", project_group_name: "AA Viewer Internal" },
+      ]), { status: 200 });
+    },
+    15_000,
+    { tokenProvider: async () => "sso-token" },
+  );
+
+  const groups = await adapter.listProjectGroups({ page: 1, pageSize: 10 }, {});
+
+  assert.equal(groups[0]?.project_group_name, "AA Viewer Internal");
+  assert.equal(request?.headers.get("Authorization"), "Bearer sso-token");
+});
+
+test("HTTP adapter parses BOM and fenced JSON list bodies", async () => {
+  const payload = [
+    { tdei_project_group_id: "group-1", project_group_name: "AA Viewer Internal" },
+  ];
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async () => new Response(
+      `\uFEFF\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``,
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+
+  const groups = await adapter.listProjectGroups(
+    { page: 1, pageSize: 10 },
+    { accessToken: "bearer-A" },
+  );
+  assert.deepEqual(groups, payload);
+});
+
 test("HTTP adapter submits inline validation assets as multipart", async () => {
   let request: Request | undefined;
   const adapter = new HttpTdeiOperations(

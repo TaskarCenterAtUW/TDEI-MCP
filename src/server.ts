@@ -15,12 +15,11 @@ import { registerAwsTools } from "./aws/register-aws-tools.js";
 import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
-import { AwsTdeiOperations } from "./adapters/aws-tdei-operations.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
+import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
-import { DirectMultipartTdeiMutations } from "./adapters/direct-multipart-tdei-mutations.js";
 
 export interface HealthProbes {
   fetchImpl?: typeof fetch;
@@ -151,15 +150,18 @@ export async function createServer(
         tokenProvider: () => auth.getAccessToken(),
       }),
   );
+  // Semantic intents call TDEI over HTTP with the SSO bearer — same path as
+  // curl / portal — instead of routing through the AWS OpenAPI MCP child,
+  // which can decode a successful project-groups response as [].
   const semanticModule = new SemanticIntentModule({
-    operations: new AwsTdeiOperations(
-      (tool, input) => awsToolsLifecycle.callTool(tool, input),
-      (tool) => awsToolsLifecycle.isDenied(tool),
-      new DirectMultipartTdeiMutations({
-        baseUrl: getConfig().apiUrl,
+    operations: new HttpTdeiOperations(
+      getConfig().apiUrl,
+      fetch,
+      15_000,
+      {
         tokenProvider: () => auth.getAccessToken(),
         allowedAssetKinds: new Set(["local_path"]),
-      }),
+      },
     ),
     places: createConfiguredPlaceResolver(getConfig()),
   });

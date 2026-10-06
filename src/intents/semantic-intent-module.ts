@@ -160,7 +160,13 @@ export class SemanticIntentModule {
     );
     return {
       status: "complete",
-      data: { services, appliedFilters },
+      data: {
+        services,
+        appliedFilters,
+        apiOperation: "listServices",
+        method: "GET",
+        path: "/api/v1/services",
+      },
     };
   }
 
@@ -180,6 +186,9 @@ export class SemanticIntentModule {
         appliedFilters,
         accessScope: "authenticated_user",
         scopeExplanation: "These are all project groups available to your authenticated TDEI login.",
+        apiOperation: "listProjectGroups",
+        method: "GET",
+        path: "/api/v1/project-groups",
       },
     };
   }

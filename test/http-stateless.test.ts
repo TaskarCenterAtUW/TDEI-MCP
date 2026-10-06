@@ -227,3 +227,63 @@ test("good bearer serves semantic tools and request bearers stay isolated", asyn
     globalThis.fetch = originalFetch;
   }
 });
+
+test("HTTP MCP tools/call list my project groups returns parsed live array (not empty)", async () => {
+  const originalFetch = globalThis.fetch;
+  const groups = [
+    {
+      tdei_project_group_id: "1ec1c79b-6b7a-4011-936b-c75dbbd903e3",
+      project_group_name: "AA Viewer Internal",
+    },
+  ];
+  const listCalls: string[] = [];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(String(input), init);
+    const url = request.url;
+    if (url.includes("/api/v1/project-groups")) {
+      listCalls.push(request.headers.get("Authorization") ?? "");
+      // validateToken probe and the semantic tool share this endpoint.
+      return new Response(JSON.stringify(groups), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+
+  try {
+    const handle = await serveHttp({}, { port: TEST_PORT + 1 });
+    try {
+      const init = await postMcp(
+        `${handle.url}/mcp`,
+        mcpBody(1, "initialize", {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "http-groups-test", version: "1.0.0" },
+        }),
+        "http-user-token",
+      );
+      assert.equal(init.status, 200);
+
+      const call = await postMcp(
+        `${handle.url}/mcp`,
+        mcpBody(2, "tools/call", {
+          name: "tdei_list_my_project_groups",
+          arguments: { page: 1, pageSize: 10 },
+        }),
+        "http-user-token",
+      );
+      assert.equal(call.status, 200);
+      const text = await call.text();
+      assert.match(text, /AA Viewer Internal/);
+      assert.match(text, /listProjectGroups/);
+      assert.match(text, /\/api\/v1\/project-groups/);
+      assert.ok(listCalls.every((auth) => auth === "Bearer http-user-token"));
+      assert.ok(listCalls.length >= 2, "probe + tool call both hit project-groups");
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

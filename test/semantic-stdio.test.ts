@@ -9,8 +9,20 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { registerAwsTools } from "../src/aws/register-aws-tools.js";
 import { createServer } from "../src/server.js";
 
-test("stdio server exposes semantic tools backed by the AWS child", async () => {
-  const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
+  const requests: Request[] = [];
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const request = new Request(input, init);
+    requests.push(request);
+    assert.equal(request.headers.get("Authorization"), "Bearer test-token");
+    if (new URL(request.url).pathname === "/api/v1/datasets") {
+      return new Response(JSON.stringify([
+        { tdei_dataset_id: "dataset-1", name: "Seattle OSW" },
+      ]), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  });
+
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -38,14 +50,8 @@ test("stdio server exposes semantic tools backed by the AWS child", async () => 
           })),
         };
       },
-      async callTool(name, input) {
-        calls.push({ name, input });
-        const records = name === "listDatasetFiles" && input.name === "Seattle"
-          ? [{ tdei_dataset_id: "dataset-1", name: "Seattle OSW" }]
-          : [];
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(records) }],
-        };
+      async callTool(name) {
+        throw new Error(`semantic tools must not use AWS child (${name})`);
       },
       async close() {},
       isConnected: () => true,
@@ -67,7 +73,64 @@ test("stdio server exposes semantic tools backed by the AWS child", async () => 
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
     assert.equal(body.status, "complete");
     assert.equal(body.data.selected.tdei_dataset_id, "dataset-1");
-    assert.equal(calls.at(-1)?.name, "listDatasetFiles");
+    assert.equal(new URL(requests[0]!.url).pathname, "/api/v1/datasets");
+  } finally {
+    await client.close();
+  }
+});
+
+test("stdio list my project groups calls GET /api/v1/project-groups", async (t) => {
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const request = new Request(input, init);
+    assert.equal(new URL(request.url).pathname, "/api/v1/project-groups");
+    assert.equal(request.headers.get("Authorization"), "Bearer test-token");
+    return new Response(JSON.stringify([
+      {
+        tdei_project_group_id: "1ec1c79b-6b7a-4011-936b-c75dbbd903e3",
+        project_group_name: "AA Viewer Internal",
+      },
+    ]), { status: 200 });
+  });
+
+  const server = await createServer({
+    authManager: {
+      async startSsoLogin() { throw new Error("not used"); },
+      async getAccessToken() { return "test-token"; },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
+      getTokenVersion: () => 1,
+      async logout() { throw new Error("not used"); },
+    },
+    awsMcpClient: {
+      async listTools() { return { tools: [] }; },
+      async callTool() { throw new Error("must not use AWS child"); },
+      async close() {},
+      isConnected: () => false,
+    },
+    registerAwsTools,
+  });
+  const client = new Client({ name: "semantic-stdio-groups-client", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  try {
+    const result = await client.callTool({
+      name: "tdei_list_my_project_groups",
+      arguments: { page: 1, pageSize: 10 },
+    });
+    const first = result.content[0];
+    const body = JSON.parse(first?.type === "text" ? first.text : "{}");
+    assert.equal(body.status, "complete");
+    assert.equal(body.data.apiOperation, "listProjectGroups");
+    assert.equal(body.data.path, "/api/v1/project-groups");
+    assert.equal(
+      body.data.projectGroups[0].project_group_name,
+      "AA Viewer Internal",
+    );
   } finally {
     await client.close();
   }
