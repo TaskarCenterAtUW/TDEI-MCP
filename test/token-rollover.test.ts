@@ -3,8 +3,8 @@ import test from "node:test";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
-import { AwsToolsLifecycle } from "../src/aws/aws-tools-lifecycle.js";
-import { registerAwsTools } from "../src/aws/register-aws-tools.js";
+import { OpenApiToolsLifecycle } from "../src/openapi/openapi-tools-lifecycle.js";
+import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
 function listServicesTool() {
@@ -30,7 +30,7 @@ function makeAuth() {
   };
 }
 
-function makeAws() {
+function makeOpenApi() {
   let closes = 0;
   return {
     get closes() { return closes; },
@@ -43,9 +43,9 @@ function makeAws() {
   };
 }
 
-test("token rollover triggers exactly one child restart", async () => {
+test("token rollover does not reset the in-process OpenAPI provider", async () => {
   const auth = makeAuth();
-  const aws = makeAws();
+  const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -54,23 +54,23 @@ test("token rollover triggers exactly one child restart", async () => {
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
-    awsMcpClient: aws,
-    registerAwsTools,
+    openApiMcpClient: openapi,
+    registerTdeiOpenApiTools,
   });
-  const lifecycle = new AwsToolsLifecycle(server, auth, aws, registerAwsTools);
+  const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);
   await lifecycle.load();
   await lifecycle.callTool("listServices", {});
-  assert.equal(aws.closes, 0);
+  assert.equal(openapi.closes, 0);
   auth.bumpVersion();
   await lifecycle.callTool("listServices", {});
-  assert.equal(aws.closes, 1);
+  assert.equal(openapi.closes, 0);
   await lifecycle.callTool("listServices", {});
-  assert.equal(aws.closes, 1);
+  assert.equal(openapi.closes, 0);
 });
 
-test("concurrent calls during refresh issue one restart only", async () => {
+test("concurrent calls during token refresh keep the provider loaded", async () => {
   const auth = makeAuth();
-  const aws = makeAws();
+  const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -79,10 +79,10 @@ test("concurrent calls during refresh issue one restart only", async () => {
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
-    awsMcpClient: aws,
-    registerAwsTools,
+    openApiMcpClient: openapi,
+    registerTdeiOpenApiTools,
   });
-  const lifecycle = new AwsToolsLifecycle(server, auth, aws, registerAwsTools);
+  const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);
   await lifecycle.load();
   auth.bumpVersion();
   await Promise.all([
@@ -90,15 +90,12 @@ test("concurrent calls during refresh issue one restart only", async () => {
     lifecycle.callTool("listServices", {}),
     lifecycle.callTool("listServices", {}),
   ]);
-  assert.equal(aws.closes, 1);
+  assert.equal(openapi.closes, 0);
 });
 
-// Without the logout reset, load-after-bump would see a version mismatch and
-// close+reload (closes=2). With the reset, post-logout load is a silent first
-// load (closes stays 1 — logout's own close).
-test("logout resets version so next load starts fresh", async () => {
+test("logout resets the provider so next load starts fresh", async () => {
   const auth = makeAuth();
-  const aws = makeAws();
+  const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -107,20 +104,20 @@ test("logout resets version so next load starts fresh", async () => {
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
-    awsMcpClient: aws,
-    registerAwsTools,
+    openApiMcpClient: openapi,
+    registerTdeiOpenApiTools,
   });
-  const lifecycle = new AwsToolsLifecycle(server, auth, aws, registerAwsTools);
+  const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);
   await lifecycle.load();
   await lifecycle.logout();
   auth.bumpVersion();
   await lifecycle.load();
-  assert.equal(aws.closes, 1);
+  assert.equal(openapi.closes, 1);
 });
 
-test("registered tool handlers route through the lifecycle version gate", async () => {
+test("registered tool handlers keep using the loaded provider after token rollover", async () => {
   const auth = makeAuth();
-  const aws = makeAws();
+  const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -129,8 +126,8 @@ test("registered tool handlers route through the lifecycle version gate", async 
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
-    awsMcpClient: aws,
-    registerAwsTools,
+    openApiMcpClient: openapi,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "rollover-closure-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -138,10 +135,10 @@ test("registered tool handlers route through the lifecycle version gate", async 
 
   try {
     await client.callTool({ name: "listServices", arguments: {} });
-    assert.equal(aws.closes, 0);
+    assert.equal(openapi.closes, 0);
     auth.bumpVersion();
     await client.callTool({ name: "listServices", arguments: {} });
-    assert.equal(aws.closes, 1);
+    assert.equal(openapi.closes, 0);
   } finally {
     await client.close();
   }

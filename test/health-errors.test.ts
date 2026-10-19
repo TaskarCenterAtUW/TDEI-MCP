@@ -75,31 +75,30 @@ test("tdei_health works signed-out with stubbed probes", async () => {
   const report = await checkHealth(
     {
       auth: { getStatus: () => ({ configured: true, authenticated: false, state: "signed_out" as const, loginMethod: "sso" as const }) },
-      aws: { isConnected: () => false },
+      openapi: { isConnected: () => false },
     },
     {
       fetchImpl: (async () => new Response("{}", { status: 200 })) as typeof fetch,
-      runUvx: (async () => "uvx 0.12.7") as () => Promise<string>,
       canBind: (async () => true) as () => Promise<boolean>,
     },
   );
   assert.equal(report.ok, true);
   assert.equal(report.auth.state, "signed_out");
   assert.equal(report.spec.reachable, true);
-  assert.equal(report.uvx.found, true);
+  assert.equal(report.openapi.loaded, false);
   assert.equal(report.callback.portFree, true);
   const serialized = JSON.stringify(report);
   assert.ok(!serialized.includes("secret"));
 });
 
 test("tdei_health tool is listed and callable", async () => {
-  const awsStub = {
+  const openApiStub = {
     async listTools() { return { tools: [] }; },
     async callTool() { throw new Error("TDEI_SSO_REQUIRED"); },
     async close() {},
     isConnected: () => false,
   };
-  const { registerAwsTools } = await import("../src/aws/register-aws-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
   const server = await createServer({
     authManager: {
       async startSsoLogin() { throw new Error("not used"); },
@@ -108,8 +107,8 @@ test("tdei_health tool is listed and callable", async () => {
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: awsStub,
-    registerAwsTools,
+    openApiMcpClient: openApiStub,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "health-tool-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

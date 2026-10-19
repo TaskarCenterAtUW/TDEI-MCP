@@ -1,6 +1,8 @@
 # TDEI-MCP
 
-Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode retains the AWS Labs OpenAPI MCP server for raw API coverage. Hosted Streamable HTTP mode is a stateless Node server that calls TDEI directly with the access token supplied on every request.
+Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode loads raw API tools from the TDEI OpenAPI specification and executes them directly in TypeScript. Hosted Streamable HTTP mode is a stateless Node server that calls TDEI directly with the access token supplied on every request.
+
+The transport-neutral OpenAPI module can also build a separate MCP server for another specification. See [Reusing the OpenAPI MCP core](docs/openapi-mcp-core.md).
 
 The default configuration uses the **TDEI development environment**. You need an account with access to that environment; downloading the repository does not create an account or grant API permissions.
 
@@ -10,8 +12,7 @@ The default configuration uses the **TDEI development environment**. You need an
 npx -y tdei-mcp init
 ```
 
-This checks Node.js ≥22 and `uvx`, offers to install `uv` when it is missing,
-asks for your TDEI environment (dev / stage / prod / custom URL — one per
+This checks Node.js ≥22, asks for your TDEI environment (dev / stage / prod / custom URL — one per
 setup), verifies the MCP server, and writes the `tdei` entry into your MCP
 client config (Codex / Claude Desktop / VSCode / Custom-manual). The default
 SSO callback uses registered port 8765; if it is busy, setup stops with recovery
@@ -29,12 +30,9 @@ documented under Advanced below.
 ## Requirements
 
 - **Node.js 22** and npm. Check with `node --version` and `npm --version`.
-- **uv**, which provides `uvx`, for local stdio mode only. Follow the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/), then check with `uvx --version`. Hosted HTTP deployments do not need Python, uv, or the AWS child.
 - An MCP client that can launch a local **stdio** server, such as Codex. Generated API tool definitions are loaded during MCP initialization so clients see them in the initial catalogue; invoking them still requires SSO.
 - Access to TDEI through its browser-based SSO login.
-- Internet access to install dependencies, download the AWS child package and OpenAPI specification, and contact TDEI.
-
-The AWS child package is pinned to `awslabs.openapi-mcp-server@1.1.2`, the version tested with this connector. `uvx` manages that Python tool separately from the npm dependencies; its first launch may take longer while dependencies download.
+- Internet access to install dependencies, download the OpenAPI specification, and contact TDEI.
 
 ## Advanced: manual setup from a checkout (developers only)
 
@@ -82,8 +80,7 @@ missing, backs up an existing Codex config to `config.toml.tdei.bak`, and then
 writes an absolute Node + `dist/index.js` stdio entry. Restart Codex afterward.
 
 To keep separate source-checkout settings for each environment, create ignored
-local files that set only the API origin (spec URL, SSO callback, and AWS
-package use built-in defaults):
+local files that set only the API origin; the spec URL and SSO callback use built-in defaults:
 
 ```bash
 printf 'TDEI_API_URL=https://api-dev.tdei.us\n' > .env.dev
@@ -174,13 +171,13 @@ Use your client's stdio server settings with these values:
 | Arguments | `--env-file=/absolute/path/to/project/.env` and `/absolute/path/to/project/dist/index.js`, as two separate arguments |
 | Transport | stdio |
 
-The client process must be able to find `uvx` on its `PATH`. Restart the client after installing uv or changing its environment.
+The client process needs only Node.js and network access to the configured specification and API URLs.
 
 ### STDIO vs manual start
 
 **STDIO** is started automatically by your MCP client (Codex, Claude Desktop, VS Code, etc.) after `init` writes the client config. Do not run `node dist/index.js` yourself for stdio — with a terminal attached it exits and tells you to use HTTP or `init`.
 
-**Manual start** is only for Streamable HTTP (see below).
+For a non-blocking stdio handshake check, run `npm run check:stdio`. **Manual start** is only for Streamable HTTP (see below).
 
 ### HTTP mode (Streamable HTTP, stateless)
 
@@ -196,11 +193,11 @@ Example:
 
     curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer <token>" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
-Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request gets an ephemeral MCP server and direct TDEI HTTP adapter; no AWS child or MCP session is created.
+Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request gets an ephemeral MCP server and direct TDEI HTTP adapter; no MCP session is created.
 
 ### Docker deployment
 
-Build the image (multi-stage; ships compiled `dist/` plus Node 22 only—no Python, `uvx`, source, or development dependencies):
+Build the image (multi-stage; ships compiled `dist/` plus Node 22 only—no Python, source, or development dependencies):
 
     docker build -t tdei-mcp:http .
 
@@ -225,11 +222,11 @@ Both transports expose the common semantic tools:
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
 | `tdei_list_services` | List services by text, project group, or service type. |
-| `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer (same path as curl), not the AWS OpenAPI child. |
+| `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
 
-Hosted validation/upload accepts `inline_base64` assets up to 10MB. Client-local paths are intentionally unavailable to a remote server. Local stdio validation/upload accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token; these file mutations bypass the AWS child.
+Hosted validation/upload accepts `inline_base64` assets up to 10MB. Client-local paths are intentionally unavailable to a remote server. Local stdio validation/upload accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 
@@ -238,13 +235,13 @@ Local stdio mode also exposes these connector-management tools while signed out:
 | Tool | Purpose |
 | --- | --- |
 | `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated. |
-| `tdei_health` | Report connector health: auth state, AWS child, spec reachability, `uvx`, callback port, and config. Read-only, safe signed-out. |
+| `tdei_health` | Report connector health: auth state, OpenAPI provider, spec reachability, callback port, and config. Read-only, safe signed-out. |
 | `tdei_sso_login` | Start browser SSO and return the login URL. |
 | `tdei_test_authentication` | Check for a usable SSO session token. |
 | `tdei_load_api_tools` | Retry API tool loading after SSO succeeds. |
-| `tdei_logout` | Clear local tokens, close the AWS child, and return the browser SSO logout URL. |
+| `tdei_logout` | Clear local tokens, reset the OpenAPI provider, and return the browser SSO logout URL. |
 
-The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. The first authenticated API call restarts the AWS child with the user's access token.
+The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. Every API call obtains the current access token before calling TDEI.
 
 Raw authentication operations generated from the OpenAPI specification are intentionally hidden. Use the connector's `tdei_sso_login`, `tdei_auth_status`, and `tdei_logout` tools for session management.
 
@@ -254,7 +251,7 @@ For a first check, ask your AI client:
 
 Ask for a health report any time, signed out or authenticated:
 
-    {"ok": true, "auth": {"state": "authenticated"}, "child": {"connected": true, "mode": "authenticated"}, "spec": {"reachable": true, "latencyMs": 210}, "uvx": {"found": true}, "callback": {"portFree": true}}
+    {"ok": true, "auth": {"state": "authenticated"}, "openapi": {"loaded": true}, "spec": {"reachable": true, "latencyMs": 210}, "callback": {"portFree": true}}
 
 Bad env fails fast before serving anything:
 
@@ -264,9 +261,9 @@ Successful setup means SSO succeeds, generated tools appear, and a permitted API
 
 If loading fails, correct the underlying issue and call `tdei_load_api_tools`. If you changed `.env`, restart the connector first because configuration is read at process startup. Repeated or concurrent load requests do not register duplicate tools.
 
-Tokens are kept in process memory. When a token needs renewal, the connector attempts a refresh. If refresh fails, a new browser SSO login is required. It restarts the AWS child when the token changes.
+Tokens are kept in process memory. When a token needs renewal, the connector attempts a refresh. If refresh fails, a new browser SSO login is required.
 
-`tdei_logout` clears tokens and closes the AWS child while retaining registered tool definitions, then returns a `logoutUrl`. Open that URL in the same browser used for login to end the upstream SSO session. Call `tdei_sso_login` to authenticate again. To disconnect completely, disable the MCP entry or stop the connector through your client.
+`tdei_logout` clears tokens and resets the in-process OpenAPI provider while retaining registered tool definitions, then returns a `logoutUrl`. Open that URL in the same browser used for login to end the upstream SSO session. Call `tdei_sso_login` to authenticate again. To disconnect completely, disable the MCP entry or stop the connector through your client.
 
 ## Configuration reference
 
@@ -277,7 +274,6 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_API_URL` | No | `https://api-dev.tdei.us` (the only value a typical stdio setup needs) |
 | `TDEI_SPEC_URL` | No | Derived from `TDEI_API_URL` (`dev` / `stage` / `main` OpenAPI JSON on GitHub) |
 | `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var) |
-| `TDEI_AWS_MCP_PACKAGE` | No | `awslabs.openapi-mcp-server@1.1.2` (stdio OpenAPI child only; unused in HTTP mode) |
 | `TDEI_GEOCODER_URL` | No | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback |
 | `TDEI_GEOCODER_USER_AGENT` | No | Identifies this connector; set an operator contact when required by the provider |
 | `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
@@ -287,7 +283,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 
-The API URL must use HTTPS. Spec URL, SSO callback, and AWS package are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it. Keep the AWS package pin only if you need a version other than the default, and only for stdio.
+The API URL must use HTTPS. The spec URL and SSO callback are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it.
 
 ## Endpoint filtering and workflows (tdei.config.json)
 
@@ -315,9 +311,8 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | SSO login is required | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | Callback port is already in use | Stop the process using port 8765, then retry login. |
 | SSO redirect returns 400 | Confirm the client ID and callback URL exactly match the backend registration. |
-| `uvx` cannot be launched / `ENOENT` | Install uv and make sure `uvx` is on the MCP client's `PATH`, then restart the client. A desktop app may have a different `PATH` from your terminal. |
-| Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, check `uvx`, network access, and the specification URL, then restart the MCP client. |
-| First load times out | Check network access and allow time for `uvx` downloads. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
+| Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, network access, and the specification URL, then restart the MCP client. |
+| First load times out | Check network access to the specification URL. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
 | URL validation fails | Ensure `TDEI_API_URL` (and any `TDEI_SPEC_URL` override) is a valid absolute URL beginning with `https://`. |
 | `TDEI_SSO_REQUIRED` | Call `tdei_sso_login` and open the returned `loginUrl`. |
@@ -329,7 +324,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | `TDEI_UPSTREAM_5XX` | Retry; if it persists, check TDEI environment status. |
 | `TDEI_CONFIG_INVALID` | Check `.env` values and `tdei.config.json` against the schema. |
 | `TDEI_TOOL_DISABLED` | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`. |
-| `TDEI_CHILD_UNAVAILABLE` | Call `tdei_load_api_tools` to restart the AWS child. |
+| `TDEI_CHILD_UNAVAILABLE` | Legacy error code: call `tdei_load_api_tools` to reload the in-process OpenAPI provider. |
 | `TDEI_CONFIG_INVALID` | Check the named variable against its rule; the error JSON includes a working example value. |
 
 Connector diagnostics are written to stderr, which MCP clients usually capture in server logs. Keep stdout reserved for MCP messages.
@@ -345,7 +340,7 @@ npm run build
 
 The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability.
 
-To verify a real TDEI connection, configure the registered SSO client and callback in `.env` and ensure `uvx` is available, then run:
+To verify a real TDEI connection, configure the registered SSO client and callback in `.env`, then run:
 
 ```bash
 npm run test:live

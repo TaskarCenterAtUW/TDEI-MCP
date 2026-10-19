@@ -66,7 +66,7 @@ test("hosted semantic server calls TDEI directly with its request bearer", async
   }
 });
 
-test("HTTP MCP list my project groups uses direct GET /api/v1/project-groups (no AWS child)", async () => {
+test("HTTP MCP list my project groups uses direct GET /api/v1/project-groups (no OpenAPI provider)", async () => {
   const requests: Request[] = [];
   const server = createHttpSemanticServer({
     accessToken: "http-bearer",

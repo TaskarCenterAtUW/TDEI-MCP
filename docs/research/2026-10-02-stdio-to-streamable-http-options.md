@@ -1,4 +1,4 @@
-# Hosting the AWS OpenAPI MCP server: open-source options
+# Hosting the external OpenAPI OpenAPI MCP server: open-source options
 
 Research snapshot: 2026-10-02
 
@@ -6,25 +6,25 @@ Research snapshot: 2026-10-02
 
 For TDEI, a generic stdio-to-HTTP bridge solves only the transport conversion. It does **not** by itself solve the harder requirement: each remote user must invoke the TDEI API with the correct user identity and no credential leakage across users.
 
-The best near-term choice is to keep the HTTP adapter already in this repository and replace its "one AWS child per HTTP request" behavior with a bounded, idle-evicted pool keyed by validated user identity/token version. The code already performs TDEI token validation, builds the same curated tool surface as local stdio mode, and gives every request a fresh outer MCP server. Those TDEI-specific behaviors would have to be rebuilt around any generic bridge.
+The best near-term choice is to keep the HTTP adapter already in this repository and replace its "one OpenAPI child per HTTP request" behavior with a bounded, idle-evicted pool keyed by validated user identity/token version. The code already performs TDEI token validation, builds the same curated tool surface as local stdio mode, and gives every request a fresh outer MCP server. Those TDEI-specific behaviors would have to be rebuilt around any generic bridge.
 
-The best adoption candidate for a deliberate replacement is [agentgateway](https://github.com/agentgateway/agentgateway), not a stdio bridge. It can expose an OpenAPI document directly as MCP, supports Streamable HTTP, stdio and HTTP upstreams, validates JWT/OAuth, can pass a validated JWT or exchange it for a backend token, and has standalone and Kubernetes deployments. A proof of concept could remove both the AWS child and most of `src/http.ts`. It must first prove parity on the live TDEI specification, tool names/descriptions, draft-04 schema quirks, uploads, and TDEI's token/audience model.
+The best adoption candidate for a deliberate replacement is [agentgateway](https://github.com/agentgateway/agentgateway), not a stdio bridge. It can expose an OpenAPI document directly as MCP, supports Streamable HTTP, stdio and HTTP upstreams, validates JWT/OAuth, can pass a validated JWT or exchange it for a backend token, and has standalone and Kubernetes deployments. A proof of concept could remove both the OpenAPI child and most of `src/http.ts`. It must first prove parity on the live TDEI specification, tool names/descriptions, draft-04 schema quirks, uploads, and TDEI's token/audience model.
 
-For a quick single-tenant demo, [Supergateway](https://github.com/supercorp-ai/supergateway) is the simplest wrapper. It is not a production multi-user identity solution. [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) has the same limitation. [mcp-stdio](https://github.com/shigechika/mcp-stdio) has much better session and user isolation, but it cannot directly turn each caller's TDEI access token into the `AUTH_TOKEN` of the AWS child. [IBM ContextForge](https://github.com/IBM/mcp-context-forge) is a capable enterprise gateway, but is substantially more platform than TDEI currently needs and still uses a separate translate/bridge process for stdio children.
+For a quick single-tenant demo, [Supergateway](https://github.com/supercorp-ai/supergateway) is the simplest wrapper. It is not a production multi-user identity solution. [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) has the same limitation. [mcp-stdio](https://github.com/shigechika/mcp-stdio) has much better session and user isolation, but it cannot directly turn each caller's TDEI access token into the `AUTH_TOKEN` of the OpenAPI child. [IBM ContextForge](https://github.com/IBM/mcp-context-forge) is a capable enterprise gateway, but is substantially more platform than TDEI currently needs and still uses a separate translate/bridge process for stdio children.
 
 ## The TDEI-specific constraint
 
-AWS Labs' OpenAPI MCP server still advertises [stdio as its only transport](https://github.com/awslabs/mcp/blob/main/src/openapi-mcp-server/README.md), and its request for native Streamable HTTP support [remains an open issue](https://github.com/awslabs/mcp/issues/2350). It accepts its upstream API credential at process startup through `--auth-token` or `AUTH_TOKEN`. Therefore a shared AWS child is also a shared TDEI identity.
+external Python OpenAPI MCP server still advertises [stdio as its only transport](https://modelcontextprotocol.io), and its request for native Streamable HTTP support [remains an open issue](https://modelcontextprotocol.io). It accepts its upstream API credential at process startup through `--auth-token` or `AUTH_TOKEN`. Therefore a shared OpenAPI child is also a shared TDEI identity.
 
 That yields three safe process models:
 
-1. A fresh AWS process for every MCP request, which is what this repository currently does.
-2. One AWS process per validated TDEI user/token, with bounded reuse and eviction.
-3. No AWS process: convert OpenAPI operations to MCP tools in the HTTP gateway itself and attach the user's upstream credential per call.
+1. A fresh external OpenAPI process for every MCP request, which is what this repository currently does.
+2. One external OpenAPI process per validated TDEI user/token, with bounded reuse and eviction.
+3. No external OpenAPI process: convert OpenAPI operations to MCP tools in the HTTP gateway itself and attach the user's upstream credential per call.
 
-A single long-lived AWS process for all hosted users is unsafe because its bearer is fixed at startup. A generic bridge that starts one configured child has the same problem.
+A single long-lived external OpenAPI process for all hosted users is unsafe because its bearer is fixed at startup. A generic bridge that starts one configured child has the same problem.
 
-There is also an authorization-boundary issue to resolve before a public launch. MCP's official security guidance defines accepting a client token for another resource and forwarding it unchanged as the [token-passthrough anti-pattern](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx). The current HTTP mode accepts a TDEI API bearer, validates it, and forwards it to the TDEI API through AWS. This is pragmatic identity propagation, but it is MCP-spec compliant only if the token's intended resource/audience and the MCP resource are designed accordingly. The standards-aligned hosted design is:
+There is also an authorization-boundary issue to resolve before a public launch. MCP's official security guidance defines accepting a client token for another resource and forwarding it unchanged as the [token-passthrough anti-pattern](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx). The current HTTP mode accepts a TDEI API bearer, validates it, and forwards it to the TDEI API through external OpenAPI. This is pragmatic identity propagation, but it is MCP-spec compliant only if the token's intended resource/audience and the MCP resource are designed accordingly. The standards-aligned hosted design is:
 
 - authenticate the MCP client to the MCP resource with an audience-bound token;
 - bind the authenticated MCP principal to a separately obtained TDEI credential; and
@@ -34,14 +34,14 @@ Agentgateway supports backend OAuth token exchange. ContextForge supports per-ca
 
 ## Comparison
 
-| Project | License | stdio -> Streamable HTTP | Inbound auth / multi-user isolation | Per-user TDEI bearer into AWS child | Deployment / scale | TDEI verdict |
+| Project | License | stdio -> Streamable HTTP | Inbound auth / multi-user isolation | Per-user TDEI bearer into OpenAPI child | Deployment / scale | TDEI verdict |
 |---|---|---:|---|---|---|---|
 | Existing TDEI-MCP | No repository license declared | Yes | Validates each TDEI bearer; one child per request | Yes | Docker exists; high cold-start cost | **Keep and harden now** |
 | [Supergateway](https://github.com/supercorp-ai/supergateway) | [MIT](https://raw.githubusercontent.com/supercorp-ai/supergateway/main/LICENSE) | Yes, stateful or stateless | No documented inbound OAuth/JWT validator or identity-to-child credential mapping | Static command/config only | Official Docker/uvx images; session timeout; recent v4.0.0 | Demo/single tenant only |
 | [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) | [MIT](https://raw.githubusercontent.com/sparfenyuk/mcp-proxy/main/LICENSE) | Yes | No documented inbound bearer validation or per-user child credential binding | Static command/environment only | PyPI, GHCR/Docker Hub, named servers | Demo or private network only |
 | [mcp-stdio](https://github.com/shigechika/mcp-stdio) | [MIT](https://raw.githubusercontent.com/shigechika/mcp-stdio/main/LICENSE) | Yes (`serve`) | Static bearer or embedded OAuth; one child per session; OAuth sessions bound to user | No direct original-token-to-`AUTH_TOKEN` mapping | Session caps, idle TTL, durable token store | Good bridge, but needs TDEI auth adapter |
 | [IBM ContextForge](https://github.com/IBM/mcp-context-forge) (`mcpgateway`) | [Apache-2.0](https://raw.githubusercontent.com/IBM/mcp-context-forge/main/LICENSE) | Via separate `mcpgateway.translate` bridge | JWT, OIDC/SSO, teams, RBAC, per-server OAuth, token exchange | Possible only with deliberate upstream credential mapping/bridge design | Docker, Compose, Helm/Kubernetes, Redis/HA; operationally large | Adopt only if enterprise gateway features are required |
-| [agentgateway](https://github.com/agentgateway/agentgateway) | [Apache-2.0](https://github.com/agentgateway/agentgateway/blob/main/LICENSE) | Yes; also direct OpenAPI -> MCP | MCP OAuth/JWT, CEL authorization, API keys, rate limits; backend token passthrough/exchange | Direct OpenAPI path avoids AWS child | Standalone binary/container and Kubernetes/Helm | **Best replacement PoC** |
+| [agentgateway](https://github.com/agentgateway/agentgateway) | [Apache-2.0](https://github.com/agentgateway/agentgateway/blob/main/LICENSE) | Yes; also direct OpenAPI -> MCP | MCP OAuth/JWT, CEL authorization, API keys, rate limits; backend token passthrough/exchange | Direct OpenAPI path avoids OpenAPI child | Standalone binary/container and Kubernetes/Helm | **Best replacement PoC** |
 
 ## Project findings
 
@@ -49,7 +49,7 @@ Agentgateway supports backend OAuth token exchange. ContextForge supports per-ca
 
 Supergateway v4.0.0 can publish a stdio process at `/mcp` using current Streamable HTTP, in stateless or stateful mode, with child session timeout and current/legacy MCP protocol compatibility. The [README documents the bridge, Docker images and uvx-equipped image](https://github.com/supercorp-ai/supergateway#stdio--streamable-http); the [v4.0.0 release](https://github.com/supercorp-ai/supergateway/releases/tag/v4.0.0) reports newer MCP protocol support, subprocess cleanup improvements and a six-hour soak test.
 
-Its `--oauth2Bearer` and `--header` flags are header configuration, not a complete inbound multi-user authorization system. The [CLI source](https://github.com/supercorp-ai/supergateway/blob/main/src/index.ts) has no issuer/JWKS/audience validation or mapping of an authenticated caller to a distinct child environment. Wrapping the AWS server would therefore give either:
+Its `--oauth2Bearer` and `--header` flags are header configuration, not a complete inbound multi-user authorization system. The [CLI source](https://github.com/supercorp-ai/supergateway/blob/main/src/index.ts) has no issuer/JWKS/audience validation or mapping of an authenticated caller to a distinct child environment. Wrapping the external OpenAPI server would therefore give either:
 
 - one shared TDEI token in the command/environment; or
 - a child lifecycle that is isolated by MCP session but not provisioned with that session user's TDEI credential.
@@ -66,7 +66,7 @@ The available server options do not document inbound JWT/OAuth validation, tenan
 
 `mcp-stdio serve` is the strongest purpose-built stdio publisher in this group. The [official README](https://github.com/shigechika/mcp-stdio#reverse-gateway-serve-mode) documents current Streamable HTTP, optional static bearer or embedded OAuth 2.1, one backend child per MCP session, user binding that prevents a leaked session ID crossing tenants, concurrent-session limits, per-owner caps, idle eviction, request-size limits, and token persistence.
 
-Its multi-user mode delegates login to a trusted reverse proxy and can inject the authenticated principal into a child with `--user-env`. It does not document injecting the actual, validated upstream access token into a unique environment variable for the AWS child. Supplying only a user name is insufficient because AWS needs `AUTH_TOKEN`. A small TDEI credential broker/wrapper would still be required, which moves the most sensitive part back into custom code.
+Its multi-user mode delegates login to a trusted reverse proxy and can inject the authenticated principal into a child with `--user-env`. It does not document injecting the actual, validated upstream access token into a unique environment variable for the OpenAPI child. Supplying only a user name is insufficient because the external server needs `AUTH_TOKEN`. A small TDEI credential broker/wrapper would still be required, which moves the most sensitive part back into custom code.
 
 This is worth reconsidering if the TDEI authentication model changes to server-side token storage keyed by principal: `mcp-stdio` could then own transport/session/process mechanics while a narrow wrapper resolves a principal to a TDEI credential.
 
@@ -74,7 +74,7 @@ This is worth reconsidering if the TDEI authentication model changes to server-s
 
 ContextForge is a broad gateway, registry and management plane rather than a thin stdio wrapper. Its [README](https://github.com/IBM/mcp-context-forge) documents MCP/REST/gRPC federation, centralized governance, plugins and observability. Its [security documentation](https://github.com/IBM/mcp-context-forge/blob/main/docs/docs/architecture/security-features.md) covers JWT enforcement, per-server OAuth, OIDC providers, scoped credentials, teams/RBAC, header controls, audit and policy plugins. The project reached GA in 2026 and [v1.0.11](https://github.com/IBM/mcp-context-forge/releases/tag/v1.0.11) moved to MCP SDK 2.x with opt-in modern protocol negotiation.
 
-ContextForge gateways themselves are network endpoints. For a stdio child, the official workflow is to run a separate [`mcpgateway.translate --stdio ... --expose-streamable-http`](https://github.com/IBM/mcp-context-forge/blob/main/docs/docs/using/mcpgateway-translate.md) process and register its HTTP URL in ContextForge. That means at least two additional runtime layers around AWS.
+ContextForge gateways themselves are network endpoints. For a stdio child, the official workflow is to run a separate [`mcpgateway.translate --stdio ... --expose-streamable-http`](https://github.com/IBM/mcp-context-forge/blob/main/docs/docs/using/mcpgateway-translate.md) process and register its HTTP URL in ContextForge. That means at least two additional runtime layers around external OpenAPI.
 
 ContextForge is a sensible front door if TDEI needs team administration, catalog/registry, per-tool policy, audit, plugins, several upstream MCP servers, or multi-cluster operations. It is excessive if the only goal is one TDEI API exposed over stdio and HTTPS. It also does not eliminate the need to decide how a gateway identity becomes the upstream TDEI credential.
 
@@ -97,7 +97,7 @@ Agentgateway's OpenAPI binary-body support is evolving. Its issue history shows 
 
 ### 6. A promising design reference that is not currently adoptable
 
-[`elad-bar/mcp-streamable-http-bridge`](https://github.com/elad-bar/mcp-streamable-http-bridge) maps `x-<ENV>` headers to child environments, hashes resolved environments to reuse a process per tenant, and implements idle eviction and Prometheus metrics. This is close to the process model TDEI needs because AWS accepts `AUTH_TOKEN` via the environment.
+[`elad-bar/mcp-streamable-http-bridge`](https://github.com/elad-bar/mcp-streamable-http-bridge) maps `x-<ENV>` headers to child environments, hashes resolved environments to reuse a process per tenant, and implements idle eviction and Prometheus metrics. This is close to the process model TDEI needs because external OpenAPI accepts `AUTH_TOKEN` via the environment.
 
 However, the repository has only a handful of commits, no releases, and its README explicitly says to add a license; there is no license file. Publicly readable source is not automatically open-source software. It should be treated as a design reference, not a dependency, unless the owner adds an acceptable license and the security model receives review.
 
@@ -109,9 +109,9 @@ The hosted path in [`src/http.ts`](../../src/http.ts) is a real Streamable HTTP 
 - validates that bearer with TDEI;
 - creates an ephemeral auth adapter that cannot refresh or retain the token;
 - builds the same outer `McpServer` and tool surface as stdio mode; and
-- closes the MCP transport, outer server and AWS process after the response.
+- closes the MCP transport, outer server and external OpenAPI process after the response.
 
-[`src/aws/aws-mcp-client.ts`](../../src/aws/aws-mcp-client.ts) starts AWS with the request's TDEI bearer, while [`src/aws/register-aws-tools.ts`](../../src/aws/register-aws-tools.ts) sanitizes schemas, hides conflicting auth tools, filters operations, preserves result shape and normalizes failures.
+[`src/openapi/openapi-mcp-client.ts`](../../src/openapi/openapi-mcp-client.ts) starts the external server with the request's TDEI bearer, while [`src/tdei/register-openapi-tools.ts`](../../src/tdei/register-openapi-tools.ts) sanitizes schemas, hides conflicting auth tools, filters operations, preserves result shape and normalizes failures.
 
 This is secure by process lifetime but expensive. A natural-language request commonly causes an initialize/list-tools exchange followed by several tool calls; every HTTP JSON-RPC request currently pays Python/uvx startup, spec loading and tool discovery again.
 
@@ -133,13 +133,13 @@ The code also needs normal production HTTP controls that no stdio wrapper remove
 Keep local stdio unchanged. For hosted HTTP:
 
 1. Cache the sanitized tool catalog independently of user credentials. Tool discovery is based on the OpenAPI specification, not the caller.
-2. Replace per-request AWS creation with a bounded `AwsChildPool` keyed by a non-reversible digest of a validated identity plus token version/expiry. Never key logs or metrics by raw tokens.
+2. Replace per-request external OpenAPI creation with a bounded `OpenApiChildPool` keyed by a non-reversible digest of a validated identity plus token version/expiry. Never key logs or metrics by raw tokens.
 3. Give entries an idle TTL, absolute lifetime, per-user cap and global cap. Deduplicate concurrent creation for the same key. Evict/close on token expiry, logout, child failure and shutdown.
-4. Serialize calls only when the AWS child requires it; allow different users' children to run concurrently.
+4. Serialize calls only when the OpenAPI child requires it; allow different users' children to run concurrently.
 5. Put a small rate/concurrency limiter before child acquisition so attackers cannot turn bearer validation into unbounded process creation.
 6. Add the HTTP/OAuth security controls listed above.
 
-This preserves the already-tested AWS tool generation and TDEI-specific behavior while removing most cold starts.
+This preserves the already-tested external OpenAPI tool generation and TDEI-specific behavior while removing most cold starts.
 
 ### Parallel proof of concept: agentgateway direct OpenAPI
 
@@ -162,7 +162,7 @@ Do not add ContextForge merely to convert transport. Add it if TDEI later needs 
 
 ## Uploads and downloads are a separate design problem
 
-None of these gateways automatically makes an OpenAPI multipart operation agent-friendly. MCP tool arguments and Streamable HTTP frames are JSON; relaying large datasets as base64 bloats memory and request size. The current workflow runner explicitly rejects multipart operations, and AWS's documented feature list does not promise a hosted large-file channel.
+None of these gateways automatically makes an OpenAPI multipart operation agent-friendly. MCP tool arguments and Streamable HTTP frames are JSON; relaying large datasets as base64 bloats memory and request size. The current workflow runner explicitly rejects multipart operations, and external OpenAPI's documented feature list does not promise a hosted large-file channel.
 
 For TDEI datasets, prefer explicit domain tools:
 

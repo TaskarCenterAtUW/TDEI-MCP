@@ -4,7 +4,7 @@ import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
 import { createServer, type ServerDependencies } from "../src/index.js";
-import { registerAwsTools } from "../src/aws/register-aws-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 
 function signedOutStatus() {
   return {
@@ -25,7 +25,7 @@ test("SSO login loads API tools and supports calls and logout", async () => {
   let serviceCallCount = 0;
   let logoutCount = 0;
 
-  const awsClient = {
+  const openApiClient = {
     async listTools() {
       return {
         tools: [
@@ -86,8 +86,8 @@ test("SSO login loads API tools and supports calls and logout", async () => {
         };
       },
     },
-    awsMcpClient: awsClient,
-    registerAwsTools,
+    openApiMcpClient: openApiClient,
+    registerTdeiOpenApiTools,
   };
 
   const server = await createServer(dependencies);
@@ -161,12 +161,12 @@ test("signed-out server remains available for SSO login", async () => {
         };
       },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() { throw new Error("TDEI_SSO_REQUIRED"); },
       async callTool() { throw new Error("TDEI_SSO_REQUIRED"); },
       async close() {},
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   };
 
   const server = await createServer(dependencies);

@@ -4,9 +4,9 @@
 
 **Goal:** Serve TDEI-MCP over Streamable HTTP, stateless, reusing the same SSO protocol with per-request Bearer auth.
 
-**Architecture:** New self-contained `src/http.ts` (Node built-in `http` + SDK `WebStandardStreamableHTTPServerTransport` in stateless mode) builds an ephemeral `AuthManager` (via `injectAccessToken`) + ephemeral `AwsMcpClient(tokenProvider)` per request, serves them through the existing `createServer(dependencies)` injection point, and closes the child after each response. `src/index.ts` holds only the exclusive startup branch (dynamic import).
+**Architecture:** New self-contained `src/http.ts` (Node built-in `http` + SDK `WebStandardStreamableHTTPServerTransport` in stateless mode) builds an ephemeral `AuthManager` (via `injectAccessToken`) + ephemeral `OpenApiMcpClient(tokenProvider)` per request, serves them through the existing `createServer(dependencies)` injection point, and closes the child after each response. `src/index.ts` holds only the exclusive startup branch (dynamic import).
 
-**Tech Stack:** TypeScript ES2022 NodeNext ESM, `@modelcontextprotocol/server ^2.0.0` (`WebStandardStreamableHTTPServerTransport`), `zod/v4`, Node built-in `http`, `node:test` + `tsx`, existing `uvx awslabs.openapi-mcp-server@1.1.2` child unchanged.
+**Tech Stack:** TypeScript ES2022 NodeNext ESM, `@modelcontextprotocol/server ^2.0.0` (`WebStandardStreamableHTTPServerTransport`), `zod/v4`, Node built-in `http`, `node:test` + `tsx`, existing `uvx external Python OpenAPI package` child unchanged.
 
 **Spec:** `docs/superpowers/specs/2026-09-30-streamable-http-design.md`
 
@@ -16,11 +16,11 @@
 - TypeScript strict, ESM (`module: NodeNext`, `moduleResolution: NodeNext`), `rootDir ./src`, `outDir dist`.
 - Never write MCP payloads to stdout; diagnostics go to stderr; stdout reserved for MCP messages (stdio) — HTTP mode also logs only to stderr.
 - Zero new runtime dependencies: Node built-in `http` only. SDK import is `@modelcontextprotocol/server` root (`WebStandardStreamableHTTPServerTransport`); the deep `streamableHttp.js` subpath does not exist in v2 — do not import it.
-- `src/http.ts` is self-contained and side-effect-free on import: no module-level servers/listeners, no mutation of STDIO singletons (`authManager`, `awsMcpClient`). `src/index.ts` contains only the exclusive branch via dynamic `import("./http.js")`.
+- `src/http.ts` is self-contained and side-effect-free on import: no module-level servers/listeners, no mutation of STDIO singletons (`authManager`, `openApiMcpClient`). `src/index.ts` contains only the exclusive branch via dynamic `import("./http.js")`.
 - STDIO behavior byte-identical when the flag is absent; HTTP mode opens no STDIO, STDIO mode opens no port.
 - Stateless v1: no server sessions, no refresh-token vaulting, server never refreshes on the client's behalf; `Mcp-Session-Id` echoed for SSE routing only, never auth.
 - `TDEI_API_URL` and `TDEI_SPEC_URL` must remain HTTPS. Callback rule: stdio keeps strict `http://127.0.0.1:<port>/callback`; http mode allows any `https://` URL plus `http://127.0.0.1/` for local dev (must still be backend-registered for `tdei-mcp` or SSO returns 400).
-- Keep hiding connector-managed auth tools: `authenticate, refreshToken, ssoRedirect, ssoLogin, ssoLogout` (`src/aws/register-aws-tools.ts:64-70`).
+- Keep hiding connector-managed auth tools: `authenticate, refreshToken, ssoRedirect, ssoLogin, ssoLogout` (`src/tdei/register-openapi-tools.ts:64-70`).
 - Keep green: `npm test` and `npm run build`.
 - Test runner: `node --import tsx --test test/<file>.test.ts` (matches package.json `test` script glob).
 
@@ -30,10 +30,10 @@
 
 - Modify: `src/config.ts` — add `transport`, `httpHost`, `httpPort`, `httpBasePath`, `corsOrigins`, `tlsCert`, `tlsKey`; bifurcate `ssoCallbackUrl` validator on transport.
 - Modify: `src/auth/auth-manager.ts` — add `injectAccessToken(token)` factory + `validateToken()` (local expiry + lightweight TDEI probe); keep singleton export and loopback methods untouched for STDIO.
-- Modify: `src/aws/aws-mcp-client.ts` — add optional constructor `tokenProvider`; use it instead of the `authManager` singleton when provided.
+- Modify: `src/openapi/openapi-mcp-client.ts` — add optional constructor `tokenProvider`; use it instead of the `authManager` singleton when provided.
 - Create: `src/http.ts` — isolated HTTP entry: `serveHttp()` + Bearer middleware, CORS, per-request ephemeral stack, stateless transport wiring, 401 envelope, graceful shutdown.
 - Modify: `src/index.ts` — exclusive transport branch only (`--transport=` overrides `TDEI_TRANSPORT`); stdio path unchanged.
-- Test: `test/http-stateless.test.ts` — 401s, isolation, validator bifurcation (mocked fetch + stubbed AWS child, no live TDEI).
+- Test: `test/http-stateless.test.ts` — 401s, isolation, validator bifurcation (mocked fetch + stubbed OpenAPI child, no live TDEI).
 - Modify: `README.md` — HTTP section with indented (not fenced) run + curl example.
 - Modify: `.env.example` — document new variables.
 
@@ -47,7 +47,7 @@
 - Test: `test/http-stateless.test.ts` (validator cases live here; config cases first)
 
 **Interfaces:**
-- Consumes: existing `config` object (`apiUrl, specUrl, ssoClientId, ssoCallbackUrl, awsMcpPackage`).
+- Consumes: existing `config` object (`apiUrl, specUrl, ssoClientId, ssoCallbackUrl, openApiMcpPackage`).
 - Produces: `config.transport: "stdio" | "http"`, `config.httpHost: string`, `config.httpPort: number`, `config.httpBasePath: string`, `config.corsOrigins: string[]`, `config.tlsCert: string | undefined`, `config.tlsKey: string | undefined`. `ssoCallbackUrl` rule bifurcates on resolved transport.
 
 - [ ] **Step 1: Write the failing test**
@@ -375,24 +375,24 @@ git commit -m "feat: add injectAccessToken and validateToken for stateless auth"
 
 ---
 
-### Task 3: AWS client — per-request `tokenProvider` with guaranteed `close()`
+### Task 3: external OpenAPI client — per-request `tokenProvider` with guaranteed `close()`
 
 **Files:**
-- Modify: `src/aws/aws-mcp-client.ts:1-126`
+- Modify: `src/openapi/openapi-mcp-client.ts:1-126`
 - Test: extend `test/http-stateless.test.ts` (constructor + close cases with stubbed child)
 
 **Interfaces:**
 - Consumes: `AuthManager` type (for provider signature); existing `startChild`, `close`, `listTools`, `callTool`.
-- Produces: `new AwsMcpClient(tokenProvider?: () => Promise<string>)`. Default (no arg) preserves singleton behavior for STDIO. `connectAuthenticated()` uses provider when present. `callTool`/`listTools` semantics unchanged.
+- Produces: `new OpenApiMcpClient(tokenProvider?: () => Promise<string>)`. Default (no arg) preserves singleton behavior for STDIO. `connectAuthenticated()` uses provider when present. `callTool`/`listTools` semantics unchanged.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `test/http-stateless.test.ts`. The child spawn (`uvx`) must not run in tests, so stub `startChild` via subclass:
 
 ```ts
-import { AwsMcpClient } from "../src/aws/aws-mcp-client.js";
+import { OpenApiMcpClient } from "../src/openApi/openApi-mcp-client.js";
 
-class StubAwsMcpClient extends AwsMcpClient {
+class StubOpenApiMcpClient extends OpenApiMcpClient {
   public startedWith: string[] = [];
   public closedCount = 0;
   protected override async startChild(accessToken: string): Promise<void> {
@@ -413,9 +413,9 @@ class StubAwsMcpClient extends AwsMcpClient {
 Wait — `startChild` is `private` in the current file, so `protected override` fails to compile. The Step 3 implementation changes `private startChild` to `protected startChild` (safe: no behavior change, enables test subclassing). Write the test as above; Step 2 fails on the constructor arg (compile error `Expected 0 arguments, but got 1`), which is the red we want first. Then:
 
 ```ts
-test("AwsMcpClient uses injected provider instead of singleton", async () => {
+test("OpenApiMcpClient uses injected provider instead of singleton", async () => {
   const seen: string[] = [];
-  const client = new StubAwsMcpClient(async () => {
+  const client = new StubOpenApiMcpClient(async () => {
     seen.push("provider-called");
     return "bearer-A";
   });
@@ -427,8 +427,8 @@ test("AwsMcpClient uses injected provider instead of singleton", async () => {
 });
 
 test("two clients with different providers stay isolated", async () => {
-  const a = new StubAwsMcpClient(async () => "bearer-A");
-  const b = new StubAwsMcpClient(async () => "bearer-B");
+  const a = new StubOpenApiMcpClient(async () => "bearer-A");
+  const b = new StubOpenApiMcpClient(async () => "bearer-B");
   await a.callTool("listServices", {});
   await b.callTool("listServices", {});
   assert.deepEqual(a.startedWith, ["bearer-A"]);
@@ -438,19 +438,19 @@ test("two clients with different providers stay isolated", async () => {
 });
 ```
 
-Also update the `ServerDependencies` aws surface? No — `callTool | close | listTools` already covers it.
+Also update the `ServerDependencies` openApi surface? No — `callTool | close | listTools` already covers it.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node --import tsx --test test/http-stateless.test.ts`
-Expected: FAIL with `Expected 0 arguments, but got 1` (TS compile error via tsx) on `new StubAwsMcpClient(async () => ...)`.
+Expected: FAIL with `Expected 0 arguments, but got 1` (TS compile error via tsx) on `new StubOpenApiMcpClient(async () => ...)`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/aws/aws-mcp-client.ts`:
+In `src/openapi/openapi-mcp-client.ts`:
 
 ```ts
-export class AwsMcpClient {
+export class OpenApiMcpClient {
   private client?: Client;
   private transport?: StdioClientTransport;
   private connectedMode?: ConnectionMode;
@@ -471,7 +471,7 @@ private async connectAuthenticated(): Promise<void> {
     if (this.client) {
       await this.close();
     }
-    console.error("[aws-mcp] starting per-request AWS OpenAPI MCP server");
+    console.error("[openapi] starting per-request external OpenAPI OpenAPI MCP server");
     const accessToken = await this.tokenProvider();
     await this.startChild(accessToken, "authenticated");
     return;
@@ -491,13 +491,13 @@ private async connectAuthenticated(): Promise<void> {
   if (this.client) {
     console.error(
       this.connectedMode === "discovery"
-        ? "[aws-mcp] restarting discovery server with authenticated session"
-        : "[aws-mcp] access token changed; restarting AWS MCP server",
+        ? "[openapi] restarting discovery server with authenticated session"
+        : "[openapi] access token changed; restarting OpenAPI MCP server",
     );
     await this.close();
   }
 
-  console.error("[aws-mcp] starting authenticated AWS OpenAPI MCP server");
+  console.error("[openapi] starting authenticated external OpenAPI OpenAPI MCP server");
   await this.startChild(accessToken, "authenticated", tokenVersion);
 }
 ```
@@ -519,7 +519,7 @@ async listTools() {
 }
 ```
 
-`callTool` is unchanged (it already calls `connectAuthenticated()`; the provider branch inside handles stateless). Singleton export `export const awsMcpClient = new AwsMcpClient();` unchanged.
+`callTool` is unchanged (it already calls `connectAuthenticated()`; the provider branch inside handles stateless). Singleton export `export const openApiMcpClient = new OpenApiMcpClient();` unchanged.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -529,8 +529,8 @@ Expected: PASS (all prior + 2 client tests). Then run `npm test` — `session-li
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/aws/aws-mcp-client.ts test/http-stateless.test.ts
-git commit -m "feat: support per-request token provider in AwsMcpClient"
+git add src/openapi/openapi-mcp-client.ts test/http-stateless.test.ts
+git commit -m "feat: support per-request token provider in OpenApiMcpClient"
 ```
 
 ---
@@ -539,13 +539,13 @@ git commit -m "feat: support per-request token provider in AwsMcpClient"
 
 **Files:**
 - Create: `src/http.ts`
-- Test: extend `test/http-stateless.test.ts` (HTTP-level: 401s, good-Bearer tools/list + call, isolation — all with stubbed AWS child and mocked fetch, real `http` server on loopback)
+- Test: extend `test/http-stateless.test.ts` (HTTP-level: 401s, good-Bearer tools/list + call, isolation — all with stubbed OpenAPI child and mocked fetch, real `http` server on loopback)
 
 **Interfaces:**
-- Consumes: `config` (Task 1), `injectAccessToken` (Task 2), `AwsMcpClient` provider constructor (Task 3), `createServer` + `ServerDependencies` from `./index.js`, `WebStandardStreamableHTTPServerTransport` from `@modelcontextprotocol/server`.
-- Produces: `serveHttp(options?: { createAwsClient?: (token: string) => AwsMcpClient; fetchImpl?: typeof fetch }): Promise<{ close(): Promise<void>; url: string }>`. Defaults use the real `AwsMcpClient` + global fetch; tests inject stubs. No other exports with side effects.
+- Consumes: `config` (Task 1), `injectAccessToken` (Task 2), `OpenApiMcpClient` provider constructor (Task 3), `createServer` + `ServerDependencies` from `./index.js`, `WebStandardStreamableHTTPServerTransport` from `@modelcontextprotocol/server`.
+- Produces: `serveHttp(options?: { createOpenApiClient?: (token: string) => OpenApiMcpClient; fetchImpl?: typeof fetch }): Promise<{ close(): Promise<void>; url: string }>`. Defaults use the real `OpenApiMcpClient` + global fetch; tests inject stubs. No other exports with side effects.
 
-Isolation contract (test-enforced): importing `../src/http.js` must not open ports, spawn children, or mutate `authManager`/`awsMcpClient` singletons.
+Isolation contract (test-enforced): importing `../src/http.js` must not open ports, spawn children, or mutate `authManager`/`openApiMcpClient` singletons.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -571,16 +571,16 @@ async function postMcp(url: string, body: string, token?: string) {
 }
 
 test("http.ts import has no side effects on singletons", async () => {
-  const { authManager, awsMcpClient } = await import("../src/auth/auth-manager.js").then(
-    async (auth) => ({ authManager: auth.authManager, awsMcpClient: (await import("../src/aws/aws-mcp-client.js")).awsMcpClient }),
+  const { authManager, openApiMcpClient } = await import("../src/auth/auth-manager.js").then(
+    async (auth) => ({ authManager: auth.authManager, openApiMcpClient: (await import("../src/openApi/openApi-mcp-client.js")).openApiMcpClient }),
   );
   await import("../src/http.js");
   assert.equal(authManager.getStatus().authenticated, false);
-  assert.equal(awsMcpClient.isConnected(), false);
+  assert.equal(openApiMcpClient.isConnected(), false);
 });
 
 test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
-  const handle = await serveHttp({ createAwsClient: () => { throw new Error("must not spawn"); } });
+  const handle = await serveHttp({ createOpenApiClient: () => { throw new Error("must not spawn"); } });
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(response.status, 401);
@@ -605,7 +605,7 @@ test("POST /mcp with bad bearer returns 401 without spawning child", async () =>
   }) as typeof fetch;
   try {
     const handle = await serveHttp({
-      createAwsClient: () => { spawned += 1; throw new Error("must not spawn"); },
+      createOpenApiClient: () => { spawned += 1; throw new Error("must not spawn"); },
     });
     try {
       const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
@@ -622,7 +622,7 @@ test("POST /mcp with bad bearer returns 401 without spawning child", async () =>
 });
 ```
 
-Good-Bearer + isolation test (mock probe 200, stub AWS child listing `listServices`):
+Good-Bearer + isolation test (mock probe 200, stub OpenAPI child listing `listServices`):
 
 ```ts
 test("good bearer serves tools/list and calls; bearers isolated", async () => {
@@ -639,11 +639,11 @@ test("good bearer serves tools/list and calls; bearers isolated", async () => {
   try {
     const closed: string[] = [];
     const handle = await serveHttp({
-      createAwsClient: (token: string) => {
-        const stub = new StubAwsMcpClient(async () => token);
+      createOpenApiClient: (token: string) => {
+        const stub = new StubOpenApiMcpClient(async () => token);
         const origClose = stub.close.bind(stub);
         stub.close = async () => { closed.push(token); await origClose(); };
-        return stub as unknown as AwsMcpClient;
+        return stub as unknown as OpenApiMcpClient;
       },
     });
     try {
@@ -662,7 +662,7 @@ test("good bearer serves tools/list and calls; bearers isolated", async () => {
 });
 ```
 
-Note: `StubAwsMcpClient` is defined in the Task 3 section of this same file — reuse it; do not redefine. The good-Bearer test expects the stub child's `listTools()` to return `listServices`; extend the Task 3 stub's fake client `listTools` to return the `listServices` tool definition from `session-lifecycle.test.ts:29-43` shape (copy that literal into the stub).
+Note: `StubOpenApiMcpClient` is defined in the Task 3 section of this same file — reuse it; do not redefine. The good-Bearer test expects the stub child's `listTools()` to return `listServices`; extend the Task 3 stub's fake client `listTools` to return the `listServices` tool definition from `session-lifecycle.test.ts:29-43` shape (copy that literal into the stub).
 
 Response assertion detail: `WebStandardStreamableHTTPServerTransport` in stateless mode with default `enableJsonResponse: false` returns SSE (`text/event-stream`). The test asserts `status === 200` and does not parse the body — parsing SSE frames is brittle; status + child-spawn/close + token assertions prove the path. `tools/call` coverage comes from the stub `callTool` returning `ok` (asserted indirectly via 200).
 
@@ -681,11 +681,11 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { config } from "./config.js";
 import { injectAccessToken } from "./auth/auth-manager.js";
-import { AwsMcpClient } from "./aws/aws-mcp-client.js";
+import { OpenApiMcpClient } from "./openApi/openApi-mcp-client.js";
 import { createServer } from "./index.js";
 
 export interface HttpServeOptions {
-  createAwsClient?: (token: string) => AwsMcpClient;
+  createOpenApiClient?: (token: string) => OpenApiMcpClient;
   fetchImpl?: typeof fetch;
 }
 
@@ -825,9 +825,9 @@ async function handleMcpRequest(
     return;
   }
 
-  const awsClient = options.createAwsClient(bearer);
+  const openApiClient = options.createOpenApiClient(bearer);
   try {
-    const server = await createServer({ authManager: auth, awsMcpClient: awsClient, registerAwsTools: (await import("./aws/register-aws-tools.js")).registerAwsTools });
+    const server = await createServer({ authManager: auth, openApiMcpClient: openApiClient, registerOpenApiTools: (await import("./openApi/register-openApi-tools.js")).registerOpenApiTools });
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);
     try {
@@ -851,7 +851,7 @@ async function handleMcpRequest(
     }
     await server.close().catch(() => undefined);
   } finally {
-    await awsClient.close().catch(() => undefined);
+    await openApiClient.close().catch(() => undefined);
   }
 }
 ```
@@ -884,14 +884,14 @@ const httpAuth = {
 };
 ```
 
-Spread of a class instance loses prototype methods — `...ephemeralAuth` copies only own enumerable props (none for methods). So construct explicitly with the four picked methods (as above, without spread). `getAccessToken()` on the ephemeral manager returns the injected token while unexpired, else throws `TDEI_SSO_REQUIRED` (it holds no refresh token, so it never refreshes — correct stateless behavior). The registered `tdei_sso_login` tool checks `auth.getStatus().authenticated` first: with a valid Bearer it reports "already authenticated"; with login pending semantics N/A. `tdei_auth_status` reports Bearer validity. `tdei_logout` clears the ephemeral tokens and returns the logout URL with "drop your token" semantics — adjust? The tool text from `index.ts` says "Local tokens and the AWS API tool session have already been cleared" — accurate enough for the ephemeral instance. No `index.ts` tool-text change in v1 (document as-is).
+Spread of a class instance loses prototype methods — `...ephemeralAuth` copies only own enumerable props (none for methods). So construct explicitly with the four picked methods (as above, without spread). `getAccessToken()` on the ephemeral manager returns the injected token while unexpired, else throws `TDEI_SSO_REQUIRED` (it holds no refresh token, so it never refreshes — correct stateless behavior). The registered `tdei_sso_login` tool checks `auth.getStatus().authenticated` first: with a valid Bearer it reports "already authenticated"; with login pending semantics N/A. `tdei_auth_status` reports Bearer validity. `tdei_logout` clears the ephemeral tokens and returns the logout URL with "drop your token" semantics — adjust? The tool text from `index.ts` says "Local tokens and the OpenAPI tool session have already been cleared" — accurate enough for the ephemeral instance. No `index.ts` tool-text change in v1 (document as-is).
 
 `serveHttp`:
 
 ```ts
 export async function serveHttp(options: HttpServeOptions = {}): Promise<{ close(): Promise<void>; url: string }> {
   const resolved: Required<HttpServeOptions> = {
-    createAwsClient: options.createAwsClient ?? ((token: string) => new AwsMcpClient(async () => token)),
+    createOpenApiClient: options.createOpenApiClient ?? ((token: string) => new OpenApiMcpClient(async () => token)),
     fetchImpl: options.fetchImpl ?? fetch,
   };
   // validateToken uses global fetch internally; when tests pass fetchImpl, temporarily swap:
@@ -956,7 +956,7 @@ Document this as intentional and scoped (single await, restored in finally). Tes
 
 DELETE method: spec's transport supports DELETE for session termination; stateless v1 has no sessions — return 405 naming GET/POST. Covered by the method check above (DELETE falls into 405). `Mcp-Session-Id` request header is passed through `toWebRequest` untouched and echoed by the transport for SSE routing only.
 
-Default `createAwsClient` uses the Task 3 provider constructor — per-request spawn, closed in `finally`.
+Default `createOpenApiClient` uses the Task 3 provider constructor — per-request spawn, closed in `finally`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1071,7 +1071,7 @@ Example:
 
     curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer <token>" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
-Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request spawns the AWS child fresh (v1 trade-off); the child is closed after the response.
+Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request spawns the OpenAPI child fresh (v1 trade-off); the child is closed after the response.
 ```
 
 Indented (not fenced) per spec §5. Also extend the Configuration reference table with the six new variables.
@@ -1110,6 +1110,6 @@ git commit -m "feat: add exclusive http transport branch and docs"
 - Deviation from issue text, carried from spec: `validateToken()` probes `GET /api/v1/project-groups` (live auth proof doubles as validation; acceptance flow "authenticate then test list_Services" preserved end-to-end via `tools/list` + `listServices` on valid Bearer).
 - Supersedes: `docs/superpowers/plans/2026-09-26-streamable-http-support.md` (stateful sessions, Express, headless SSO) — that plan's approach contradicts the Issue #3 agreed v1 decisions; do not implement it. Executor: ignore that file.
 - Placeholder scan: every step has exact file paths, code blocks, run commands, expected outputs. No TBD/TODO. "Similar to" glue (stub `listServices` shape) points to an exact file+line source.
-- Type consistency: `Transport` (`config.ts`) → `validateSsoCallbackUrl(value, transport)` → `config.transport`; `injectAccessToken(token, expiresInSeconds?) → AuthManager` + `validateToken(): Promise<void>` (throws named errors); `new AwsMcpClient(tokenProvider?: () => Promise<string>)`; `serveHttp(options?, overrides?) → Promise<{ close, url }>`; `HttpServeOptions { createAwsClient?, fetchImpl? }`, `HttpServeOverrides { port?, host? }`. Names used identically across Tasks 2-5.
+- Type consistency: `Transport` (`config.ts`) → `validateSsoCallbackUrl(value, transport)` → `config.transport`; `injectAccessToken(token, expiresInSeconds?) → AuthManager` + `validateToken(): Promise<void>` (throws named errors); `new OpenApiMcpClient(tokenProvider?: () => Promise<string>)`; `serveHttp(options?, overrides?) → Promise<{ close, url }>`; `HttpServeOptions { createOpenApiClient?, fetchImpl? }`, `HttpServeOverrides { port?, host? }`. Names used identically across Tasks 2-5.
 - Ordering risk flagged inline: Task 4's `serveHttp` final signature is defined in Task 5 (env-import-time problem) — executor must read Task 5 before writing Task 4.
 - Test-port risk handled: `TDEI_HTTP_PORT=18080` at test-file top; `serveHttp` builds URL from `server.address()`.

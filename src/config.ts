@@ -2,9 +2,6 @@ import { specUrlForApiUrl } from "./init/envs.js";
 
 const DEFAULT_API_URL = "https://api-dev.tdei.us";
 
-const DEFAULT_AWS_MCP_PACKAGE =
-  "awslabs.openapi-mcp-server@1.1.2";
-
 const DEFAULT_SSO_CALLBACK_URL = "http://127.0.0.1:8765/callback";
 
 /** Fixed OAuth client for this MCP connector. Not configurable — never use portal/web/API client ids. */
@@ -30,7 +27,6 @@ export interface ResolvedConfig {
   corsOrigins: string[];
   tlsCert: string | undefined;
   tlsKey: string | undefined;
-  awsMcpPackage: string;
   geocoderUrl: string | undefined;
   geocoderUserAgent: string;
 }
@@ -170,7 +166,6 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
         .filter(Boolean),
       tlsCert: process.env.TDEI_TLS_CERT?.trim() || undefined,
       tlsKey: process.env.TDEI_TLS_KEY?.trim() || undefined,
-      awsMcpPackage: process.env.TDEI_AWS_MCP_PACKAGE?.trim() || DEFAULT_AWS_MCP_PACKAGE,
       geocoderUrl,
       geocoderUserAgent: process.env.TDEI_GEOCODER_USER_AGENT?.trim() ||
         "tdei-mcp/0.1 (https://github.com/TaskarCenterAtUW/TDEI-MCP)",

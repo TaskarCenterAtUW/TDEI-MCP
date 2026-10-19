@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
-import { registerAwsTools } from "../src/aws/register-aws-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
 test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
@@ -36,7 +36,7 @@ test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() {
         return {
           tools: ["listDatasetFiles", "listServices"].map((name) => ({
@@ -51,12 +51,12 @@ test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
         };
       },
       async callTool(name) {
-        throw new Error(`semantic tools must not use AWS child (${name})`);
+        throw new Error(`semantic tools must not use OpenAPI provider (${name})`);
       },
       async close() {},
       isConnected: () => true,
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "semantic-stdio-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -105,13 +105,13 @@ test("stdio list my project groups calls GET /api/v1/project-groups", async (t) 
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() { return { tools: [] }; },
-      async callTool() { throw new Error("must not use AWS child"); },
+      async callTool() { throw new Error("must not use OpenAPI provider"); },
       async close() {},
       isConnected: () => false,
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "semantic-stdio-groups-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -172,16 +172,16 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() { return { tools: [] }; },
       async callTool(name) {
         childCalls.push(name);
-        throw new Error("multipart validation must bypass the AWS child");
+        throw new Error("multipart validation must bypass the OpenAPI provider");
       },
       async close() {},
       isConnected: () => false,
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "semantic-stdio-upload-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

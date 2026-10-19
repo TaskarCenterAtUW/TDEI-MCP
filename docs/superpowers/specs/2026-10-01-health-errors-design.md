@@ -47,7 +47,7 @@ behavior change to transports, auth, or the config schema.
 
 ## 4. Wiring
 
-- `src/aws/register-aws-tools.ts` tool-closure catch: `errorResult(error)` →
+- `src/tdei/register-openapi-tools.ts` tool-closure catch: `errorResult(error)` →
   `formatError(error)`. Raw child errors become coded JSON; the 256KB
   truncation (§6) applies here.
 - `src/workflows/runner.ts` step-failure path: the abort error carries
@@ -83,7 +83,7 @@ behavior change to transports, auth, or the config schema.
   first 12 hex chars), never logged. Adopted in new code (health, errors,
   Part A rollover log) only. Stdout stays reserved for MCP.
 - 256KB cap: `text` outputs over 262144 bytes (UTF-8) are truncated in
-  `formatError()` and the `register-aws-tools.ts` pass-through, appended
+  `formatError()` and the `register-openapi-tools.ts` pass-through, appended
   with `{truncated: true, hint: "Output exceeded 256KB; refine filters or
   call a narrower operation."}`.
 
@@ -122,7 +122,7 @@ behavior change to transports, auth, or the config schema.
 ## 10. References
 
 - `src/api/tdei-client.ts:4-117` (dead `TdeiApiError` + status table to fold in)
-- `src/aws/register-aws-tools.ts:124-140` (closure catch to rewire)
+- `src/tdei/register-openapi-tools.ts:124-140` (closure catch to rewire)
 - `src/workflows/runner.ts:97-122` (step-failure path)
 - `src/server.ts` (`tdei_auth_status` pattern, `createServer` injection)
 - `src/http.ts` (401 envelope to extend with `retryable`)

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { decodeAwsRecords } from "../src/adapters/aws-result-decoder.js";
+import { decodeOpenApiRecords } from "../src/adapters/openapi-result-decoder.js";
 import { recordsFrom } from "../src/adapters/tdei-records.js";
 
 const fixtures = JSON.parse(
@@ -21,7 +21,7 @@ test("live project-groups / services / datasets arrays parse for HTTP and MCP pa
   for (const key of ["listProjectGroups", "listServices", "listDatasetFiles", "oswDatasetViewerFeedbacks"]) {
     const body = fixtures[key];
     const direct = recordsFrom(body);
-    const viaMcp = decodeAwsRecords(asMcp(body));
+    const viaMcp = decodeOpenApiRecords(asMcp(body));
     assert.ok(direct.length > 0, key);
     assert.equal(viaMcp.length, direct.length, key);
   }
@@ -33,7 +33,7 @@ test("live versions envelopes parse via versions key", () => {
     const direct = recordsFrom(body);
     assert.equal(direct.length, 1, key);
     assert.equal(typeof direct[0]?.version, "string", key);
-    assert.equal(decodeAwsRecords(asMcp(body)).length, 1, key);
+    assert.equal(decodeOpenApiRecords(asMcp(body)).length, 1, key);
   }
 });
 
@@ -52,12 +52,12 @@ test("wrapped project_groups envelope still parses", () => {
 
 test("empty jobs list is a valid complete parse", () => {
   assert.deepEqual(recordsFrom(fixtures.listJobs), []);
-  assert.deepEqual(decodeAwsRecords(asMcp(fixtures.listJobs)), []);
+  assert.deepEqual(decodeOpenApiRecords(asMcp(fixtures.listJobs)), []);
 });
 
 test("non-JSON upstream text surfaces a short actionable error", () => {
   assert.throws(
-    () => decodeAwsRecords({
+    () => decodeOpenApiRecords({
       content: [{ type: "text", text: "tdei_project_group_id is required for non-admin user" }],
     }),
     /tdei_project_group_id is required/,

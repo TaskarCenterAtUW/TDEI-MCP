@@ -1,16 +1,16 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import { decodeAwsRecords } from "../src/adapters/aws-result-decoder.js";
+import { decodeOpenApiRecords } from "../src/adapters/openapi-result-decoder.js";
 
 const group = { tdei_project_group_id: "group-1", name: "AA Viewer Internal" };
 
-test("AWS decoder reads a top-level project group array", () => {
-  assert.deepEqual(decodeAwsRecords([group]), [group]);
+test("OpenAPI decoder reads a top-level project group array", () => {
+  assert.deepEqual(decodeOpenApiRecords([group]), [group]);
 });
 
-test("AWS decoder reads project_groups wrapped in MCP text content", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder reads project_groups wrapped in MCP text content", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{
       type: "text",
       text: JSON.stringify({ project_groups: [group] }),
@@ -18,8 +18,8 @@ test("AWS decoder reads project_groups wrapped in MCP text content", () => {
   }), [group]);
 });
 
-test("AWS decoder reads projectGroups wrapped in MCP text content", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder reads projectGroups wrapped in MCP text content", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{
       type: "text",
       text: JSON.stringify({ projectGroups: [group] }),
@@ -27,24 +27,24 @@ test("AWS decoder reads projectGroups wrapped in MCP text content", () => {
   }), [group]);
 });
 
-test("AWS decoder reads structuredContent when text content is absent", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder reads structuredContent when text content is absent", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{ type: "image", data: "not-json" }],
     structuredContent: { project_groups: [group] },
   }), [group]);
 });
 
-test("AWS decoder surfaces plain-text upstream errors", () => {
+test("OpenAPI decoder surfaces plain-text upstream errors", () => {
   assert.throws(
-    () => decodeAwsRecords({
+    () => decodeOpenApiRecords({
       content: [{ type: "text", text: "tdei_project_group_id is required for non-admin user" }],
     }),
     /tdei_project_group_id is required/,
   );
 });
 
-test("AWS decoder reads versions envelopes from live API shapes", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder reads versions envelopes from live API shapes", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{
       type: "text",
       text: JSON.stringify({ versions: [{ version: "0.3" }] }),
@@ -52,8 +52,8 @@ test("AWS decoder reads versions envelopes from live API shapes", () => {
   }), [{ version: "0.3" }]);
 });
 
-test("AWS decoder prefers non-empty project_groups over empty data", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder prefers non-empty project_groups over empty data", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{
       type: "text",
       text: JSON.stringify({ data: [], project_groups: [group] }),
@@ -61,8 +61,8 @@ test("AWS decoder prefers non-empty project_groups over empty data", () => {
   }), [group]);
 });
 
-test("AWS decoder parses double-encoded MCP text JSON", () => {
-  assert.deepEqual(decodeAwsRecords({
+test("OpenAPI decoder parses double-encoded MCP text JSON", () => {
+  assert.deepEqual(decodeOpenApiRecords({
     content: [{
       type: "text",
       text: JSON.stringify(JSON.stringify([group])),

@@ -5,14 +5,12 @@ import {
   authManager,
   type AuthManager,
 } from "./auth/auth-manager.js";
-import {
-  awsMcpClient,
-  type AwsMcpClient,
-} from "./aws/aws-mcp-client.js";
+import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
+import { openApiMcpClient } from "./tdei/openapi-provider.js";
 import { errorResult } from "./mcp/responses.js";
 import { log } from "./mcp/log.js";
-import { registerAwsTools } from "./aws/register-aws-tools.js";
-import { AwsToolsLifecycle } from "./aws/aws-tools-lifecycle.js";
+import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
+import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
@@ -23,25 +21,16 @@ import { createConfiguredPlaceResolver } from "./adapters/configured-place-resol
 
 export interface HealthProbes {
   fetchImpl?: typeof fetch;
-  runUvx?: () => Promise<string>;
   canBind?: (port: number, host: string) => Promise<boolean>;
 }
 
 export interface HealthReport {
   ok: boolean;
   auth: { state: string; expiresAt?: number };
-  child: { connected: boolean; mode: string };
+  openapi: { loaded: boolean };
   spec: { url: string; reachable: boolean; latencyMs?: number; hint?: string };
-  uvx: { found: boolean; version?: string; hint?: string };
   callback: { url: string; portFree: boolean | "n/a"; hint?: string };
   config: { transport: string; mode: string };
-}
-
-async function defaultRunUvx(): Promise<string> {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const { stdout } = await promisify(execFile)("uvx", ["--version"], { timeout: 10_000 });
-  return stdout;
 }
 
 async function defaultCanBind(port: number, host: string): Promise<boolean> {
@@ -57,7 +46,7 @@ async function defaultCanBind(port: number, host: string): Promise<boolean> {
 export async function checkHealth(
   deps: {
     auth: Pick<AuthManager, "getStatus">;
-    aws: { isConnected(): boolean };
+    openapi: { isConnected(): boolean };
   },
   probes: HealthProbes = {},
 ): Promise<HealthReport> {
@@ -76,14 +65,6 @@ export async function checkHealth(
     spec = { url: getConfig().specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
   }
 
-  let uvx: HealthReport["uvx"];
-  try {
-    const version = await (probes.runUvx ?? defaultRunUvx)();
-    uvx = { found: true, version: version.trim() };
-  } catch {
-    uvx = { found: false, hint: "uvx not found on PATH; install uv (https://docs.astral.sh/uv/getting-started/installation/)." };
-  }
-
   let callback: HealthReport["callback"];
   try {
     const url = new URL(getConfig().ssoCallbackUrl);
@@ -100,13 +81,12 @@ export async function checkHealth(
     callback = { url: getConfig().ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
   }
 
-  const ok = spec.reachable && uvx.found && callback.portFree !== false;
+  const ok = spec.reachable && callback.portFree !== false;
   return {
     ok,
     auth: { state: status.state, ...(status.expiresAt ? { expiresAt: status.expiresAt } : {}) },
-    child: { connected: deps.aws.isConnected(), mode: status.authenticated ? "authenticated" : "discovery" },
+    openapi: { loaded: deps.openapi.isConnected() },
     spec,
-    uvx,
     callback,
     config: { transport: getConfig().transport, mode: loadConfigFile().filter.mode },
   };
@@ -117,42 +97,41 @@ export interface ServerDependencies {
     AuthManager,
     "completeSsoLogin" | "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
   >;
-  awsMcpClient: Pick<
-    AwsMcpClient,
+  openApiMcpClient: Pick<
+    OpenApiMcpClient,
     "callTool" | "close" | "listTools" | "isConnected"
   >;
-  registerAwsTools: typeof registerAwsTools;
+  registerTdeiOpenApiTools: typeof registerTdeiOpenApiTools;
   binaryDownloads?: Pick<BinaryTdeiDownloads, "download">;
 }
 
 export async function createServer(
   dependencies: ServerDependencies = {
     authManager,
-    awsMcpClient,
-    registerAwsTools,
+    openApiMcpClient,
+    registerTdeiOpenApiTools,
   },
 ) {
   const auth = dependencies.authManager;
-  const awsClient = dependencies.awsMcpClient;
+  const openApiClient = dependencies.openApiMcpClient;
 
   const server = new McpServer({
     name: "tdei-mcp",
     version: "0.1.0",
   });
-  const awsToolsLifecycle = new AwsToolsLifecycle(
+  const openApiToolsLifecycle = new OpenApiToolsLifecycle(
     server,
     auth,
-    awsClient,
-    dependencies.registerAwsTools,
+    openApiClient,
+    dependencies.registerTdeiOpenApiTools,
     dependencies.binaryDownloads ??
       new BinaryTdeiDownloads({
         baseUrl: getConfig().apiUrl,
         tokenProvider: () => auth.getAccessToken(),
       }),
   );
-  // Semantic intents call TDEI over HTTP with the SSO bearer — same path as
-  // curl / portal — instead of routing through the AWS OpenAPI MCP child,
-  // which can decode a successful project-groups response as [].
+  // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
+  // generated tools use the in-process OpenAPI provider.
   const semanticModule = new SemanticIntentModule({
     operations: new HttpTdeiOperations(
       getConfig().apiUrl,
@@ -190,7 +169,7 @@ export async function createServer(
         void login.completion
           .then(async () => {
             console.error("[auth] SSO login successful");
-            await awsToolsLifecycle.load();
+            await openApiToolsLifecycle.load();
           })
           .catch((error) => {
             console.error(
@@ -230,7 +209,7 @@ export async function createServer(
     async ({ callbackUrl }) => {
       try {
         await auth.completeSsoLogin(callbackUrl);
-        await awsToolsLifecycle.load();
+        await openApiToolsLifecycle.load();
         return {
           content: [{ type: "text", text: "TDEI SSO login completed." }],
         };
@@ -266,12 +245,12 @@ export async function createServer(
     "tdei_health",
     {
       description:
-        "Report connector health: auth state, AWS child, spec reachability, uvx, callback port, and config. Read-only, safe signed-out, never emits tokens.",
+        "Report connector health: auth state, OpenAPI provider, specification reachability, callback port, and config. Read-only, safe signed-out, never emits tokens.",
       inputSchema: z.object({}),
     },
     async (_args) => {
       log("info", "health check", { tool: "tdei_health" });
-      const report = await checkHealth({ auth, aws: awsClient });
+      const report = await checkHealth({ auth, openapi: openApiClient });
       return {
         content: [
           {
@@ -341,7 +320,7 @@ export async function createServer(
     },
     async (_args) => {
       try {
-        const logout = await awsToolsLifecycle.logout();
+        const logout = await openApiToolsLifecycle.logout();
 
         void logout.completion
           .then(() => console.error("[auth] SSO logout successful"))
@@ -360,7 +339,7 @@ export async function createServer(
                 status: "logout_pending",
                 logoutUrl: logout.logoutUrl,
                 callbackUrl: logout.callbackUrl,
-                message: "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the AWS API tool session have already been cleared.",
+                message: "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the OpenAPI tool session have already been cleared.",
               }, null, 2),
             },
           ],
@@ -374,12 +353,12 @@ export async function createServer(
     "tdei_load_api_tools",
     {
       description:
-        "Authenticate with TDEI and load all AWS-generated TDEI API tools into this MCP server.",
+        "Authenticate with TDEI and load all OpenAPI-generated TDEI API tools into this MCP server.",
       inputSchema: z.object({}),
     },
     async () => {
       try {
-        const loadResult = await awsToolsLifecycle.load();
+        const loadResult = await openApiToolsLifecycle.load();
 
         if (loadResult === "already-loaded") {
           return {
@@ -415,7 +394,7 @@ export async function createServer(
     },
     async () => {
       try {
-        const result = await awsToolsLifecycle.reload();
+        const result = await openApiToolsLifecycle.reload();
 
         return {
           content: [
@@ -433,12 +412,12 @@ export async function createServer(
 
   // Discover tool definitions before MCP initialization so hosts that cache
   // the initial catalogue can see API tools before the user signs in. Calls
-  // still require SSO and restart the child with the real access token.
+  // still require SSO and inject the current access token per request.
   try {
-    await awsToolsLifecycle.load();
+    await openApiToolsLifecycle.load();
   } catch (error) {
     console.error(
-      "[aws-tools] initial discovery failed:",
+      "[openapi-tools] initial discovery failed:",
       error instanceof Error ? error.message : String(error),
     );
   }

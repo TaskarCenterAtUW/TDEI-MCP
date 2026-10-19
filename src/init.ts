@@ -23,7 +23,7 @@ function detectCheckout(): LocalCheckout | undefined {
 function usage(): string {
   return [
     "Usage:",
-    "  tdei-mcp init [--env dev|stage|prod | --url <https-url> | --env-file <path>] [--client codex|claude|vscode|custom] [--port <n>] [--install-uv|--no-install-uv]",
+    "  tdei-mcp init [--env dev|stage|prod | --url <https-url> | --env-file <path>] [--client codex|claude|vscode|custom] [--port <n>]",
     "  tdei-mcp switch base-url [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode]",
     "",
     "First setup: tdei-mcp init. Change environment: tdei-mcp switch base-url.",
@@ -83,7 +83,6 @@ try {
     const flags = sub === "switch" ? rest.slice(1) : rest;
     const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port", "--env-file"] : [])]);
     for (let index = 0; index < flags.length; index += 1) {
-      if (sub === "init" && ["--install-uv", "--no-install-uv"].includes(flags[index] as string)) continue;
       if (!valued.has(flags[index] as string)) throw new Error(`unknown option ${flags[index]}; run tdei-mcp --help`);
       if (!flags[index + 1] || flags[index + 1]?.startsWith("--")) {
         throw new Error(`missing value for ${flags[index]}`);
@@ -119,11 +118,6 @@ try {
         ...(envFileFlag ? { envFile: resolve(envFileFlag) } : {}),
         ...(clientFlag ? { client: clientFlag as ClientName } : {}),
         ...(portFlag === undefined ? {} : { port: assertPort(portFlag) }),
-        ...(rest.includes("--install-uv")
-          ? { installUv: true }
-          : rest.includes("--no-install-uv")
-            ? { installUv: false }
-            : {}),
         ...(local ? { local } : {}),
       });
     } finally {

@@ -35,7 +35,7 @@ tooling before any typed error can surface. There is no
   - `getConfig()` memoizes the first successful load for runtime use; on
     failure throws a single `TdeiConfigError` carrying the errors array.
   - The module-level `config` const export is removed. All consumers switch
-    to `getConfig()`: `src/auth/auth-manager.ts`, `src/aws/aws-mcp-client.ts`,
+    to `getConfig()`: `src/auth/auth-manager.ts`, `src/openapi/openapi-mcp-client.ts`,
     `src/server.ts` (incl. `checkHealth`), `src/http.ts`, `src/init/*`.
   - Unchanged: `Transport`, `validateSsoCallbackUrl`, every env name,
     default, and validation rule.

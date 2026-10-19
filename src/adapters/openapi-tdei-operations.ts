@@ -1,4 +1,4 @@
-import { decodeAwsRecords } from "./aws-result-decoder.js";
+import { decodeOpenApiRecords } from "./openapi-result-decoder.js";
 import type {
   DatasetSearch,
   ServiceSearch,
@@ -16,14 +16,14 @@ import type {
   ListProjectGroupsInput,
 } from "../intents/types.js";
 
-export type AwsToolCaller = (
+export type TdeiOpenApiToolCaller = (
   tool: string,
   input: Record<string, unknown>,
 ) => Promise<unknown>;
 
-export class AwsTdeiOperations implements TdeiOperations {
+export class OpenApiTdeiOperations implements TdeiOperations {
   constructor(
-    private readonly callTool: AwsToolCaller,
+    private readonly callTool: TdeiOpenApiToolCaller,
     private readonly isDenied: (tool: string) => boolean = () => false,
     private readonly mutations?: Required<Pick<TdeiOperations, "validateDataset" | "uploadDataset">>,
   ) {}
@@ -105,6 +105,6 @@ export class AwsTdeiOperations implements TdeiOperations {
     if (this.isDenied(tool)) {
       throw new Error(`TDEI operation "${tool}" is disabled by config.`);
     }
-    return decodeAwsRecords(await this.callTool(tool, input));
+    return decodeOpenApiRecords(await this.callTool(tool, input));
   }
 }

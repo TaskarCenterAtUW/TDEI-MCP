@@ -24,13 +24,14 @@ test("callback validation mirrors src/config.ts", () => {
   assert.throws(() => assertCallbackUrl("http://localhost:8765/callback"), /TDEI_SSO_CALLBACK_URL must use http:\/\/127\.0\.0\.1:<port>\/callback/);
 });
 
-test("checkPreflight passes on good versions, guides on missing uvx", async () => {
-  const ok = await checkPreflight(async (cmd) => ({ stdout: cmd === "node" ? "v22.5.0\n" : "uvx 0.7.0\n" }));
+test("checkPreflight requires only a supported Node runtime", async () => {
+  const calls: string[] = [];
+  const ok = await checkPreflight(async (cmd) => {
+    calls.push(cmd);
+    return { stdout: "v22.5.0\n" };
+  });
   assert.equal(ok.nodeVersion, "v22.5.0");
-  await assert.rejects(
-    checkPreflight(async (cmd) => { if (cmd === "uvx") throw new Error("not found"); return { stdout: "v22.5.0\n" }; }),
-    /https:\/\/docs\.astral\.sh\/uv\//,
-  );
+  assert.deepEqual(calls, ["node"]);
   await assert.rejects(
     checkPreflight(async () => ({ stdout: "v20.1.0\n" })),
     /requires Node\.js >=22/,

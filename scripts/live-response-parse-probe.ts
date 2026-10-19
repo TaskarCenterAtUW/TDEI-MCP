@@ -14,7 +14,7 @@
  *   TDEI_API_URL=https://api-dev.tdei.us \
  *     node --import tsx scripts/live-response-parse-probe.ts
  */
-import { decodeAwsJson } from "../src/adapters/aws-result-decoder.js";
+import { decodeOpenApiJson } from "../src/adapters/openapi-result-decoder.js";
 import { parseTdeiGetResponse } from "../src/adapters/tdei-get-response.js";
 import { tryParseTdeiJson } from "../src/adapters/parse-tdei-json.js";
 import { TDEI_SSO_CLIENT_ID } from "../src/config.js";
@@ -193,7 +193,7 @@ for (const probe of PROBES) {
     const { status, contentType, body, text } = await fetchJson(path);
     const shape = describe(body, contentType, text.length);
     const parsed = parseTdeiGetResponse(body);
-    const mcpDecoded = decodeAwsJson({
+    const mcpDecoded = decodeOpenApiJson({
       content: [{ type: "text", text: typeof body === "string" ? body : JSON.stringify(body) }],
     });
 

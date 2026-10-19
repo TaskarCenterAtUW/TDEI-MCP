@@ -54,7 +54,6 @@ test("valid env yields ok:true with defaults", () => {
         "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
       );
       assert.equal(result.config.ssoCallbackUrl, "http://127.0.0.1:8765/callback");
-      assert.equal(result.config.awsMcpPackage, "awslabs.openapi-mcp-server@1.1.2");
     }
   });
 });

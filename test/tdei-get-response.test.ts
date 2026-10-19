@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { decodeAwsJson, normalizeAwsToolResult } from "../src/adapters/aws-result-decoder.js";
+import { decodeOpenApiJson, normalizeOpenApiToolResult } from "../src/adapters/openapi-result-decoder.js";
 import { parseTdeiGetResponse } from "../src/adapters/tdei-get-response.js";
 
 const fixtures = JSON.parse(
@@ -66,9 +66,9 @@ test("service-metrics object keeps services array extractable and full body inta
   assert.deepEqual(parsed.body, fixtures.serviceMetrics);
 });
 
-test("MCP text wrapping round-trips each GET shape via decodeAwsJson", () => {
+test("MCP text wrapping round-trips each GET shape via decodeOpenApiJson", () => {
   for (const [key, body] of Object.entries(fixtures)) {
-    const decoded = decodeAwsJson({
+    const decoded = decodeOpenApiJson({
       content: [{ type: "text", text: JSON.stringify(body) }],
     });
     const direct = parseTdeiGetResponse(body);
@@ -78,8 +78,8 @@ test("MCP text wrapping round-trips each GET shape via decodeAwsJson", () => {
   }
 });
 
-test("normalizeAwsToolResult keeps object GET JSON valid for LLMs", () => {
-  const normalized = normalizeAwsToolResult({
+test("normalizeOpenApiToolResult keeps object GET JSON valid for LLMs", () => {
+  const normalized = normalizeOpenApiToolResult({
     content: [{
       type: "text",
       text: "```json\n" + JSON.stringify(fixtures.systemCapabilities) + "\n```",
@@ -88,8 +88,8 @@ test("normalizeAwsToolResult keeps object GET JSON valid for LLMs", () => {
   assert.deepEqual(JSON.parse(normalized.content[0]!.text), fixtures.systemCapabilities);
 });
 
-test("normalizeAwsToolResult keeps list GET arrays valid for LLMs", () => {
-  const normalized = normalizeAwsToolResult({
+test("normalizeOpenApiToolResult keeps list GET arrays valid for LLMs", () => {
+  const normalized = normalizeOpenApiToolResult({
     content: [{
       type: "text",
       text: JSON.stringify(JSON.stringify(fixtures.listProjectGroups)),

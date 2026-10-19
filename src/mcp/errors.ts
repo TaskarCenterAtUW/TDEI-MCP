@@ -80,7 +80,7 @@ export function inferCode(err: unknown): { code: TdeiErrorCode; message: string;
     return { code: "TDEI_CONFLICT", message: backendMessage ? `TDEI request conflict: ${backendMessage}` : "The TDEI request conflicts with the current resource state.", retryable: false };
   }
   if ((status !== undefined && status >= 500) || /child|spawn|ENOENT|ECONNRESET/i.test(message)) {
-    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The AWS tool child is unavailable.", retryable: true };
+    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The OpenAPI tool provider is unavailable.", retryable: true };
   }
   if (/disabled by config/.test(message)) {
     return { code: "TDEI_TOOL_DISABLED", message, retryable: false };
@@ -101,7 +101,7 @@ const HINTS: Record<TdeiErrorCode, string> = {
   TDEI_UPSTREAM_5XX: "Retry; if it persists, check TDEI environment status.",
   TDEI_CONFIG_INVALID: "Check .env values and tdei.config.json against the documented schema.",
   TDEI_TOOL_DISABLED: "Enable the tool in tdei.config.json or call tdei_reload_config.",
-  TDEI_CHILD_UNAVAILABLE: "Call tdei_load_api_tools to restart the AWS child.",
+  TDEI_CHILD_UNAVAILABLE: "Call tdei_load_api_tools to reload the OpenAPI provider.",
 };
 
 export function formatError(err: unknown): { isError: true; content: [{ type: "text"; text: string }] } {

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { parseTdeiJson, tryParseTdeiJson } from "../src/adapters/parse-tdei-json.js";
 import { recordsFrom } from "../src/adapters/tdei-records.js";
-import { decodeAwsRecords } from "../src/adapters/aws-result-decoder.js";
+import { decodeOpenApiRecords } from "../src/adapters/openapi-result-decoder.js";
 
 const group = {
   tdei_project_group_id: "1ec1c79b-6b7a-4011-936b-c75dbbd903e3",
@@ -47,9 +47,9 @@ test("recordsFrom uses a sole unknown array property as records", () => {
   );
 });
 
-test("decodeAwsRecords handles fenced MCP text and multiple content blocks", () => {
+test("decodeOpenApiRecords handles fenced MCP text and multiple content blocks", () => {
   assert.deepEqual(
-    decodeAwsRecords({
+    decodeOpenApiRecords({
       content: [
         { type: "text", text: "note: ignoring preface" },
         {

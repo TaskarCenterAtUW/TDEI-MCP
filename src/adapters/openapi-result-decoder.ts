@@ -51,13 +51,13 @@ export function unwrapMcpPayload(payload: unknown): unknown {
 }
 
 /** Full GET classification — use for object and list responses. */
-export function decodeAwsJson(payload: unknown): ParsedTdeiGetResponse {
+export function decodeOpenApiJson(payload: unknown): ParsedTdeiGetResponse {
   return parseTdeiGetResponse(unwrapMcpPayload(payload));
 }
 
 /** List-row extraction for array / envelope GET endpoints. */
-export function decodeAwsRecords(payload: unknown): Array<Record<string, unknown>> {
-  return decodeAwsJson(payload).records;
+export function decodeOpenApiRecords(payload: unknown): Array<Record<string, unknown>> {
+  return decodeOpenApiJson(payload).records;
 }
 
 export type NormalizedMcpToolResult = {
@@ -88,10 +88,10 @@ function textContentFrom(result: unknown): Array<{ type: "text"; text: string }>
 }
 
 /**
- * Normalize an AWS MCP tool result so JSON GET bodies stay valid API JSON
+ * Normalize an OpenAPI MCP tool result so JSON GET bodies stay valid API JSON
  * (unwrap fences / double-encoding) without inventing empty lists for objects.
  */
-export function normalizeAwsToolResult(result: unknown): NormalizedMcpToolResult {
+export function normalizeOpenApiToolResult(result: unknown): NormalizedMcpToolResult {
   const content = textContentFrom(result);
   const isError =
     typeof result === "object" &&
