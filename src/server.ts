@@ -13,12 +13,11 @@ import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
-import { OpenApiTdeiOperations } from "./adapters/openapi-tdei-operations.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
+import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
-import { DirectMultipartTdeiMutations } from "./adapters/direct-multipart-tdei-mutations.js";
 
 export interface HealthProbes {
   fetchImpl?: typeof fetch;
@@ -131,15 +130,17 @@ export async function createServer(
         tokenProvider: () => auth.getAccessToken(),
       }),
   );
+  // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
+  // generated tools use the in-process OpenAPI provider.
   const semanticModule = new SemanticIntentModule({
-    operations: new OpenApiTdeiOperations(
-      (tool, input) => openApiToolsLifecycle.callTool(tool, input),
-      (tool) => openApiToolsLifecycle.isDenied(tool),
-      new DirectMultipartTdeiMutations({
-        baseUrl: getConfig().apiUrl,
+    operations: new HttpTdeiOperations(
+      getConfig().apiUrl,
+      fetch,
+      15_000,
+      {
         tokenProvider: () => auth.getAccessToken(),
         allowedAssetKinds: new Set(["local_path"]),
-      }),
+      },
     ),
     places: createConfiguredPlaceResolver(getConfig()),
   });

@@ -64,6 +64,8 @@ test("common semantic tools are discoverable and callable", async () => {
     assert.equal(body.status, "complete");
     assert.equal(body.data.accessScope, "authenticated_user");
     assert.match(body.data.scopeExplanation, /authenticated TDEI login/i);
+    assert.equal(body.data.apiOperation, "listProjectGroups");
+    assert.equal(body.data.path, "/api/v1/project-groups");
     assert.equal(body.data.projectGroups[0].tdei_project_group_id, "group-1");
 
     const upload = await client.callTool({

@@ -71,6 +71,9 @@ export interface ListServicesInput {
 export interface ListServicesData {
   services: TdeiService[];
   appliedFilters: ListServicesInput;
+  apiOperation: "listServices";
+  method: "GET";
+  path: "/api/v1/services";
 }
 
 export interface ListProjectGroupsInput {
@@ -84,6 +87,9 @@ export interface ListProjectGroupsData {
   appliedFilters: ListProjectGroupsInput;
   accessScope: "authenticated_user";
   scopeExplanation: string;
+  apiOperation: "listProjectGroups";
+  method: "GET";
+  path: "/api/v1/project-groups";
 }
 
 export type DatasetAsset =

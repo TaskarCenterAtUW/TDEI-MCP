@@ -34,6 +34,15 @@ test("package entry routes setup commands without starting a transport", async (
   );
 });
 
+test("interactiveStdioRefusal only fires for a terminal TTY", async () => {
+  const { interactiveStdioRefusal } = await import("../src/index.ts");
+  assert.equal(interactiveStdioRefusal(false), undefined);
+  const message = interactiveStdioRefusal(true);
+  assert.match(message ?? "", /STDIO mode is started automatically by your MCP client/);
+  assert.match(message ?? "", /--transport=http/);
+  assert.match(message ?? "", /tdei-mcp init/);
+});
+
 test("package entry still rejects an invalid HTTP port as a transport option", async () => {
   await assert.rejects(
     exec(

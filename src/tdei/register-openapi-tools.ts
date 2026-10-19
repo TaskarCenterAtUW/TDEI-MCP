@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 
 import { openApiMcpClient } from "../tdei/openapi-provider.js";
+import { normalizeOpenApiToolResult } from "../adapters/openapi-result-decoder.js";
 import { formatError, truncateText } from "../mcp/errors.js";
 import { isToolAllowed, type EndpointFilter } from "../config-file.js";
 import {
@@ -52,7 +53,7 @@ export async function registerTdeiOpenApiTools(
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
     isAllowed: (name) => isToolAllowed(name, filter),
     ...(onCall ? { onCall } : {}),
-    mapResult: truncateResult,
+    mapResult: (result) => truncateResult(normalizeOpenApiToolResult(result)),
     mapError: formatError,
     logger: (message) => console.error(message),
   });

@@ -1,9 +1,11 @@
+import { specUrlForApiUrl } from "./init/envs.js";
+
 const DEFAULT_API_URL = "https://api-dev.tdei.us";
 
-const DEFAULT_SPEC_URL =
-  "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json";
-
 const DEFAULT_SSO_CALLBACK_URL = "http://127.0.0.1:8765/callback";
+
+/** Fixed OAuth client for this MCP connector. Not configurable — never use portal/web/API client ids. */
+export const TDEI_SSO_CLIENT_ID = "tdei-mcp" as const;
 
 export type Transport = "stdio" | "http";
 
@@ -113,7 +115,8 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   const apiUrl = readHttpsUrl("TDEI_API_URL", DEFAULT_API_URL, DEFAULT_API_URL);
   if ("error" in apiUrl) errors.push(apiUrl.error);
 
-  const specUrl = readHttpsUrl("TDEI_SPEC_URL", DEFAULT_SPEC_URL, DEFAULT_SPEC_URL);
+  const derivedSpec = "error" in apiUrl ? specUrlForApiUrl(DEFAULT_API_URL) : specUrlForApiUrl(apiUrl.value);
+  const specUrl = readHttpsUrl("TDEI_SPEC_URL", derivedSpec, derivedSpec);
   if ("error" in specUrl) errors.push(specUrl.error);
 
   const transport = resolveTransport();
@@ -151,7 +154,7 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
     config: {
       apiUrl: (apiUrl as { value: string }).value,
       specUrl: (specUrl as { value: string }).value,
-      ssoClientId: process.env.TDEI_SSO_CLIENT_ID?.trim() || "tdei-mcp",
+      ssoClientId: TDEI_SSO_CLIENT_ID,
       ssoCallbackUrl: new URL(process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL).toString(),
       transport: goodTransport,
       httpHost: process.env.TDEI_HTTP_HOST?.trim() || "127.0.0.1",

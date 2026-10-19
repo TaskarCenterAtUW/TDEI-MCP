@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { runInit, runSwitch } from "../src/init/commands.js";
+import { runInit, runSwitch, clientConfigDropHint } from "../src/init/commands.js";
 
 function memFs(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial));
@@ -28,19 +28,19 @@ test("runInit writes codex entry end to end", async () => {
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.client, "codex");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
-  assert.match(logs.join("\n"), /Fully restart Codex, then start a new chat/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SPEC_URL/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SSO_CLIENT_ID/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SSO_CALLBACK_URL/);
+  assert.match(logs.join("\n"), /TDEI-MCP  ·  Codex Desktop  ·  ready/);
+  assert.match(logs.join("\n"), /Fully quit and reopen Codex Desktop/);
   assert.match(logs.join("\n"), /tdei_sso_login/);
+  assert.match(logs.join("\n"), /If tools disappear later/);
+  assert.match(logs.join("\n"), /may rewrite ~\/\.codex\/config\.toml/);
+  assert.match(logs.join("\n"), /node dist\/index\.js init --client codex --env-file \.env\.dev/);
 });
 
 test("runInit configures Codex to launch with the selected environment file", async () => {
-  const envFile = [
-    "TDEI_API_URL=https://api-dev.tdei.us",
-    "TDEI_SPEC_URL=https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
-    "TDEI_SSO_CLIENT_ID=tdei-mcp",
-    "TDEI_SSO_CALLBACK_URL=http://127.0.0.1:8765/callback",
-    "TDEI_TRANSPORT=stdio",
-    "",
-  ].join("\n");
+  const envFile = "TDEI_API_URL=https://api-dev.tdei.us\n";
   const fs = memFs({ "/repo/.env.dev": envFile });
   let verifiedEntry: { args: string[]; env: Record<string, string> } | undefined;
   const d = {
@@ -88,11 +88,33 @@ test("runInit rejects conflicting env-file selection flags", async () => {
 });
 
 test("runInit custom prints manual and writes nothing", async () => {
+  logs.length = 0;
   const fs = memFs();
   const summary = await runInit(deps(fs, { chooseEnv: async () => ({ url: "https://example.com/" }), chooseClient: async () => "custom" as const }) as never, { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 9999 });
   assert.equal(summary.callbackUrl, "http://127.0.0.1:9999/callback");
   assert.deepEqual([...fs.files.keys()], ["/h/.tdei-mcp/tdei.config.json"]);
   assert.match(logs.join("\n"), /Manual MCP setup/);
+  assert.match(logs.join("\n"), /re-apply the command, args, working directory, and env/i);
+  assert.doesNotMatch(logs.join("\n"), /claude_desktop_config/);
+});
+
+test("runInit prints Claude Desktop config-drop recovery", async () => {
+  logs.length = 0;
+  const fs = memFs();
+  const summary = await runInit(deps(fs, {
+    chooseEnv: async () => ({ env: "dev" }),
+    chooseClient: async () => "claude" as const,
+  }) as never, { home: "/h", cwd: "/repo", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node" });
+  assert.equal(summary.client, "claude");
+  assert.match(logs.join("\n"), /may rewrite claude_desktop_config\.json/);
+  assert.match(logs.join("\n"), /node dist\/index\.js init --client claude --env-file \.env\.dev/);
+});
+
+test("clientConfigDropHint covers vscode without claiming a Desktop rewrite", () => {
+  const hint = clientConfigDropHint("vscode");
+  assert.match(hint, /\.vscode\/mcp\.json/);
+  assert.match(hint, /--client vscode --env-file \.env\.dev/);
+  assert.doesNotMatch(hint, /That rewrite cannot be blocked/);
 });
 
 test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
@@ -102,8 +124,9 @@ test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   const summary = await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
   assert.equal(summary.apiUrl, "https://api-stage.tdei.us");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-stage\.tdei\.us/);
-  assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /127\.0\.0\.1:8765/);
-  assert.match(logs.join("\n"), /restart your MCP client/);
+  assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SPEC_URL/);
+  assert.match(logs.join("\n"), /TDEI-MCP  ·  Codex Desktop  ·  environment updated/);
+  assert.match(logs.join("\n"), /may rewrite ~\/\.codex\/config\.toml/);
   await assert.rejects(runSwitch(deps(fs, {}) as never, { client: "claude", env: "prod", home: "/h" }), /no tdei entry found/);
 });
 
@@ -166,6 +189,8 @@ test("checkout init writes absolute Node launch config and scaffolds tdei config
   assert.match(toml, /command = "\/usr\/bin\/node"/);
   assert.match(toml, /args = \["\/repo\/dist\/index\.js"\]/);
   assert.match(toml, /TDEI_CONFIG_PATH = "\/repo\/tdei\.config\.json"/);
+  assert.doesNotMatch(toml, /TDEI_SPEC_URL/);
+  assert.doesNotMatch(toml, /TDEI_SSO_CALLBACK_URL/);
   assert.match(fs.files.get("/repo/tdei.config.json") ?? "", /"mode": "all"/);
 });
 

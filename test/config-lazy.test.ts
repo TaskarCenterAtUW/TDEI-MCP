@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 
 import { loadConfig, getConfig, TdeiConfigError } from "../src/config.js";
+import { TDEI_SSO_CLIENT_ID } from "./helpers/sso-client.js";
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
   const saved: Record<string, string | undefined> = {};
@@ -33,14 +34,42 @@ test("bad api url yields ok:false naming var and rule (no throw)", () => {
 });
 
 test("valid env yields ok:true with defaults", () => {
-  withEnv({ TDEI_API_URL: undefined, TDEI_TRANSPORT: undefined, TDEI_HTTP_PORT: undefined }, () => {
+  withEnv({
+    TDEI_API_URL: undefined,
+    TDEI_TRANSPORT: undefined,
+    TDEI_HTTP_PORT: undefined,
+    // Env override must be ignored — client id is fixed to tdei-mcp.
+    TDEI_SSO_CLIENT_ID: "tdei-gateway",
+  }, () => {
     const result = loadConfig();
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.config.apiUrl, "https://api-dev.tdei.us");
+      assert.equal(result.config.ssoClientId, TDEI_SSO_CLIENT_ID);
+      assert.equal(result.config.ssoClientId, "tdei-mcp");
       assert.equal(result.config.transport, "stdio");
       assert.equal(result.config.httpPort, 3000);
+      assert.equal(
+        result.config.specUrl,
+        "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
+      );
+      assert.equal(result.config.ssoCallbackUrl, "http://127.0.0.1:8765/callback");
     }
+  });
+});
+
+test("spec URL follows TDEI_API_URL when TDEI_SPEC_URL is unset", () => {
+  withEnv({
+    TDEI_API_URL: "https://api-stage.tdei.us",
+    TDEI_SPEC_URL: undefined,
+  }, () => {
+    const result = loadConfig();
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(
+      result.config.specUrl,
+      "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway.json",
+    );
   });
 });
 

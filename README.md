@@ -2,22 +2,11 @@
 
 Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode loads raw API tools from the TDEI OpenAPI specification and executes them directly in TypeScript. Hosted Streamable HTTP mode is a stateless Node server that calls TDEI directly with the access token supplied on every request.
 
-The transport-neutral OpenAPI module can also be used to build a separate MCP
-server for another specification. See [Reusing the OpenAPI MCP core](docs/openapi-mcp-core.md).
+The transport-neutral OpenAPI module can also build a separate MCP server for another specification. See [Reusing the OpenAPI MCP core](docs/openapi-mcp-core.md).
 
 The default configuration uses the **TDEI development environment**. You need an account with access to that environment; downloading the repository does not create an account or grant API permissions.
 
-## Installation
-
-Choose one of the two paths:
-
-1. [Path 1 — NPX (after publishing, recommended)](#path-1-npx) — no clone needed; `npx -y tdei-mcp init` configures your MCP client.
-2. [Path 2 — Checkout-based installation (from source)](#path-2-checkout) — clone/download the repo, `npm ci`, build, and connect manually.
-
-<a id="path-1-npx"></a>
-## Path 1 — NPX (recommended)
-
-### Quickstart (npx)
+## Quickstart (npx)
 
 ```bash
 npx -y tdei-mcp init
@@ -45,10 +34,7 @@ documented under Advanced below.
 - Access to TDEI through its browser-based SSO login.
 - Internet access to install dependencies, download the OpenAPI specification, and contact TDEI.
 
-<a id="path-2-checkout"></a>
-## Path 2 — Checkout-based installation (developers only)
-
-### Advanced: manual setup from a checkout
+## Advanced: manual setup from a checkout (developers only)
 
 If you installed via `npx -y tdei-mcp init`, skip this section — `init` already
 wrote your client config with the environment inline and there is no `.env` to
@@ -93,18 +79,15 @@ The command detects the checkout, verifies `dist/index.js` through MCP
 missing, backs up an existing Codex config to `config.toml.tdei.bak`, and then
 writes an absolute Node + `dist/index.js` stdio entry. Restart Codex afterward.
 
-To keep separate source-checkout settings for each environment, create three
-ignored local files from the example:
+To keep separate source-checkout settings for each environment, create ignored
+local files that set only the API origin; the spec URL and SSO callback use built-in defaults:
 
 ```bash
-cp .env.example .env.dev
-cp .env.example .env.staging
-cp .env.example .env.prod
+printf 'TDEI_API_URL=https://api-dev.tdei.us\n' > .env.dev
+printf 'TDEI_API_URL=https://api-stage.tdei.us\n' > .env.staging
+printf 'TDEI_API_URL=https://api.tdei.us\n' > .env.prod
 ```
 
-Set `TDEI_API_URL` to `https://api-dev.tdei.us`,
-`https://api-stage.tdei.us`, and `https://api.tdei.us`, respectively. Keep
-`TDEI_TRANSPORT=stdio` and the public `TDEI_SPEC_URL` from `.env.example`.
 Then select the file Codex should use:
 
 ```bash
@@ -140,6 +123,44 @@ Codex also supports a project-scoped `.codex/config.toml` for trusted projects. 
 
 Restart your Codex session after saving the configuration. In the Codex terminal interface, use `/mcp` to check the connection.
 
+#### Codex Desktop drops the tdei tools
+
+Codex Desktop can rewrite `~/.codex/config.toml` on startup or settings changes and remove custom MCP servers, including `tdei`. This connector cannot prevent that rewrite.
+
+If `/mcp` no longer lists `tdei`, or a chat says tdei-mcp tools are unavailable:
+
+1. Re-run the **same** init command you used originally, for example:
+
+   ```bash
+   tdei-mcp init --client codex --env dev
+   node dist/index.js init --client codex --env-file .env.dev
+   ```
+
+   Use `--env-file .env.staging` or `.env.prod` when that is how this checkout was configured.
+
+2. Fully quit and reopen Codex, then start a **new** chat so it reloads the MCP catalogue.
+3. Call `tdei_sso_login` again. Access tokens live in server memory and do not survive a Desktop rewrite or restart.
+
+#### Claude Desktop drops the tdei tools
+
+Claude Desktop can rewrite `claude_desktop_config.json` on startup, settings changes, or connector sync and remove custom MCP servers, including `tdei`. This connector cannot prevent that rewrite.
+
+If the tdei tools disappear:
+
+1. Re-run the **same** init command you used originally, for example:
+
+   ```bash
+   tdei-mcp init --client claude --env dev
+   node dist/index.js init --client claude --env-file .env.dev
+   ```
+
+2. Fully quit and reopen Claude Desktop, then start a **new** chat.
+3. Call `tdei_sso_login` again. Tokens are in-memory.
+
+#### VS Code drops the tdei tools
+
+If the tdei tools disappear from VS Code, the workspace entry in `.vscode/mcp.json` may be missing. Restore it with the same init command (`--client vscode`), reload the window, and run `tdei_sso_login` again.
+
 ### Other local MCP clients
 
 Use your client's stdio server settings with these values:
@@ -152,23 +173,11 @@ Use your client's stdio server settings with these values:
 
 The client process needs only Node.js and network access to the configured specification and API URLs.
 
-### Manual startup check
+### STDIO vs manual start
 
-From the project folder, run the non-blocking stdio check (handshakes, lists tools, then exits and returns your terminal):
+**STDIO** is started automatically by your MCP client (Codex, Claude Desktop, VS Code, etc.) after `init` writes the client config. Do not run `node dist/index.js` yourself for stdio — with a terminal attached it exits and tells you to use HTTP or `init`.
 
-```bash
-npm run check:stdio
-```
-
-Expect `[tdei-mcp] stdio check OK: server started, handshake succeeded, N tool(s) listed.` A bad config exits non-zero with `TDEI_CONFIG_INVALID` instead of hanging.
-
-The raw server command below is blocking by design — it waits for MCP messages on stdin, so you must press Ctrl+C to get your terminal back. Prefer `check:stdio` above for a quick health check:
-
-```bash
-node --env-file=.env dist/index.js --transport=stdio
-```
-
-Expect `[tdei-mcp] Starting MCP server` on stderr. The process waits for MCP messages on stdin and starts signed out. This is a stdio server, so there is no browser page or HTTP port. Manual startup alone does not verify authentication or tool calls; an MCP client must send the initialization request. Press Ctrl+C to stop. For normal use, let your MCP client launch the process.
+For a non-blocking stdio handshake check, run `npm run check:stdio`. **Manual start** is only for Streamable HTTP (see below).
 
 ### HTTP mode (Streamable HTTP, stateless)
 
@@ -213,7 +222,7 @@ Both transports expose the common semantic tools:
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
 | `tdei_list_services` | List services by text, project group, or service type. |
-| `tdei_list_my_project_groups` | Lists project groups available to the authenticated TDEI login via `listProjectGroups` / `GET /api/v1/project-groups`. |
+| `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
 
@@ -232,7 +241,7 @@ Local stdio mode also exposes these connector-management tools while signed out:
 | `tdei_load_api_tools` | Retry API tool loading after SSO succeeds. |
 | `tdei_logout` | Clear local tokens, reset the OpenAPI provider, and return the browser SSO logout URL. |
 
-The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. Every API call obtains the current access token before calling TDEI directly.
+The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. Every API call obtains the current access token before calling TDEI.
 
 Raw authentication operations generated from the OpenAPI specification are intentionally hidden. Use the connector's `tdei_sso_login`, `tdei_auth_status`, and `tdei_logout` tools for session management.
 
@@ -262,10 +271,9 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 
 | Variable | Required | Default / purpose |
 | --- | --- | --- |
-| `TDEI_SSO_CLIENT_ID` | No | `tdei-mcp` |
-| `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` |
-| `TDEI_API_URL` | No | `https://api-dev.tdei.us` |
-| `TDEI_SPEC_URL` | No | `https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json` |
+| `TDEI_API_URL` | No | `https://api-dev.tdei.us` (the only value a typical stdio setup needs) |
+| `TDEI_SPEC_URL` | No | Derived from `TDEI_API_URL` (`dev` / `stage` / `main` OpenAPI JSON on GitHub) |
+| `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var) |
 | `TDEI_GEOCODER_URL` | No | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback |
 | `TDEI_GEOCODER_USER_AGENT` | No | Identifies this connector; set an operator contact when required by the provider |
 | `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
@@ -275,7 +283,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 
-The API and specification URLs must use HTTPS. The local SSO callback must exactly match the registered HTTP loopback URL. When selecting another environment, use a matching API URL, OpenAPI specification, and account.
+The API URL must use HTTPS. The spec URL and SSO callback are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it.
 
 ## Endpoint filtering and workflows (tdei.config.json)
 
@@ -306,7 +314,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 | Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, network access, and the specification URL, then restart the MCP client. |
 | First load times out | Check network access to the specification URL. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
-| URL validation fails | Ensure `TDEI_API_URL` and `TDEI_SPEC_URL` are valid absolute URLs beginning with `https://`. |
+| URL validation fails | Ensure `TDEI_API_URL` (and any `TDEI_SPEC_URL` override) is a valid absolute URL beginning with `https://`. |
 | `TDEI_SSO_REQUIRED` | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | `TDEI_TOKEN_EXPIRED` | Refresh via `POST /api/v1/refresh-token` or re-run SSO login. |
 | `TDEI_TOKEN_INVALID` | Call `tdei_sso_login` again; do not reuse the old Bearer. |

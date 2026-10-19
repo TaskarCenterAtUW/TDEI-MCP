@@ -1,0 +1,107 @@
+{
+  "listProjectGroups": [
+    {
+      "tdei_project_group_id": "67ee4e4b-8ed1-4e42-8311-75a90a2b1e2e",
+      "project_group_name": "AA Dataset Viewer Test 1",
+      "phone": "",
+      "url": "",
+      "address": "1264 Albert way",
+      "polygon": null,
+      "data_viewer_config": {
+        "dataset_viewer_allowed": true,
+        "feedback_turnaround_time": { "number": 15, "units": "days" }
+      },
+      "poc": []
+    }
+  ],
+  "listServices": [
+    {
+      "tdei_service_id": "9e75031e-e3a2-49b9-befb-74a290fa9d94",
+      "tdei_project_group_id": "67ee4e4b-8ed1-4e42-8311-75a90a2b1e2e",
+      "service_name": "sample-service",
+      "service_type": "osw",
+      "polygon": null
+    }
+  ],
+  "listDatasetFiles": [
+    {
+      "data_type": "osw",
+      "tdei_dataset_id": "491bd7aa-937d-4a13-a5bb-17058068ce89",
+      "status": "Publish",
+      "project_group": "AA Dataset Viewer Test 1",
+      "service": "sample-service",
+      "derived_from_dataset_id": null,
+      "uploaded_timestamp": "2024-01-01T00:00:00.000Z",
+      "confidence_level": null,
+      "download_url": "https://example.test/file.zip",
+      "data_viewer_allowed": true,
+      "metadata": {}
+    }
+  ],
+  "listJobs": [],
+  "listOswVersions": {
+    "versions": [
+      {
+        "documentation": "https://github.com/OpenSidewalks/OpenSidewalks-Schema/blob/OSW0.3/README.md",
+        "specification": "https://github.com/OpenSidewalks/OpenSidewalks-Schema/blob/OSW0.3/opensidewalks.schema.json",
+        "version": "0.3"
+      }
+    ]
+  },
+  "listApiVersions": {
+    "versions": [
+      {
+        "version": "1.0",
+        "documentation": "https://api-doc-dev.tdei.us",
+        "specification": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json"
+      }
+    ]
+  },
+  "serviceMetrics": {
+    "services": [
+      { "tdei_service_id": "svc-1", "service_name": "A" },
+      { "tdei_service_id": "svc-2", "service_name": "B" }
+    ],
+    "project_group": { "tdei_project_group_id": "pg-1" }
+  },
+  "oswDatasetViewerFeedbacks": [
+    {
+      "id": "fb-1",
+      "project_group": "AA Viewer Internal",
+      "dataset": "dataset-1",
+      "feedback_text": "example",
+      "status": "open"
+    }
+  ],
+  "systemCapabilities": {
+    "dataset_upload_limits": { "max_file_size_mb": 500 }
+  },
+  "systemMetrics": {
+    "systemMetrics": { "users": 1 },
+    "datasetMetrics": { "osw": 1 },
+    "apiCalls": { "total": 10 }
+  },
+  "dataMetrics": {
+    "dataMetrics": { "published": 1 }
+  },
+  "oswDatasetViewerFeedbacksMetadata": {
+    "total_count": 10,
+    "total_overdues": 1,
+    "total_open": 4
+  },
+  "listGtfsFlexVersions": {
+    "versions": [
+      { "version": "2.0", "documentation": "https://example.test/flex", "specification": "https://example.test/flex.json" }
+    ]
+  },
+  "listGtfsPathwaysVersions": {
+    "versions": [
+      { "version": "1.0", "documentation": "https://example.test/pathways", "specification": "https://example.test/pathways.json" }
+    ]
+  },
+  "wrappedProjectGroups": {
+    "project_groups": [
+      { "tdei_project_group_id": "pg-wrap", "project_group_name": "Wrapped" }
+    ]
+  }
+}

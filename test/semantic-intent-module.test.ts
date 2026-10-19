@@ -197,6 +197,9 @@ test("service listing returns normalized filters and results", async () => {
         page: 1,
         pageSize: 25,
       },
+      apiOperation: "listServices",
+      method: "GET",
+      path: "/api/v1/services",
     },
   });
   assert.deepEqual(harness.serviceSearches, [{
@@ -224,6 +227,9 @@ test("project-group membership lists groups visible to the authenticated login",
       appliedFilters: { page: 1, pageSize: 50 },
       accessScope: "authenticated_user",
       scopeExplanation: "These are all project groups available to your authenticated TDEI login.",
+      apiOperation: "listProjectGroups",
+      method: "GET",
+      path: "/api/v1/project-groups",
     },
   });
   assert.deepEqual(harness.searches, []);

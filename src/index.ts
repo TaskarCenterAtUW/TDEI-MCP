@@ -8,6 +8,17 @@ import { loadConfig, TdeiConfigError } from "./config.js";
 
 export { createServer, type ServerDependencies } from "./server.js";
 
+/** Message when STDIO is launched from a terminal instead of an MCP client. */
+export function interactiveStdioRefusal(stdinIsTTY: boolean): string | undefined {
+  if (!stdinIsTTY) return undefined;
+  return [
+    "[tdei-mcp] STDIO mode is started automatically by your MCP client (e.g. Codex), not from a terminal.",
+    "[tdei-mcp] To start a server manually, use Streamable HTTP:",
+    "[tdei-mcp]   node --env-file=.env dist/index.js --transport=http --port 3000",
+    "[tdei-mcp] Or configure a client: npx -y tdei-mcp init",
+  ].join("\n");
+}
+
 function failFastConfig(error: unknown): never {
   const errors = error instanceof TdeiConfigError
     ? error.errors
@@ -65,7 +76,14 @@ if (isEntryPoint()) {
       const { serveHttp } = await import("./http.js");
       await serveHttp({}, overrides);
     } else if (transport === "stdio" || transport === "") {
-      console.error("[tdei-mcp] Starting MCP server");
+      // STDIO is for MCP clients (Codex, Claude Desktop, etc.) that spawn this
+      // process with piped stdin. A terminal TTY means someone started it by hand.
+      const refusal = interactiveStdioRefusal(Boolean(process.stdin.isTTY));
+      if (refusal) {
+        console.error(refusal);
+        process.exit(1);
+      }
+      console.error("[tdei-mcp] Starting MCP server (stdio)");
       await serveStdio(() => createServer());
     } else {
       console.error(`[tdei-mcp] Unknown transport "${transport}". Use --transport=stdio|http.`);

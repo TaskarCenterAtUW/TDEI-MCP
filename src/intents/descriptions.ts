@@ -4,7 +4,7 @@ export const SEMANTIC_TOOL_DESCRIPTIONS = {
   findDatasets:
     "Find TDEI datasets from a natural-language place or bounding box. Use for requests such as 'get me the latest dataset for Seattle'. Searches dataset name first, then city, then forward-geocodes the place for a bbox search. Returns ambiguity instead of guessing a place.",
   listMyProjectGroups:
-    "List the TDEI project groups available to the authenticated login. Use this for questions such as 'which projects or project groups do I have access to?'. Results come from the authenticated listProjectGroups API and therefore reflect that login's access.",
+    "List TDEI project groups for the authenticated login via listProjectGroups (GET /api/v1/project-groups). Use this for 'project', 'projects', 'project group', 'project groups', or 'groups I belong to'. This tool is the listProjectGroups call; do not look for a separate membership API.",
   listServices:
     "List TDEI services, optionally filtered by name, project group, or data type (OSW, GTFS Flex, or GTFS Pathways). Use for requests such as 'get me the list of services'.",
   validateDataset:
