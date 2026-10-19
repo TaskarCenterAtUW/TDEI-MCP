@@ -6,7 +6,7 @@ Supersedes: `2026-10-02-semantic-intent-layer.md`
 
 ## Goal
 
-Implement one stateless semantic intent module used by both local stdio and hosted Streamable HTTP/S. Keep the AWS OpenAPI MCP adapter for local raw-tool compatibility; make hosted semantic tools call TDEI REST directly with the bearer from each request.
+Implement one stateless semantic intent module used by both local stdio and hosted Streamable HTTP/S. Keep the external OpenAPI OpenAPI MCP adapter for local raw-tool compatibility; make hosted semantic tools call TDEI REST directly with the bearer from each request.
 
 ## Delivery strategy
 
@@ -16,9 +16,9 @@ Global acceptance rules:
 
 - the client/LLM owns login, token refresh, conversation state, clarification state, and polling;
 - the HTTP server receives and forwards an access token on every request, retaining none;
-- common code imports no AWS MCP, HTTP transport, auth manager, or process singleton;
+- common code imports no OpenAPI MCP, HTTP transport, auth manager, or process singleton;
 - both transports register the same semantic tool names, descriptions, input schemas, and result envelopes;
-- raw AWS tools remain available in stdio;
+- raw external OpenAPI tools remain available in stdio;
 - no mutation occurs from incomplete or ambiguous input;
 - `npm test`, `npm run build`, and `npm run lint` pass after every slice.
 
@@ -42,7 +42,7 @@ Steps:
 - [ ] Construct `SemanticIntentModule` from those ports. It must hold configuration and adapters only, never request context or accepted user fields.
 - [ ] Add compile/runtime tests that result envelopes contain no token field and are JSON serializable.
 
-Checkpoint: fake ports can construct the module without MCP, AWS, HTTP, auth, or filesystem imports.
+Checkpoint: fake ports can construct the module without MCP, external OpenAPI, HTTP, auth, or filesystem imports.
 
 ## Slice 2: Implement dataset discovery
 
@@ -180,27 +180,27 @@ Steps:
 
 Checkpoint: any composition root can expose the semantic catalogue without knowing how each intent works.
 
-## Slice 7: Implement and wire the stdio AWS adapter
+## Slice 7: Implement and wire the stdio OpenAPI adapter
 
 Files:
 
-- create `src/adapters/aws-result-decoder.ts`
-- create `src/adapters/aws-tdei-operations.ts`
-- modify `src/aws/aws-tools-lifecycle.ts`
+- create `src/adapters/openApi-result-decoder.ts`
+- create `src/adapters/openApi-tdei-operations.ts`
+- modify `src/openApi/openApi-tools-lifecycle.ts`
 - modify `src/server.ts`
-- create `test/aws-tdei-operations.test.ts`
+- create `test/openApi-tdei-operations.test.ts`
 - update existing lifecycle/session tests
 
 Steps:
 
-- [ ] Map each `TdeiOperations` method to the exact AWS child operation ID and argument names.
-- [ ] Centralize MCP content-envelope decoding in `aws-result-decoder.ts`; keep it out of intent code.
-- [ ] Expose a version-gated call function and effective denied-operation check from `AwsToolsLifecycle` without registering semantic tools inside it.
+- [ ] Map each `TdeiOperations` method to the exact OpenAPI child operation ID and argument names.
+- [ ] Centralize MCP content-envelope decoding in `openApi-result-decoder.ts`; keep it out of intent code.
+- [ ] Expose a version-gated call function and effective denied-operation check from `OpenApiToolsLifecycle` without registering semantic tools inside it.
 - [ ] Compose the semantic module in the stdio server factory and register it independently from raw discovery.
-- [ ] Keep raw AWS tools and local SSO helpers unchanged in stdio mode.
+- [ ] Keep raw external OpenAPI tools and local SSO helpers unchanged in stdio mode.
 - [ ] Ensure an endpoint-filter denial produces a clear semantic dependency error rather than an empty result.
 
-Checkpoint: existing local behavior is preserved and semantic tools call the same AWS child through a typed adapter.
+Checkpoint: existing local behavior is preserved and semantic tools call the same OpenAPI child through a typed adapter.
 
 ## Slice 8: Implement the direct HTTP adapter
 
@@ -220,7 +220,7 @@ Steps:
 - [ ] Apply bounded timeouts; retry safe reads only, never upload/validate by default.
 - [ ] Add fixture/contract tests for URL, headers, body parts, response normalization, and token isolation.
 
-Checkpoint: hosted semantic calls no longer spawn `uvx` or an AWS MCP child.
+Checkpoint: hosted semantic calls no longer spawn `uvx` or an OpenAPI MCP child.
 
 ## Slice 9: Split composition roots by deployment mode
 
@@ -236,11 +236,11 @@ Files:
 Steps:
 
 - [ ] Extract a common semantic-server registration function.
-- [ ] stdio composition: local auth + AWS adapter + local assets + semantic tools + raw tools.
-- [ ] HTTP composition: request bearer + direct HTTP adapter + hosted assets + semantic tools; omit local SSO/logout and raw AWS lifecycle.
+- [ ] stdio composition: local auth + OpenAPI adapter + local assets + semantic tools + raw tools.
+- [ ] HTTP composition: request bearer + direct HTTP adapter + hosted assets + semantic tools; omit local SSO/logout and raw external OpenAPI lifecycle.
 - [ ] Continue creating an ephemeral MCP server and stateless Streamable HTTP transport per HTTP request.
 - [ ] Validate the bearer at the boundary without storing or refreshing it.
-- [ ] Remove `createAwsClient` from hosted runtime options after tests no longer need it.
+- [ ] Remove `createOpenApiClient` from hosted runtime options after tests no longer need it.
 - [ ] Ensure `tools/list` and `tools/call` behave consistently with a bearer on every request.
 
 Tests:
@@ -251,7 +251,7 @@ Tests:
 - [ ] common semantic tool schemas are equal across both factories;
 - [ ] no `Mcp-Session-Id` is issued or required.
 
-Checkpoint: one codebase has two clean composition roots, and hosted mode has no AWS runtime dependency.
+Checkpoint: one codebase has two clean composition roots, and hosted mode has no external OpenAPI runtime dependency.
 
 ## Slice 10: Forward geocoder adapter
 
@@ -322,7 +322,7 @@ Checkpoint: tests detect API drift before a semantic intent silently changes mea
 
 1. Slices 1–3: shared read-only core and honest membership behavior.
 2. Slice 6, then 7: expose and prove the module in current stdio.
-3. Slice 8, then 9: remove the AWS child from hosted runtime.
+3. Slice 8, then 9: remove the OpenAPI child from hosted runtime.
 4. Slice 10: enable place-to-bbox fallback.
 5. Slices 4–5: add bounded file handling and mutations after the transport seam is stable.
 6. Slices 11–12: package, deploy, and lock contracts.

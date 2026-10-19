@@ -15,7 +15,7 @@ AI client / LLM
       v
 semantic intent module (shared, deterministic, stateless)
       |
-      +-- TdeiOperations port ---- AWS OpenAPI MCP adapter (local stdio)
+      +-- TdeiOperations port ---- external OpenAPI OpenAPI MCP adapter (local stdio)
       |                         `-- direct TDEI HTTP adapter (hosted HTTP/S)
       +-- PlaceResolver port ----- forward geocoder
       `-- DatasetAsset port ------ local file / hosted asset reference
@@ -23,8 +23,8 @@ semantic intent module (shared, deterministic, stateless)
 
 The same semantic tools and behavior are exposed over:
 
-- local stdio: installed with npm/npx; keeps the existing AWS OpenAPI MCP child for raw API access;
-- hosted Streamable HTTP/S: deployed as a container/service; calls TDEI REST directly and does not require `uvx` or the AWS MCP child at runtime.
+- local stdio: installed with npm/npx; keeps the existing external OpenAPI OpenAPI MCP child for raw API access;
+- hosted Streamable HTTP/S: deployed as a container/service; calls TDEI REST directly and does not require `uvx` or the OpenAPI MCP child at runtime.
 
 The hosted server does not own login sessions. The client sends `Authorization: Bearer <access_token>` on every MCP request. The token is request-scoped, passed to the adapter, never persisted, refreshed, or shared by the server.
 
@@ -37,7 +37,7 @@ This keeps the contract observable and testable:
 - tool descriptions explain when a tool applies, including natural-language examples;
 - Zod schemas capture entities the LLM can extract, such as place, dataset type, project group, service, and metadata;
 - domain code implements fallback order, validation, ambiguity, and missing-input behavior;
-- adapters translate domain operations to AWS MCP calls or HTTP requests.
+- adapters translate domain operations to OpenAPI MCP calls or HTTP requests.
 
 Raw OpenAPI tools remain useful for advanced access, but normal user requests should select the curated `tdei_*` tools.
 
@@ -62,15 +62,15 @@ Adapters live outside the module:
 
 ```text
 src/adapters/
-  aws-tdei-operations.ts
+  openApi-tdei-operations.ts
   http-tdei-operations.ts
-  aws-result-decoder.ts
+  openApi-result-decoder.ts
   local-file-assets.ts
   hosted-assets.ts
   geocoder.ts
 ```
 
-The module may depend on the following ports, but never on an MCP transport, `McpServer`, AWS response envelopes, `fetch`, process environment, or authentication manager:
+The module may depend on the following ports, but never on an MCP transport, `McpServer`, external OpenAPI response envelopes, `fetch`, process environment, or authentication manager:
 
 ```ts
 interface RequestContext {
@@ -97,7 +97,7 @@ interface DatasetAssetPort {
 }
 ```
 
-The interfaces use typed domain values. Decoding the AWS MCP content envelope belongs in `aws-result-decoder.ts`; building ordinary HTTP URLs, query strings, bearer headers, and read errors belongs in `http-tdei-operations.ts`. Multipart validation/upload is shared by both transports in `direct-multipart-tdei-mutations.ts`: stdio supplies its current local SSO token and local file assets, while HTTP supplies the bearer from the current request and bounded inline assets.
+The interfaces use typed domain values. Decoding the OpenAPI MCP content envelope belongs in `openApi-result-decoder.ts`; building ordinary HTTP URLs, query strings, bearer headers, and read errors belongs in `http-tdei-operations.ts`. Multipart validation/upload is shared by both transports in `direct-multipart-tdei-mutations.ts`: stdio supplies its current local SSO token and local file assets, while HTTP supplies the bearer from the current request and bounded inline assets.
 
 ## 4. Stateless result protocol
 
@@ -242,13 +242,13 @@ The HTTP request/body limit and TDEI's `/api/v1/system/capabilities` upload limi
 The stdio composition root creates:
 
 - existing local `AuthManager`;
-- existing `AwsMcpClient`;
-- `AwsTdeiOperations`, which maps typed port methods to AWS child tool names;
+- existing `OpenApiMcpClient`;
+- `OpenApiTdeiOperations`, which maps typed port methods to OpenAPI child tool names;
 - `LocalFileAssets`;
 - configured `PlaceResolver`;
 - one `SemanticIntentModule` registered on the stdio `McpServer`.
 
-SSO helpers and raw AWS-generated tools remain local-only concerns. Semantic registration must not live inside `AwsToolsLifecycle`; otherwise it cannot be shared with hosted HTTP.
+SSO helpers and raw OpenAPI-generated tools remain local-only concerns. Semantic registration must not live inside `OpenApiToolsLifecycle`; otherwise it cannot be shared with hosted HTTP.
 
 ### 8.2 Streamable HTTP/S
 
@@ -272,7 +272,7 @@ Tool registration uses static schemas and descriptions. Deduplication, if needed
 
 ## 10. Tests and acceptance
 
-The semantic module is tested once against fakes. Adapter contract suites then prove AWS and HTTP parity.
+The semantic module is tested once against fakes. Adapter contract suites then prove external OpenAPI and HTTP parity.
 
 Required cases:
 
@@ -303,7 +303,7 @@ Hosted:  docker run ... tdei-mcp --transport=http
 Client:  https://mcp.example.org/mcp + Authorization bearer on every request
 ```
 
-The Docker image contains only the Node application for hosted mode; it does not install `uv`, `uvx`, or the AWS MCP server. HTTPS terminates at the deployment ingress/reverse proxy.
+The Docker image contains only the Node application for hosted mode; it does not install `uv`, `uvx`, or the OpenAPI MCP server. HTTPS terminates at the deployment ingress/reverse proxy.
 
 ## 12. Source facts used by this design
 

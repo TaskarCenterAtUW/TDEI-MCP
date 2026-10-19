@@ -24,7 +24,7 @@
 ## File map (what changes and why)
 
 - Modify: `src/config.ts` — pure validators, `loadConfig()`, `getConfig()`, `TdeiConfigError`; remove module-level `config` const.
-- Modify (mechanical `config` → `getConfig()`): `src/auth/auth-manager.ts`, `src/aws/aws-mcp-client.ts`, `src/server.ts`, `src/http.ts`.
+- Modify (mechanical `config` → `getConfig()`): `src/auth/auth-manager.ts`, `src/openapi/openapi-mcp-client.ts`, `src/server.ts`, `src/http.ts`.
 - Modify: `src/index.ts` (entry fail-fast), `src/http.ts serveHttp` (startup fail-fast).
 - Test: `test/config-lazy.test.ts`, update `test/http-stateless.test.ts` import.
 - Modify: `tsconfig.json` (strict flags), `package.json` (lint script).
@@ -37,12 +37,12 @@
 
 **Files:**
 - Modify: `src/config.ts` (full rewrite of loading mechanics, same rules)
-- Modify: `src/auth/auth-manager.ts`, `src/aws/aws-mcp-client.ts`, `src/server.ts`, `src/http.ts`, `src/index.ts`
+- Modify: `src/auth/auth-manager.ts`, `src/openapi/openapi-mcp-client.ts`, `src/server.ts`, `src/http.ts`, `src/index.ts`
 - Test: `test/config-lazy.test.ts`; modify `test/http-stateless.test.ts:6` import
 
 **Interfaces:**
 - Consumes: `process.env` (fresh per `loadConfig()` call).
-- Produces: `ConfigError {var: string, rule: string, example: string}`, `loadConfig(): {ok: true, config: ResolvedConfig} | {ok: false, errors: ConfigError[]}`, `getConfig(): ResolvedConfig` (memoized, throws `TdeiConfigError` on failure), `TdeiConfigError extends Error {errors: ConfigError[]}`, `ResolvedConfig` (same shape as today's `config` object: apiUrl, specUrl, ssoClientId, ssoCallbackUrl, transport, httpHost, httpPort, httpBasePath, corsOrigins, tlsCert, tlsKey, awsMcpPackage).
+- Produces: `ConfigError {var: string, rule: string, example: string}`, `loadConfig(): {ok: true, config: ResolvedConfig} | {ok: false, errors: ConfigError[]}`, `getConfig(): ResolvedConfig` (memoized, throws `TdeiConfigError` on failure), `TdeiConfigError extends Error {errors: ConfigError[]}`, `ResolvedConfig` (same shape as today's `config` object: apiUrl, specUrl, ssoClientId, ssoCallbackUrl, transport, httpHost, httpPort, httpBasePath, corsOrigins, tlsCert, tlsKey, openApiMcpPackage).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -149,7 +149,7 @@ export interface ResolvedConfig {
   corsOrigins: string[];
   tlsCert: string | undefined;
   tlsKey: string | undefined;
-  awsMcpPackage: string;
+  openApiMcpPackage: string;
 }
 
 export class TdeiConfigError extends Error {
@@ -194,7 +194,7 @@ export function getConfig(): ResolvedConfig {
 
 Keep exporting `Transport`, `validateSsoCallbackUrl`, `resolveTransport` (pure now — return Transport or... it was throwing; make it return `{value} | {error}`? External callers: grep shows only config.ts internal use + maybe tests. Check with grep; if only internal, make it private-ish (still exported for tests is fine, but keep the throwing signature? No — throwing reintroduces the problem. Make `resolveTransport(): Transport` default-invalid→stdio? NO — silent fallback masks errors. Decision: `resolveTransport` becomes internal returning `Transport | ConfigError`; not exported. Update this paragraph's claim if grep finds external callers — executor must grep first.)
 
-Consumer migration (mechanical): replace `import { config } from "../config.js"` with `import { getConfig } from "../config.js"` and each `config.X` use with `getConfig().X`? That reloads... `getConfig()` memoizes — cheap. But per-call overhead + repeated calls in hot paths. Cleaner: capture once per scope. In `auth-manager.ts`, methods use `config.apiUrl` etc. — replace with `getConfig()` at each use site (memoized, negligible). In `aws-mcp-client.ts` `startChild` — same. In `server.ts` `checkHealth` + tool closures — the closures run per-call; `getConfig()` memoized so fine. In `http.ts` — `buildLoginUrl/buildLogoutUrl` per request + `serveHttp` startup; fine.
+Consumer migration (mechanical): replace `import { config } from "../config.js"` with `import { getConfig } from "../config.js"` and each `config.X` use with `getConfig().X`? That reloads... `getConfig()` memoizes — cheap. But per-call overhead + repeated calls in hot paths. Cleaner: capture once per scope. In `auth-manager.ts`, methods use `config.apiUrl` etc. — replace with `getConfig()` at each use site (memoized, negligible). In `openapi-mcp-client.ts` `startChild` — same. In `server.ts` `checkHealth` + tool closures — the closures run per-call; `getConfig()` memoized so fine. In `http.ts` — `buildLoginUrl/buildLogoutUrl` per request + `serveHttp` startup; fine.
 
 Entry fail-fast. `src/index.ts` entry block: BEFORE the transport branch, force config load:
 
@@ -236,7 +236,7 @@ Expected: PASS (4 tests). Then full suite + `tsc --noEmit`. Expect fallout: any 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/config.ts src/auth/auth-manager.ts src/aws/aws-mcp-client.ts src/server.ts src/http.ts src/index.ts test/config-lazy.test.ts test/http-stateless.test.ts && git commit -m "feat: lazy config loading with typed TDEI_CONFIG_INVALID fail-fast"
+git add src/config.ts src/auth/auth-manager.ts src/openapi/openapi-mcp-client.ts src/server.ts src/http.ts src/index.ts test/config-lazy.test.ts test/http-stateless.test.ts && git commit -m "feat: lazy config loading with typed TDEI_CONFIG_INVALID fail-fast"
 ```
 
 Drop untouched files from the add at commit time.

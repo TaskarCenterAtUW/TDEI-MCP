@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
-import { registerAwsTools } from "../src/aws/register-aws-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
 // Drives the reported getOswFile call through the public MCP handler. A valid
@@ -12,7 +12,7 @@ import { createServer } from "../src/server.js";
 test("registered getOswFile tool routes locally, child never sees binary", async () => {
   const childCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const downloadCalls: Array<{ tool: string; input: Record<string, unknown> }> = [];
-  const awsClient = {
+  const openApiClient = {
     async listTools() {
       return {
         tools: [{
@@ -61,8 +61,8 @@ test("registered getOswFile tool routes locally, child never sees binary", async
       },
       getTokenVersion: () => 1,
     },
-    awsMcpClient: awsClient,
-    registerAwsTools,
+    openApiMcpClient: openApiClient,
+    registerTdeiOpenApiTools,
     binaryDownloads,
   });
   const client = new Client({ name: "binary-e2e-test", version: "1.0.0" });

@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { AuthManager } from "../auth/auth-manager.js";
 import type { SsoLogoutStart } from "../auth/types.js";
 import type { OpenApiMcpClient } from "../openapi/openapi-mcp-client.js";
-import type { registerAwsTools } from "./register-aws-tools.js";
+import type { registerTdeiOpenApiTools } from "../tdei/register-openapi-tools.js";
 import {
   BUILTIN_TOOL_PREFIX,
   CONNECTOR_AUTH_TOOLS,
@@ -18,12 +18,12 @@ import { getConfig } from "../config.js";
 type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion"> & {
   getAccessToken?: () => Promise<string>;
 };
-type AwsSession = Pick<
+type OpenApiSession = Pick<
   OpenApiMcpClient,
   "close" | "listTools" | "callTool"
 >;
-type AwsToolRegistrar = typeof registerAwsTools;
-type RegistrarClient = Parameters<AwsToolRegistrar>[1];
+type OpenApiToolRegistrar = typeof registerTdeiOpenApiTools;
+type RegistrarClient = Parameters<OpenApiToolRegistrar>[1];
 type DownloadHandler = Pick<BinaryTdeiDownloads, "download">;
 
 const ALLOW_ALL: EndpointFilter = { mode: "all", allow: [], deny: [] };
@@ -58,7 +58,7 @@ function unknownFilterIds(
   return [];
 }
 
-type McpCallResult = Awaited<ReturnType<AwsSession["callTool"]>>;
+type McpCallResult = Awaited<ReturnType<OpenApiSession["callTool"]>>;
 
 function toMcpResult(value: unknown): McpCallResult {
   if (
@@ -95,7 +95,7 @@ function deniedFor(
   return new Set<string>();
 }
 
-export class AwsToolsLifecycle {
+export class OpenApiToolsLifecycle {
   private state: "unloaded" | "loading" | "loaded" | "reloading" = "unloaded";
   private operationQueue: Promise<void> =
     Promise.resolve();
@@ -108,8 +108,8 @@ export class AwsToolsLifecycle {
   constructor(
     private readonly server: McpServer,
     private readonly authSession: AuthSession,
-    private readonly awsSession: AwsSession,
-    private readonly registrar: AwsToolRegistrar,
+    private readonly openApiSession: OpenApiSession,
+    private readonly registrar: OpenApiToolRegistrar,
     private readonly downloads?: DownloadHandler,
   ) {}
 
@@ -126,7 +126,7 @@ export class AwsToolsLifecycle {
   reload(): Promise<"reloaded"> {
     return this.serialize<"reloaded">(async () => {
       this.state = "reloading";
-      await this.awsSession.close();
+      await this.openApiSession.close();
       await this.discoverAndRegister();
       this.state = "loaded";
       return "reloaded";
@@ -147,7 +147,7 @@ export class AwsToolsLifecycle {
         });
         return downloads.download(tool, input, {});
       }
-      return this.awsSession.callTool(tool, input);
+      return this.openApiSession.callTool(tool, input);
     });
   }
 
@@ -164,7 +164,7 @@ export class AwsToolsLifecycle {
 
     // Single listTools per load/reload: the registrar reuses this
     // already-discovered list via a stub client (no second child spawn).
-    const listed = await this.awsSession.listTools();
+    const listed = await this.openApiSession.listTools();
     const discoveredNames = listed.tools.map((tool) => tool.name);
 
     // Unknown allow/deny IDs fall back to allow-all in memory —
@@ -183,7 +183,7 @@ export class AwsToolsLifecycle {
     const discoveryClient: RegistrarClient = {
       listTools: async () => listed,
       callTool: (name: string, args: Record<string, unknown>) =>
-        this.awsSession.callTool(name, args),
+        this.openApiSession.callTool(name, args),
     };
     const reg = await this.registrar(
       this.server,
@@ -236,7 +236,7 @@ export class AwsToolsLifecycle {
       try {
         return await this.authSession.logout();
       } finally {
-        await this.awsSession.close();
+        await this.openApiSession.close();
         this.state = "unloaded";
       }
     });

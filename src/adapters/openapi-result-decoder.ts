@@ -15,7 +15,7 @@ function objectRecords(value: unknown): Array<Record<string, unknown>> {
   );
 }
 
-export function decodeAwsRecords(payload: unknown): Array<Record<string, unknown>> {
+export function decodeOpenApiRecords(payload: unknown): Array<Record<string, unknown>> {
   let value = payload;
   if (typeof value === "object" && value !== null && "content" in value) {
     const content = (value as { content?: unknown }).content;
@@ -30,7 +30,7 @@ export function decodeAwsRecords(payload: unknown): Array<Record<string, unknown
     try {
       value = JSON.parse(text) as unknown;
     } catch {
-      throw new Error("AWS MCP operation returned non-JSON text content.");
+      throw new Error("OpenAPI operation returned non-JSON text content.");
     }
   }
 

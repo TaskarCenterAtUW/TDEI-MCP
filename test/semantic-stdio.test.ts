@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
-import { registerAwsTools } from "../src/aws/register-aws-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
 test("stdio server exposes semantic tools backed by the OpenAPI provider", async () => {
@@ -24,7 +24,7 @@ test("stdio server exposes semantic tools backed by the OpenAPI provider", async
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() {
         return {
           tools: ["listDatasetFiles", "listServices"].map((name) => ({
@@ -50,7 +50,7 @@ test("stdio server exposes semantic tools backed by the OpenAPI provider", async
       async close() {},
       isConnected: () => true,
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "semantic-stdio-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -109,7 +109,7 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() { return { tools: [] }; },
       async callTool(name) {
         childCalls.push(name);
@@ -118,7 +118,7 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
       async close() {},
       isConnected: () => false,
     },
-    registerAwsTools,
+    registerTdeiOpenApiTools,
   });
   const client = new Client({ name: "semantic-stdio-upload-client", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 
-import { sanitizeJsonSchema } from "../src/aws/register-aws-tools.js";
+import { sanitizeJsonSchema } from "../src/tdei/register-openapi-tools.js";
 
 test("draft-04 boolean exclusiveMinimum rewrites to numeric and converts", () => {
   // Exact shape from live tdei-api-gateway.json (proximity field)

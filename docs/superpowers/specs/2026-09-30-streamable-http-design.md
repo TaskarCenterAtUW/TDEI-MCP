@@ -22,7 +22,7 @@ Agreed decisions for v1 (from issue, user-confirmed):
   implement and deploy. SDK v2 `WebStandardStreamableHTTPServerTransport`
   converts to/from Web `Request`/`Response`.
 - **Process isolation:** `src/http.ts` is a separate, self-contained module. It
-  must not mingle with or infect the STDIO path: no shared mutable auth/AWS
+  must not mingle with or infect the STDIO path: no shared mutable auth/external OpenAPI
   state, no side effects on import, STDIO behavior byte-identical when the flag
   is absent. `src/index.ts` contains only the exclusive startup branch.
 
@@ -57,7 +57,7 @@ Agreed decisions for v1 (from issue, user-confirmed):
    itself via the existing `POST /api/v1/refresh-token` or re-runs SSO login.
    Server never holds `refresh_token` in stateless v1, so it cannot refresh on
    the client's behalf — document this.
-4. Valid Bearer → ephemeral `AwsMcpClient(tokenProvider)` for that request only,
+4. Valid Bearer → ephemeral `OpenApiMcpClient(tokenProvider)` for that request only,
    forwarded to `callTool`/`listTools`, then `close()` immediately (in
    `finally`) after the response to avoid child leaks.
 5. `Mcp-Session-Id` is echoed for SSE stream routing only, never used for auth.
@@ -85,21 +85,21 @@ Agreed decisions for v1 (from issue, user-confirmed):
   bifurcated callback validator.
 - `src/auth/auth-manager.ts`: `injectAccessToken()` + `validateToken()` without
   singleton side effects. Singleton export untouched for STDIO.
-- `src/aws/aws-mcp-client.ts`: optional constructor `tokenProvider` (defaults
+- `src/openapi/openapi-mcp-client.ts`: optional constructor `tokenProvider` (defaults
   to singleton path); guarantee `close()` on stateless path.
 - New `src/http.ts`: self-contained HTTP entry — Node `http` server,
   `WebStandardStreamableHTTPServerTransport` wiring (`sessionIdGenerator:
   undefined`) for `POST {basePath}` and `GET {basePath}` SSE, Bearer
-  middleware, per-request `createServer({authManager: ephemeral, awsMcpClient:
+  middleware, per-request `createServer({authManager: ephemeral, openApiMcpClient:
   ephemeral})`, CORS, 401 envelope, graceful shutdown. Imports from
-  `index.js` (`createServer`) and `auth/aws` modules only; no globals, no
+  `index.js` (`createServer`) and `auth/openApi` modules only; no globals, no
   module-level listeners, no mutation of STDIO singletons.
 - `src/index.ts`: exclusive transport branch only (dynamic import).
 - Tests: new `test/http-stateless.test.ts` — no-token 401, bad Bearer 401, good
   Bearer lists and calls, two sequential requests with different Bearers
   isolated, expired Bearer 401 without refresh attempt, callback validator
   accepts `https` in http mode and rejects it in stdio mode. Mocked fetch +
-  stubbed AWS child; no live TDEI.
+  stubbed OpenAPI child; no live TDEI.
 - Docs: README HTTP section with run command and curl example (indented, not
   fenced, to survive paste):
 
@@ -148,8 +148,8 @@ Agreed decisions for v1 (from issue, user-confirmed):
 - `src/index.ts:263-271` (STDIO entry; branch point)
 - `src/config.ts:1-54`, `.env.example:1-6`
 - `src/auth/auth-manager.ts:57-176,240-261`
-- `src/aws/aws-mcp-client.ts:48-124`
-- `src/aws/register-aws-tools.ts:29-115`
+- `src/openapi/openapi-mcp-client.ts:48-124`
+- `src/tdei/register-openapi-tools.ts:29-115`
 - `package.json:25-29` (`@modelcontextprotocol/server@^2.0.0`;
   `WebStandardStreamableHTTPServerTransport`, stateless via
   `sessionIdGenerator: undefined`)

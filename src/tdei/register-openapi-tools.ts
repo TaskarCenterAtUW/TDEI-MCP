@@ -11,9 +11,9 @@ import {
   type OpenApiToolRegistrationResult,
 } from "../openapi/register-openapi-tools.js";
 
-export type AwsToolClient = OpenApiToolClient;
-export type AwsToolCall = OpenApiToolCall;
-export type AwsToolRegistrationResult = OpenApiToolRegistrationResult;
+export type TdeiOpenApiToolClient = OpenApiToolClient;
+export type TdeiOpenApiToolCall = OpenApiToolCall;
+export type TdeiOpenApiToolRegistrationResult = OpenApiToolRegistrationResult;
 export { sanitizeJsonSchema };
 
 const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
@@ -41,12 +41,12 @@ function truncateResult<T>(result: T): T {
   return result;
 }
 
-export async function registerAwsTools(
+export async function registerTdeiOpenApiTools(
   server: McpServer,
-  client: AwsToolClient = openApiMcpClient,
+  client: TdeiOpenApiToolClient = openApiMcpClient,
   filter: EndpointFilter = { mode: "all", allow: [], deny: [] },
-  onCall?: AwsToolCall,
-): Promise<AwsToolRegistrationResult> {
+  onCall?: TdeiOpenApiToolCall,
+): Promise<TdeiOpenApiToolRegistrationResult> {
   console.error("[openapi-tools] discovering TDEI OpenAPI tools");
   const result = await registerOpenApiTools(server, client, {
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,

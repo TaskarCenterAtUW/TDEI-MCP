@@ -80,7 +80,7 @@ export function inferCode(err: unknown): { code: TdeiErrorCode; message: string;
     return { code: "TDEI_CONFLICT", message: backendMessage ? `TDEI request conflict: ${backendMessage}` : "The TDEI request conflicts with the current resource state.", retryable: false };
   }
   if ((status !== undefined && status >= 500) || /child|spawn|ENOENT|ECONNRESET/i.test(message)) {
-    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The AWS tool child is unavailable.", retryable: true };
+    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The OpenAPI tool provider is unavailable.", retryable: true };
   }
   if (/disabled by config/.test(message)) {
     return { code: "TDEI_TOOL_DISABLED", message, retryable: false };

@@ -4,7 +4,7 @@
 
 **Goal:** Add a `tdei_health` tool, a structured error vocabulary (`TdeiMcpError` + `formatError()`), JSON logging support, and a 256KB output cap — deleting the dead `tdei-client.ts`.
 
-**Architecture:** New `src/mcp/errors.ts` (codes + `inferCode()` absorbing the dead client's status table + `formatError()` emitting JSON-in-text) wired into the two error surfaces (AWS tool closures, workflow runner abort); new `tdei_health` tool in `src/server.ts` with lightweight injectable probes; new `src/mcp/log.ts` adopted in new code only.
+**Architecture:** New `src/mcp/errors.ts` (codes + `inferCode()` absorbing the dead client's status table + `formatError()` emitting JSON-in-text) wired into the two error surfaces (external OpenAPI tool closures, workflow runner abort); new `tdei_health` tool in `src/server.ts` with lightweight injectable probes; new `src/mcp/log.ts` adopted in new code only.
 
 **Tech Stack:** TypeScript ES2022 NodeNext ESM, `node:test` + `tsx`, `InMemoryTransport` from `@modelcontextprotocol/client` for tests.
 
@@ -28,7 +28,7 @@
 
 - Create: `src/mcp/errors.ts` — codes, `TdeiMcpError`, `inferCode()`, `formatError()`, truncation helper.
 - Delete: `src/api/tdei-client.ts` — dead code (verified: no file imports `tdeiRequest` or `TdeiApiError`; confirm with grep before deleting).
-- Modify: `src/aws/register-aws-tools.ts` — closure catch `errorResult` → `formatError` + truncation.
+- Modify: `src/tdei/register-openapi-tools.ts` — closure catch `errorResult` → `formatError` + truncation.
 - Modify: `src/workflows/runner.ts` — step-abort error carries `code + stepRef`.
 - Create: `src/mcp/log.ts` — `LOG_LEVEL`-gated pretty/JSON logger with token hashing.
 - Modify: `src/server.ts` — new `tdei_health` tool (probes injectable for tests).
@@ -43,7 +43,7 @@
 **Files:**
 - Create: `src/mcp/errors.ts`
 - Delete: `src/api/tdei-client.ts`
-- Modify: `src/aws/register-aws-tools.ts:124-140` (closure catch)
+- Modify: `src/tdei/register-openapi-tools.ts:124-140` (closure catch)
 - Modify: `src/workflows/runner.ts:97-122` (abort path)
 - Test: `test/health-errors.test.ts` (error half)
 
@@ -193,7 +193,7 @@ export function inferCode(err: unknown): { code: TdeiErrorCode; message: string;
     return { code: "TDEI_CONFLICT", message: backendMessage ? `TDEI request conflict: ${backendMessage}` : "The TDEI request conflicts with the current resource state.", retryable: false };
   }
   if ((status !== undefined && status >= 500) || /child|spawn|ENOENT|ECONNRESET/i.test(message)) {
-    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The AWS tool child is unavailable.", retryable: true };
+    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The external OpenAPI tool child is unavailable.", retryable: true };
   }
   if (/disabled by config/.test(message)) {
     return { code: "TDEI_TOOL_DISABLED", message, retryable: false };
@@ -214,7 +214,7 @@ const HINTS: Record<TdeiErrorCode, string> = {
   TDEI_UPSTREAM_5XX: "Retry; if it persists, check TDEI environment status.",
   TDEI_CONFIG_INVALID: "Check .env values and tdei.config.json against the documented schema.",
   TDEI_TOOL_DISABLED: "Enable the tool in tdei.config.json or call tdei_reload_config.",
-  TDEI_CHILD_UNAVAILABLE: "Call tdei_load_api_tools to restart the AWS child.",
+  TDEI_CHILD_UNAVAILABLE: "Call tdei_load_api_tools to restart the OpenAPI child.",
 };
 
 export function formatError(err: unknown): { isError: true; content: [{ type: "text"; text: string }] } {
@@ -248,15 +248,15 @@ export function truncateText(text: string): { text: string; truncated: boolean }
 
 Then: (a) verify no importers — `grep -rn "tdei-client" src test scripts`; (b) delete `src/api/tdei-client.ts` (`git rm`); if the directory `src/api/` becomes empty, leave the empty dir (git ignores it; do not add placeholder files).
 
-Then rewire the two sites. In `src/aws/register-aws-tools.ts`, closure catch:
+Then rewire the two sites. In `src/tdei/register-openapi-tools.ts`, closure catch:
 
 ```ts
       async (args) => {
         try {
           const raw = await (onCall
-            ? onCall(awsTool.name, args)
+            ? onCall(openApiTool.name, args)
             : client.callTool(
-              awsTool.name,
+              openApiTool.name,
               args,
             ));
           return truncateResult(raw);
@@ -331,7 +331,7 @@ Expected: PASS (5 tests). Then full suite + `./node_modules/.bin/tsc --noEmit` c
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/mcp/errors.ts src/aws/register-aws-tools.ts src/workflows/runner.ts src/workflows/register.ts test/health-errors.test.ts && git rm -q src/api/tdei-client.ts && git commit -m "feat: structured errors with coded JSON and output cap"
+git add src/mcp/errors.ts src/tdei/register-openapi-tools.ts src/workflows/runner.ts src/workflows/register.ts test/health-errors.test.ts && git rm -q src/api/tdei-client.ts && git commit -m "feat: structured errors with coded JSON and output cap"
 ```
 
 ---
@@ -345,7 +345,7 @@ git add src/mcp/errors.ts src/aws/register-aws-tools.ts src/workflows/runner.ts 
 - Test: extend `test/health-errors.test.ts` (health + logger half)
 
 **Interfaces:**
-- Consumes: `formatError` not needed here; `auth.getStatus()`, `awsClient.isConnected()` (exists, `aws-mcp-client.ts:123`), `config.{apiUrl,specUrl,ssoCallbackUrl,transport}`, `loadConfigFile().filter.mode` (`config-file.ts:55`).
+- Consumes: `formatError` not needed here; `auth.getStatus()`, `openApiClient.isConnected()` (exists, `openapi-mcp-client.ts:123`), `config.{apiUrl,specUrl,ssoCallbackUrl,transport}`, `loadConfigFile().filter.mode` (`config-file.ts:55`).
 - Produces: `log(level: "debug"|"info"|"warn"|"error", msg: string, fields?: {tool?: string; sessionHash?: string}): void`; `hashToken(token: string): string`; `tdei_health` tool callable with `{}` input.
 
 - [ ] **Step 1: Write the failing test**
@@ -403,13 +403,13 @@ test("tdei_health tool is listed and callable", async () => {
       getTokenVersion: () => 1,
       async logout() { throw new Error("not used"); },
     },
-    awsMcpClient: {
+    openApiMcpClient: {
       async listTools() { return { tools: [] }; },
       async callTool() { throw new Error("TDEI_SSO_REQUIRED"); },
       async close() {},
       isConnected: () => false,
     },
-    registerAwsTools: (async () => ({ discovered: 0, registered: 0, skipped: 0, toolSchemas: new Map() })) as never,
+    registerOpenApiTools: (async () => ({ discovered: 0, registered: 0, skipped: 0, toolSchemas: new Map() })) as never,
   });
   const client = new Client({ name: "health-tool-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -427,7 +427,7 @@ test("tdei_health tool is listed and callable", async () => {
 });
 ```
 
-Notes for the executor: the `registerAwsTools: ... as never` cast — `createServer`'s `ServerDependencies` requires the real registrar type; the cast bypasses it since this test's server never loads AWS tools (auth stub throws). If `tsc` complains about the cast target, use the real `registerAwsTools` import instead (it will run discovery against the stub client returning `{tools: []}` — safe). Prefer the real import; fall back to the cast only if discovery fails. The `awsMcpClient` stub adds `isConnected` — but `ServerDependencies["awsMcpClient"]` pick is `"callTool" | "close" | "listTools"` (no `isConnected`); extra property on an object literal triggers excess-property checks. Fix: define the stub as a variable first (`const awsStub = {...};`) then pass `awsMcpClient: awsStub` — excess properties are allowed through a variable. Same for the auth literal (it matches exactly, fine). And `checkHealth` needs the server's auth/aws — signature: `checkHealth(deps: {auth: {getStatus()}, aws: {isConnected()}, probes?: HealthProbes})`. Design it so the tool handler calls `checkHealth({auth, aws})` with real probes, tests inject stubs.
+Notes for the executor: the `registerOpenApiTools: ... as never` cast — `createServer`'s `ServerDependencies` requires the real registrar type; the cast bypasses it since this test's server never loads external OpenAPI tools (auth stub throws). If `tsc` complains about the cast target, use the real `registerOpenApiTools` import instead (it will run discovery against the stub client returning `{tools: []}` — safe). Prefer the real import; fall back to the cast only if discovery fails. The `openApiMcpClient` stub adds `isConnected` — but `ServerDependencies["openApiMcpClient"]` pick is `"callTool" | "close" | "listTools"` (no `isConnected`); extra property on an object literal triggers excess-property checks. Fix: define the stub as a variable first (`const openApiStub = {...};`) then pass `openApiMcpClient: openApiStub` — excess properties are allowed through a variable. Same for the auth literal (it matches exactly, fine). And `checkHealth` needs the server's auth/openApi — signature: `checkHealth(deps: {auth: {getStatus()}, openApi: {isConnected()}, probes?: HealthProbes})`. Design it so the tool handler calls `checkHealth({auth, openApi})` with real probes, tests inject stubs.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -479,7 +479,7 @@ export interface HealthReport {
 export async function checkHealth(
   deps: {
     auth: Pick<AuthManager, "getStatus">;
-    aws: { isConnected(): boolean };
+    openApi: { isConnected(): boolean };
   },
   probes: HealthProbes = {},
 ): Promise<HealthReport> {
@@ -526,7 +526,7 @@ export async function checkHealth(
   return {
     ok,
     auth: { state: status.state, ...(status.expiresAt ? { expiresAt: status.expiresAt } : {}) },
-    child: { connected: deps.aws.isConnected(), mode: status.authenticated ? "authenticated" : "discovery" },
+    child: { connected: deps.openApi.isConnected(), mode: status.authenticated ? "authenticated" : "discovery" },
     spec,
     uvx,
     callback,
@@ -556,7 +556,7 @@ async function defaultCanBind(port: number, host: string): Promise<boolean> {
 }
 ```
 
-Imports to add in `server.ts`: `config` from `./config.js`, `loadConfigFile` from `./config-file.js`, `AuthManager` type already imported, `log` from `./mcp/log.js` (use `log("info", ...)` in the health handler for the partial-adoption requirement). Note: `server.ts` currently imports `config`? Check — `server.ts` was extracted from `index.ts`; it imports auth/aws/responses/register/lifecycle. If `config` isn't imported, add it. `loadConfigFile()` reads `tdei.config.json` — in tests it falls back to allow-all with a stderr warning; acceptable (or pass `TDEI_CONFIG_PATH` to a temp file; not required).
+Imports to add in `server.ts`: `config` from `./config.js`, `loadConfigFile` from `./config-file.js`, `AuthManager` type already imported, `log` from `./mcp/log.js` (use `log("info", ...)` in the health handler for the partial-adoption requirement). Note: `server.ts` currently imports `config`? Check — `server.ts` was extracted from `index.ts`; it imports auth/openApi/responses/register/lifecycle. If `config` isn't imported, add it. `loadConfigFile()` reads `tdei.config.json` — in tests it falls back to allow-all with a stderr warning; acceptable (or pass `TDEI_CONFIG_PATH` to a temp file; not required).
 
 Register the tool right after `tdei_auth_status`:
 
@@ -565,12 +565,12 @@ Register the tool right after `tdei_auth_status`:
     "tdei_health",
     {
       description:
-        "Report connector health: auth state, AWS child, spec reachability, uvx, callback port, and config. Read-only, safe signed-out, never emits tokens.",
+        "Report connector health: auth state, OpenAPI child, spec reachability, uvx, callback port, and config. Read-only, safe signed-out, never emits tokens.",
       inputSchema: z.object({}),
     },
     async (_args) => {
       log("info", "health check", { tool: "tdei_health" });
-      const report = await checkHealth({ auth, aws: awsClient });
+      const report = await checkHealth({ auth, openApi: openApiClient });
       return {
         content: [
           {
@@ -583,7 +583,7 @@ Register the tool right after `tdei_auth_status`:
   );
 ```
 
-Type wrinkle: `awsClient` is `ServerDependencies["awsMcpClient"]` (pick without `isConnected`). The real `AwsMcpClient` HAS `isConnected()` but the pick-type hides it. Options the executor must choose in order: (a) widen the pick with `"isConnected"` — one-word change, consistent with the Part A `getTokenVersion` widening precedent; the two stub clients in `session-lifecycle.test.ts` then need `isConnected: () => false` added (same pattern as before). Do (a). Also widen `register-aws-tools.ts` `AwsToolClient`? It doesn't need `isConnected` — leave it.
+Type wrinkle: `openApiClient` is `ServerDependencies["openApiMcpClient"]` (pick without `isConnected`). The real `OpenApiMcpClient` HAS `isConnected()` but the pick-type hides it. Options the executor must choose in order: (a) widen the pick with `"isConnected"` — one-word change, consistent with the Part A `getTokenVersion` widening precedent; the two stub clients in `session-lifecycle.test.ts` then need `isConnected: () => false` added (same pattern as before). Do (a). Also widen `register-openapi-tools.ts` `OpenApiToolClient`? It doesn't need `isConnected` — leave it.
 
 In `src/http.ts`, extend the unauthorized body: add `retryable: true` for `TDEI_SSO_REQUIRED`/`TDEI_TOKEN_INVALID` (client can retry after login) and `retryable: false`... hmm: expired → client CAN fix by refreshing → `retryable: true`. Missing/invalid → retryable only after user action → `false`. Set: `TDEI_SSO_REQUIRED → false`, `TDEI_TOKEN_INVALID → false`, `TDEI_TOKEN_EXPIRED → true`. Edit the three `unauthorized(...)` calls to include `retryable` in `extra`.
 
@@ -598,7 +598,7 @@ Expected: PASS. Then full suite + `tsc --noEmit` clean (stub updates for `isConn
 git add src/mcp/log.ts src/server.ts src/http.ts test/health-errors.test.ts test/session-lifecycle.test.ts test/http-stateless.test.ts && git commit -m "feat: tdei_health tool with injectable probes and JSON logging"
 ```
 
-Include `http-stateless.test.ts` only if its stubs needed `isConnected` (the `httpAuth` object is auth-only; the stub AWS clients there are `StubAwsMcpClient` instances — real class, has `isConnected`. No change expected, but verify at commit time and drop from the `git add` if untouched).
+Include `http-stateless.test.ts` only if its stubs needed `isConnected` (the `httpAuth` object is auth-only; the stub external OpenAPI clients there are `StubOpenApiMcpClient` instances — real class, has `isConnected`. No change expected, but verify at commit time and drop from the `git add` if untouched).
 
 ---
 
@@ -624,7 +624,7 @@ In the Troubleshooting table, append one row per code (keep the two-column `| Sy
 | `TDEI_UPSTREAM_5XX` | Retry; if it persists, check TDEI environment status. |
 | `TDEI_CONFIG_INVALID` | Check `.env` values and `tdei.config.json` against the schema. |
 | `TDEI_TOOL_DISABLED` | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`. |
-| `TDEI_CHILD_UNAVAILABLE` | Call `tdei_load_api_tools` to restart the AWS child. |
+| `TDEI_CHILD_UNAVAILABLE` | Call `tdei_load_api_tools` to restart the OpenAPI child. |
 
 - [ ] **Step 2: Add tdei_health example**
 
@@ -645,6 +645,6 @@ git add README.md && git commit -m "docs: error-code troubleshooting and tdei_he
 ## Self-review
 
 - Spec coverage: §3 errors module + deletion + `inferCode` table (Task 1) · §4 wiring incl. runner `stepRef` + http `retryable` (Tasks 1-2) · §5 health tool + probes + `ok:false` semantics (Task 2) · §6 logger + 256KB cap (Tasks 1-2) · §7 tests incl. deletion grep + README example (Tasks 1-3) · §8 acceptance (health signed-out/authenticated, coded errors, green suite).
-- Placeholder scan: every step has exact files, code blocks, run commands, expected outputs. Fallbacks named (real `registerAwsTools` import over `as never`; drop untouched files from `git add`).
-- Type consistency: `formatError → {isError: true, content: [{type:"text", text:string}]}`; `truncateText → {text, truncated}`; `log(level, msg, fields?)`; `hashToken → string`; `checkHealth({auth, aws}, probes?) → Promise<HealthReport>`; `HealthProbes {fetchImpl?, runUvx?, canBind?}` — used identically in tests and implementation. `AwsToolCall` (Part A) reused for the closure type.
+- Placeholder scan: every step has exact files, code blocks, run commands, expected outputs. Fallbacks named (real `registerOpenApiTools` import over `as never`; drop untouched files from `git add`).
+- Type consistency: `formatError → {isError: true, content: [{type:"text", text:string}]}`; `truncateText → {text, truncated}`; `log(level, msg, fields?)`; `hashToken → string`; `checkHealth({auth, openApi}, probes?) → Promise<HealthReport>`; `HealthProbes {fetchImpl?, runUvx?, canBind?}` — used identically in tests and implementation. `OpenApiToolCall` (Part A) reused for the closure type.
 - Risk flagged inline: stub excess-property rules (variable-first pattern), `server.ts` missing `config` import (add it), `loadConfigFile` stderr warning in tests (accepted).

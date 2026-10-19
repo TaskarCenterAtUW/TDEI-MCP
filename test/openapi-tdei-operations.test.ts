@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import { AwsTdeiOperations } from "../src/adapters/aws-tdei-operations.js";
+import { OpenApiTdeiOperations } from "../src/adapters/openapi-tdei-operations.js";
 
-test("AWS adapter maps dataset search and decodes MCP text content", async () => {
+test("OpenAPI adapter maps dataset search and decodes MCP text content", async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
-  const adapter = new AwsTdeiOperations(async (tool, input) => {
+  const adapter = new OpenApiTdeiOperations(async (tool, input) => {
     calls.push({ tool, input });
     return {
       content: [{
@@ -40,9 +40,9 @@ test("AWS adapter maps dataset search and decodes MCP text content", async () =>
   assert.deepEqual(datasets, [{ tdei_dataset_id: "dataset-1" }]);
 });
 
-test("AWS adapter maps service filters", async () => {
+test("OpenAPI adapter maps service filters", async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
-  const adapter = new AwsTdeiOperations(async (tool, input) => {
+  const adapter = new OpenApiTdeiOperations(async (tool, input) => {
     calls.push({ tool, input });
     return [{ tdei_service_id: "service-1" }];
   });
@@ -66,9 +66,9 @@ test("AWS adapter maps service filters", async () => {
   assert.deepEqual(services, [{ tdei_service_id: "service-1" }]);
 });
 
-test("AWS adapter maps authenticated project-group listing", async () => {
+test("OpenAPI adapter maps authenticated project-group listing", async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
-  const adapter = new AwsTdeiOperations(async (tool, input) => {
+  const adapter = new OpenApiTdeiOperations(async (tool, input) => {
     calls.push({ tool, input });
     return [{ tdei_project_group_id: "group-1" }];
   });

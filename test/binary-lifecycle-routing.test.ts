@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import { AwsToolsLifecycle } from "../src/aws/aws-tools-lifecycle.js";
+import { OpenApiToolsLifecycle } from "../src/openapi/openapi-tools-lifecycle.js";
 import { BinaryTdeiDownloads } from "../src/adapters/binary-tdei-downloads.js";
 
 function makeAuth() {
@@ -20,12 +20,12 @@ function makeAuth() {
 
 test("lifecycle routes binary downloads through the dedicated adapter", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
-  const { registerAwsTools } = await import("../src/aws/register-aws-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
   const server = new McpServer({ name: "binary-routing-test", version: "1.0.0" });
 
   const auth = makeAuth();
   let childCalls = 0;
-  const aws = {
+  const openapi = {
     async listTools() {
       return {
         tools: [{
@@ -50,7 +50,7 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
     },
   };
 
-  const lifecycle = new AwsToolsLifecycle(server, auth, aws, registerAwsTools, downloads);
+  const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools, downloads);
   await lifecycle.load();
   const result = await lifecycle.callTool("getOswFile", { tdei_dataset_id: "yakima-1" });
 
@@ -61,11 +61,11 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
 
 test("lifecycle routes JSON tools to the OpenAPI provider", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
-  const { registerAwsTools } = await import("../src/aws/register-aws-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
   const server = new McpServer({ name: "binary-routing-json-test", version: "1.0.0" });
 
   const auth = makeAuth();
-  const aws = {
+  const openapi = {
     async listTools() {
       return {
         tools: [{
@@ -82,7 +82,7 @@ test("lifecycle routes JSON tools to the OpenAPI provider", async () => {
     async close() {},
   };
 
-  const lifecycle = new AwsToolsLifecycle(server, auth, aws, registerAwsTools);
+  const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);
   await lifecycle.load();
   const result = await lifecycle.callTool("listServices", {});
   assert.deepEqual(result, { content: [{ type: "text", text: "services" }] });
