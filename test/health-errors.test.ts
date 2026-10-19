@@ -79,14 +79,13 @@ test("tdei_health works signed-out with stubbed probes", async () => {
     },
     {
       fetchImpl: (async () => new Response("{}", { status: 200 })) as typeof fetch,
-      runUvx: (async () => "uvx 0.12.7") as () => Promise<string>,
       canBind: (async () => true) as () => Promise<boolean>,
     },
   );
   assert.equal(report.ok, true);
   assert.equal(report.auth.state, "signed_out");
   assert.equal(report.spec.reachable, true);
-  assert.equal(report.uvx.found, true);
+  assert.equal(report.openapi.loaded, false);
   assert.equal(report.callback.portFree, true);
   const serialized = JSON.stringify(report);
   assert.ok(!serialized.includes("secret"));

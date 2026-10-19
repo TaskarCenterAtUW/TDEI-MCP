@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 
 import type { AuthManager } from "../auth/auth-manager.js";
 import type { SsoLogoutStart } from "../auth/types.js";
-import type { AwsMcpClient } from "./aws-mcp-client.js";
+import type { OpenApiMcpClient } from "../openapi/openapi-mcp-client.js";
 import type { registerAwsTools } from "./register-aws-tools.js";
 import {
   BUILTIN_TOOL_PREFIX,
@@ -19,7 +19,7 @@ type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion"> & {
   getAccessToken?: () => Promise<string>;
 };
 type AwsSession = Pick<
-  AwsMcpClient,
+  OpenApiMcpClient,
   "close" | "listTools" | "callTool"
 >;
 type AwsToolRegistrar = typeof registerAwsTools;
@@ -97,7 +97,6 @@ function deniedFor(
 
 export class AwsToolsLifecycle {
   private state: "unloaded" | "loading" | "loaded" | "reloading" = "unloaded";
-  private lastTokenVersion: number | undefined;
   private operationQueue: Promise<void> =
     Promise.resolve();
   private allToolSchemas = new Map<
@@ -116,30 +115,29 @@ export class AwsToolsLifecycle {
 
   load(): Promise<"loaded" | "already-loaded"> {
     return this.serialize(async () => {
-      const current = this.authSession.getTokenVersion();
-      if (this.state === "loaded" && this.lastTokenVersion === current) {
+      if (this.state === "loaded") {
         return "already-loaded";
       }
-      await this.ensureFreshLocked(current);
+      await this.ensureLoadedLocked();
       return "loaded";
     });
   }
 
   reload(): Promise<"reloaded"> {
     return this.serialize<"reloaded">(async () => {
-      this.lastTokenVersion = undefined;
-      await this.ensureFreshLocked(this.authSession.getTokenVersion());
+      this.state = "reloading";
+      await this.awsSession.close();
+      await this.discoverAndRegister();
+      this.state = "loaded";
       return "reloaded";
     });
   }
 
   callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
-      await this.ensureFreshLocked(this.authSession.getTokenVersion());
-      // Binary downloads bypass the AWS child: FastMCP decodes every
-      // response body as UTF-8 (response.json() catching only
-      // JSONDecodeError), so octet-stream ZIPs crash it with
-      // "'utf-8' codec can't decode byte 0x83". Route those locally.
+      await this.ensureLoadedLocked();
+      // Binary downloads return local paths, which are not representable by
+      // the generic text-oriented OpenAPI executor. Route those locally.
       if (BinaryTdeiDownloads.isDownloadTool(tool)) {
         const downloads = this.downloads ?? new BinaryTdeiDownloads({
           baseUrl: getConfig().apiUrl,
@@ -153,18 +151,10 @@ export class AwsToolsLifecycle {
     });
   }
 
-  private async ensureFreshLocked(currentVersion: number): Promise<void> {
-    if (this.state === "loaded" && this.lastTokenVersion === currentVersion) {
-      return;
-    }
-    const firstLoad = this.lastTokenVersion === undefined;
-    this.state = firstLoad ? "loading" : "reloading";
-    if (!firstLoad) {
-      console.error("[aws-mcp] token changed; restarting AWS MCP server");
-      await this.awsSession.close();
-    }
+  private async ensureLoadedLocked(): Promise<void> {
+    if (this.state === "loaded") return;
+    this.state = "loading";
     await this.discoverAndRegister();
-    this.lastTokenVersion = currentVersion;
     this.state = "loaded";
   }
 
@@ -247,7 +237,6 @@ export class AwsToolsLifecycle {
         return await this.authSession.logout();
       } finally {
         await this.awsSession.close();
-        this.lastTokenVersion = undefined;
         this.state = "unloaded";
       }
     });

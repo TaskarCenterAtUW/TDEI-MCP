@@ -11,11 +11,7 @@ function memFs(initial: Record<string, string> = {}) {
     mkdir: async (_p: string) => {},
   };
 }
-const exec = async (cmd: string) => ({
-  stdout: cmd === "node" || cmd === process.execPath || cmd.endsWith("/node")
-    ? "v22.0.0\n"
-    : "uvx 0.1\n",
-});
+const exec = async (_cmd: string) => ({ stdout: "v22.0.0\n" });
 const logs: string[] = [];
 const deps = (fs: ReturnType<typeof memFs>, prompter: unknown) => ({
   exec,

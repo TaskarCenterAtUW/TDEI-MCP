@@ -18,7 +18,7 @@ function makeAuth() {
   };
 }
 
-test("lifecycle routes binary downloads locally, never to the AWS child", async () => {
+test("lifecycle routes binary downloads through the dedicated adapter", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
   const { registerAwsTools } = await import("../src/aws/register-aws-tools.js");
   const server = new McpServer({ name: "binary-routing-test", version: "1.0.0" });
@@ -37,7 +37,7 @@ test("lifecycle routes binary downloads locally, never to the AWS child", async 
     },
     async callTool(_name: string, _args: Record<string, unknown>) {
       childCalls += 1;
-      // This is what the Python child does with ZIP bytes: strict UTF-8 decode.
+      // Generic text tool execution must never receive ZIP bytes.
       throw new Error("'utf-8' codec can't decode byte 0x83 in position 50");
     },
     async close() {},
@@ -59,7 +59,7 @@ test("lifecycle routes binary downloads locally, never to the AWS child", async 
   assert.equal(childCalls, 0);
 });
 
-test("lifecycle still routes JSON tools to the AWS child", async () => {
+test("lifecycle routes JSON tools to the OpenAPI provider", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
   const { registerAwsTools } = await import("../src/aws/register-aws-tools.js");
   const server = new McpServer({ name: "binary-routing-json-test", version: "1.0.0" });

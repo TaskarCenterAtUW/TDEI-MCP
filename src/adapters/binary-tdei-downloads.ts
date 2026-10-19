@@ -23,11 +23,8 @@ export interface DownloadedFile {
 /**
  * Binary-safe counterpart to DirectMultipartTdeiMutations.
  *
- * The AWS OpenAPI MCP child decodes every response body as UTF-8
- * (FastMCP `response.json()` with only `json.JSONDecodeError` caught), so
- * `application/octet-stream` downloads such as getOswFile crash it with
- * `'utf-8' codec can't decode byte 0x83`. These downloads bypass the child
- * and stream raw bytes to a local file with fetch + arrayBuffer().
+ * Generic MCP text results cannot safely carry ZIP payloads. Binary download
+ * tools therefore stream raw bytes to a local file with fetch + arrayBuffer().
  */
 export class BinaryTdeiDownloads {
   private readonly baseUrl: string;

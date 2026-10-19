@@ -5,10 +5,8 @@ import {
   authManager,
   type AuthManager,
 } from "./auth/auth-manager.js";
-import {
-  awsMcpClient,
-  type AwsMcpClient,
-} from "./aws/aws-mcp-client.js";
+import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
+import { openApiMcpClient } from "./tdei/openapi-provider.js";
 import { errorResult } from "./mcp/responses.js";
 import { log } from "./mcp/log.js";
 import { registerAwsTools } from "./aws/register-aws-tools.js";
@@ -24,25 +22,16 @@ import { DirectMultipartTdeiMutations } from "./adapters/direct-multipart-tdei-m
 
 export interface HealthProbes {
   fetchImpl?: typeof fetch;
-  runUvx?: () => Promise<string>;
   canBind?: (port: number, host: string) => Promise<boolean>;
 }
 
 export interface HealthReport {
   ok: boolean;
   auth: { state: string; expiresAt?: number };
-  child: { connected: boolean; mode: string };
+  openapi: { loaded: boolean };
   spec: { url: string; reachable: boolean; latencyMs?: number; hint?: string };
-  uvx: { found: boolean; version?: string; hint?: string };
   callback: { url: string; portFree: boolean | "n/a"; hint?: string };
   config: { transport: string; mode: string };
-}
-
-async function defaultRunUvx(): Promise<string> {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const { stdout } = await promisify(execFile)("uvx", ["--version"], { timeout: 10_000 });
-  return stdout;
 }
 
 async function defaultCanBind(port: number, host: string): Promise<boolean> {
@@ -77,14 +66,6 @@ export async function checkHealth(
     spec = { url: getConfig().specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
   }
 
-  let uvx: HealthReport["uvx"];
-  try {
-    const version = await (probes.runUvx ?? defaultRunUvx)();
-    uvx = { found: true, version: version.trim() };
-  } catch {
-    uvx = { found: false, hint: "uvx not found on PATH; install uv (https://docs.astral.sh/uv/getting-started/installation/)." };
-  }
-
   let callback: HealthReport["callback"];
   try {
     const url = new URL(getConfig().ssoCallbackUrl);
@@ -101,13 +82,12 @@ export async function checkHealth(
     callback = { url: getConfig().ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
   }
 
-  const ok = spec.reachable && uvx.found && callback.portFree !== false;
+  const ok = spec.reachable && callback.portFree !== false;
   return {
     ok,
     auth: { state: status.state, ...(status.expiresAt ? { expiresAt: status.expiresAt } : {}) },
-    child: { connected: deps.aws.isConnected(), mode: status.authenticated ? "authenticated" : "discovery" },
+    openapi: { loaded: deps.aws.isConnected() },
     spec,
-    uvx,
     callback,
     config: { transport: getConfig().transport, mode: loadConfigFile().filter.mode },
   };
@@ -119,7 +99,7 @@ export interface ServerDependencies {
     "completeSsoLogin" | "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
   >;
   awsMcpClient: Pick<
-    AwsMcpClient,
+    OpenApiMcpClient,
     "callTool" | "close" | "listTools" | "isConnected"
   >;
   registerAwsTools: typeof registerAwsTools;
@@ -129,7 +109,7 @@ export interface ServerDependencies {
 export async function createServer(
   dependencies: ServerDependencies = {
     authManager,
-    awsMcpClient,
+    awsMcpClient: openApiMcpClient,
     registerAwsTools,
   },
 ) {
@@ -264,7 +244,7 @@ export async function createServer(
     "tdei_health",
     {
       description:
-        "Report connector health: auth state, AWS child, spec reachability, uvx, callback port, and config. Read-only, safe signed-out, never emits tokens.",
+        "Report connector health: auth state, OpenAPI provider, specification reachability, callback port, and config. Read-only, safe signed-out, never emits tokens.",
       inputSchema: z.object({}),
     },
     async (_args) => {
@@ -431,12 +411,12 @@ export async function createServer(
 
   // Discover tool definitions before MCP initialization so hosts that cache
   // the initial catalogue can see API tools before the user signs in. Calls
-  // still require SSO and restart the child with the real access token.
+  // still require SSO and inject the current access token per request.
   try {
     await awsToolsLifecycle.load();
   } catch (error) {
     console.error(
-      "[aws-tools] initial discovery failed:",
+      "[openapi-tools] initial discovery failed:",
       error instanceof Error ? error.message : String(error),
     );
   }

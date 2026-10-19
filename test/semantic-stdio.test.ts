@@ -9,7 +9,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { registerAwsTools } from "../src/aws/register-aws-tools.js";
 import { createServer } from "../src/server.js";
 
-test("stdio server exposes semantic tools backed by the AWS child", async () => {
+test("stdio server exposes semantic tools backed by the OpenAPI provider", async () => {
   const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
   const server = await createServer({
     authManager: {
@@ -113,7 +113,7 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
       async listTools() { return { tools: [] }; },
       async callTool(name) {
         childCalls.push(name);
-        throw new Error("multipart validation must bypass the AWS child");
+        throw new Error("multipart validation must use the dedicated adapter");
       },
       async close() {},
       isConnected: () => false,

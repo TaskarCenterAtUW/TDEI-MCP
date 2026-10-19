@@ -43,7 +43,7 @@ function makeAws() {
   };
 }
 
-test("token rollover triggers exactly one child restart", async () => {
+test("token rollover does not reset the in-process OpenAPI provider", async () => {
   const auth = makeAuth();
   const aws = makeAws();
   const server = await createServer({
@@ -63,12 +63,12 @@ test("token rollover triggers exactly one child restart", async () => {
   assert.equal(aws.closes, 0);
   auth.bumpVersion();
   await lifecycle.callTool("listServices", {});
-  assert.equal(aws.closes, 1);
+  assert.equal(aws.closes, 0);
   await lifecycle.callTool("listServices", {});
-  assert.equal(aws.closes, 1);
+  assert.equal(aws.closes, 0);
 });
 
-test("concurrent calls during refresh issue one restart only", async () => {
+test("concurrent calls during token refresh keep the provider loaded", async () => {
   const auth = makeAuth();
   const aws = makeAws();
   const server = await createServer({
@@ -90,13 +90,10 @@ test("concurrent calls during refresh issue one restart only", async () => {
     lifecycle.callTool("listServices", {}),
     lifecycle.callTool("listServices", {}),
   ]);
-  assert.equal(aws.closes, 1);
+  assert.equal(aws.closes, 0);
 });
 
-// Without the logout reset, load-after-bump would see a version mismatch and
-// close+reload (closes=2). With the reset, post-logout load is a silent first
-// load (closes stays 1 — logout's own close).
-test("logout resets version so next load starts fresh", async () => {
+test("logout resets the provider so next load starts fresh", async () => {
   const auth = makeAuth();
   const aws = makeAws();
   const server = await createServer({
@@ -118,7 +115,7 @@ test("logout resets version so next load starts fresh", async () => {
   assert.equal(aws.closes, 1);
 });
 
-test("registered tool handlers route through the lifecycle version gate", async () => {
+test("registered tool handlers keep using the loaded provider after token rollover", async () => {
   const auth = makeAuth();
   const aws = makeAws();
   const server = await createServer({
@@ -141,7 +138,7 @@ test("registered tool handlers route through the lifecycle version gate", async 
     assert.equal(aws.closes, 0);
     auth.bumpVersion();
     await client.callTool({ name: "listServices", arguments: {} });
-    assert.equal(aws.closes, 1);
+    assert.equal(aws.closes, 0);
   } finally {
     await client.close();
   }

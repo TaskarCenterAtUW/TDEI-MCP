@@ -150,7 +150,6 @@ export async function runInit(
     home?: string;
     cwd?: string;
     local?: LocalCheckout;
-    installUv?: boolean;
     envFile?: string;
   },
 ): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
@@ -159,15 +158,8 @@ export async function runInit(
     throw new Error("--env-file cannot be combined with --env, --url, or --port");
   }
   const nodeExecPath = opts.nodePath ?? process.execPath;
-  const confirmInstall = opts.installUv === undefined
-    ? deps.prompter.confirm
-      ? () => deps.prompter.confirm!("uv (uvx) was not found. Install it now with the official installer from astral.sh? [y/N] ")
-      : undefined
-    : async () => opts.installUv === true;
   await checkPreflight(deps.exec, {
     nodePath: nodeExecPath,
-    log: deps.log,
-    ...(confirmInstall ? { confirmInstall } : {}),
   });
   const fileEnvironment = opts.envFile
     ? await loadEnvironmentFile(deps, opts.envFile)

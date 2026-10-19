@@ -8,7 +8,7 @@ import { createServer } from "../src/server.js";
 
 // Drives the reported getOswFile call through the public MCP handler. A valid
 // regression test must prove both sides of the routing decision: the local
-// binary adapter is called and the UTF-8-decoding AWS child is never called.
+// binary adapter is called and the generic OpenAPI executor is never called.
 test("registered getOswFile tool routes locally, child never sees binary", async () => {
   const childCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const downloadCalls: Array<{ tool: string; input: Record<string, unknown> }> = [];

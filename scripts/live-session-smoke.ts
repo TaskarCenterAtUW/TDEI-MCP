@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
 import { createServer } from "../src/index.js";
-import { awsMcpClient } from "../src/aws/aws-mcp-client.js";
+import { openApiMcpClient } from "../src/tdei/openapi-provider.js";
 
 const server = await createServer();
 const client = new Client({ name: "tdei-live-session-smoke-test", version: "1.0.0" });
@@ -73,9 +73,9 @@ try {
   assert.ok(tools.some((tool) => tool.name === "listServices"), "listServices was not loaded after SSO login");
   await call("listServices");
   await call("tdei_logout");
-  assert.equal(awsMcpClient.isConnected(), false);
+  assert.equal(openApiMcpClient.isConnected(), false);
   console.log("Live SSO session smoke test passed.");
 } finally {
-  await awsMcpClient.close();
+  await openApiMcpClient.close();
   await client.close();
 }
