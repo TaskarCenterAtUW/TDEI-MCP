@@ -74,7 +74,13 @@ if (isEntryPoint()) {
       }
       if (hostFlag) overrides.host = hostFlag;
       const { serveHttp } = await import("./http.js");
-      await serveHttp({}, overrides);
+      const bearerFlag = flagValue("--require-bearer-auth")?.toLowerCase();
+      const bearerEnv = process.env.TDEI_REQUIRE_BEARER_AUTH?.trim().toLowerCase();
+      const requireBearerAuth =
+        bearerFlag !== undefined
+          ? !["0", "false", "no", "off", ""].includes(bearerFlag)
+          : ["1", "true", "yes", "on"].includes(bearerEnv ?? "");
+      await serveHttp({ requireBearerAuth }, overrides);
     } else if (transport === "stdio" || transport === "") {
       // STDIO is for MCP clients (Codex, Claude Desktop, etc.) that spawn this
       // process with piped stdin. A terminal TTY means someone started it by hand.

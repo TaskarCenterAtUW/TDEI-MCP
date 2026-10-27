@@ -1,6 +1,6 @@
 # TDEI-MCP
 
-Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode loads raw API tools from the TDEI OpenAPI specification and executes them directly in TypeScript. Hosted Streamable HTTP mode is a stateless Node server that calls TDEI directly with the access token supplied on every request.
+Connect an MCP-compatible AI client to the TDEI API using natural-language-oriented tools. Local stdio mode loads raw API tools from the TDEI OpenAPI specification and executes them directly in TypeScript. Hosted Streamable HTTP mode is a Node server that keeps a shared SSO session: clients connect with no hardcoded token, sign in via the `tdei_sso_login` MCP tool, and call TDEI with the session access token. Strict per-request Bearer auth remains available as an opt-in.
 
 The transport-neutral OpenAPI module can also build a separate MCP server for another specification. See [Reusing the OpenAPI MCP core](docs/openapi-mcp-core.md).
 
@@ -26,6 +26,20 @@ npx -y tdei-mcp switch base-url
 
 Then restart your MCP client (tokens live in server memory). Manual setup is
 documented under Advanced below.
+
+### Connecting to a hosted (remote) server
+
+If someone runs the HTTP server for you (e.g. `http://192.168.50.11:8080`),
+point your client at it instead of launching a local server — no tokens are
+stored in the config; you sign in later via `tdei_sso_login`:
+
+```bash
+npx -y tdei-mcp init --remote http://192.168.50.11:8080/mcp --client codex
+```
+
+`--client` accepts `codex`, `claude` (Claude Desktop), or `vscode`. For OpenCode, Claude Code CLI, or a one-liner
+on the client machine, the server also serves install scripts — see
+`GET /mcp/setup` (sh for macOS/Ubuntu, `.ps1` for Windows PowerShell).
 
 ## Requirements
 
@@ -179,7 +193,7 @@ The client process needs only Node.js and network access to the configured speci
 
 For a non-blocking stdio handshake check, run `npm run check:stdio`. **Manual start** is only for Streamable HTTP (see below).
 
-### HTTP mode (Streamable HTTP, stateless)
+### HTTP mode (Streamable HTTP, session SSO)
 
 One process serves one transport. HTTP mode serves no STDIO; STDIO mode opens no port.
 
@@ -187,13 +201,49 @@ Run:
 
     node --env-file=.env dist/index.js --transport=http --port 3000
 
-Every request must carry `Authorization: Bearer <access_token>` from the same TDEI SSO protocol (login page, token exchange, refresh endpoints unchanged). The server holds no sessions and no refresh tokens: it validates the Bearer per request (local expiry check plus a lightweight TDEI probe) and cannot refresh on the client's behalf — refresh via `POST /api/v1/refresh-token` or re-run SSO login yourself.
+By default the server keeps a shared SSO session and no Bearer is required:
+connect your MCP client, call the `tdei_sso_login` tool, open its `loginUrl`
+in a browser, and complete SSO (the server also serves `GET /auth/callback`
+so browser redirects land even without a local relay). Signed-out calls to
+API tools return `TDEI_SSO_REQUIRED` naming `tdei_sso_login` remediation.
+In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus
+`http://127.0.0.1/` for local dev); it must be pre-registered for the
+`tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a
+reverse proxy for public `https`.
 
-Example:
+Strict per-request Bearer mode is still available via
+`--require-bearer-auth` (or `TDEI_REQUIRE_BEARER_AUTH=1`): every request must carry
+`Authorization: Bearer <access_token>` from the same TDEI SSO protocol (login
+page, token exchange, refresh endpoints unchanged). That mode holds no
+sessions and no refresh tokens — it validates the Bearer per request and
+cannot refresh on the client's behalf. Missing, bad, or expired Bearers
+return 401 naming `tdei_sso_login` remediation.
+
+Example (Bearer mode):
 
     curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer <token>" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
-Missing, bad, or expired Bearers return 401 naming `tdei_sso_login` remediation. In HTTP mode `TDEI_SSO_CALLBACK_URL` may be a registered `https://` URL (plus `http://127.0.0.1/` for local dev); it must be pre-registered for the `tdei-mcp` client or SSO returns 400. Plain HTTP locally; terminate TLS at a reverse proxy for public `https`. Each request gets an ephemeral MCP server and direct TDEI HTTP adapter; no MCP session is created.
+#### Client setup scripts (remote HTTP)
+
+A running HTTP server advertises one-line installers for client machines so
+no token is ever written to disk. `GET /mcp/setup` prints the catalogue:
+
+macOS / Ubuntu (needs `sh` + `node`):
+
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/codex | sh          # Codex (~/.codex/config.toml)
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/opencode | sh       # OpenCode (~/.config/opencode/opencode.json)
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/claude-cli | sh     # Claude Code CLI (~/.claude.json)
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/claude-desktop | sh # Claude Desktop (claude_desktop_config.json)
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/vscode | sh         # VS Code (User/mcp.json)
+
+Windows (PowerShell 5.1+ with `node` on PATH — same targets, `.ps1` suffix):
+
+    Set-ExecutionPolicy Bypass -Scope Process -Force; irm http://127.0.0.1:3000/mcp/setup/codex.ps1 | iex
+
+After running a script, start the MCP client and ask it to log in to TDEI
+(calls `tdei_sso_login`). When the server address is not loopback, the script
+also starts a local SSO callback relay on `127.0.0.1:8765` that forwards to
+the server's `/auth/callback`.
 
 ### Docker deployment
 
