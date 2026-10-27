@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   getClientSetupJs,
   isSetupClientTarget,
+  normalizeSetupClientTarget,
   renderClientSetupPowershell,
   renderClientSetupScript,
   renderSetupOverview,
@@ -15,7 +16,7 @@ import {
 } from "../src/http-setup-script.js";
 import { serveHttp } from "../src/http.js";
 
-const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude", "vscode"];
+const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode"];
 
 test("sh and ps1 installers embed the identical node program", () => {
   const shared = getClientSetupJs();
@@ -37,9 +38,13 @@ test("shared node program is here-string safe for PowerShell", () => {
   }
 });
 
-test("unknown setup client is rejected", () => {
+test("unknown setup client is rejected, legacy claude aliases to claude-cli", () => {
   assert.equal(isSetupClientTarget("bogus"), false);
   assert.equal(isSetupClientTarget("codex.ps1"), false);
+  assert.equal(isSetupClientTarget("claude"), false);
+  assert.equal(normalizeSetupClientTarget("claude"), "claude-cli");
+  assert.equal(normalizeSetupClientTarget("CLAUDE-DESKTOP"), "claude-desktop");
+  assert.equal(normalizeSetupClientTarget("bogus"), undefined);
 });
 
 test("overview advertises sh (mac/ubuntu) and ps1 (windows) installers", () => {
@@ -84,6 +89,34 @@ test("ps1-embedded program configures a client exactly like the sh one", () => {
   }
 });
 
+test("claude-desktop program targets the Desktop config, not the CLI file", () => {
+  const ps = renderClientSetupPowershell("claude-desktop", "http://192.168.50.11:8080", 8765);
+  const js = `${ps.split("$setupJs = @'\n")[1]!.split("\n'@")[0]!}\n`;
+  const home = mkdtempSync(join(tmpdir(), "tdei-desktop-"));
+  try {
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, js);
+    execFileSync(
+      process.execPath,
+      [tmp, "claude-desktop", "http://192.168.50.11:8080/mcp", "http://192.168.50.11:8080/auth/callback", "8765"],
+      { env: { ...process.env, HOME: home } },
+    );
+    const expected =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+          : join(home, ".config", "Claude", "claude_desktop_config.json");
+    const doc = JSON.parse(readFileSync(expected, "utf-8")) as {
+      mcpServers: { tdei: { type: string; url: string } };
+    };
+    assert.equal(doc.mcpServers.tdei.url, "http://192.168.50.11:8080/mcp");
+    assert.equal(doc.mcpServers.tdei.type, "http");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 const SETUP_PORT = 18090;
 
 test("setup endpoints serve sh + ps1 installers and reject unknown clients", async () => {
@@ -108,6 +141,18 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     const bogus = await fetch(`${handle.url}/mcp/setup/bogus.ps1`);
     assert.equal(bogus.status, 404);
     assert.match(await bogus.text(), /TDEI_SETUP_CLIENT_UNKNOWN/);
+
+    const cli = await fetch(`${handle.url}/mcp/setup/claude-cli.ps1`);
+    assert.equal(cli.status, 200);
+    assert.match(await cli.text(), /\.claude\.json/);
+
+    const desktop = await fetch(`${handle.url}/mcp/setup/claude-desktop`);
+    assert.equal(desktop.status, 200);
+    assert.match(await desktop.text(), /claude_desktop_config\.json/);
+
+    const legacy = await fetch(`${handle.url}/mcp/setup/claude`);
+    assert.equal(legacy.status, 200);
+    assert.match(await legacy.text(), /\.claude\.json/);
   } finally {
     await handle.close();
   }

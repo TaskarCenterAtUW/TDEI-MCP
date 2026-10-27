@@ -4,7 +4,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
 import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/auth-manager.js";
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
-import { isSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview } from "./http-setup-script.js";
+import { normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview } from "./http-setup-script.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
@@ -287,11 +287,12 @@ export async function serveHttp(
         if (request.method === "GET" && setupMatch !== undefined) {
           const rawClient = setupMatch.replace(/\/+$/, "").toLowerCase();
           const wantsPowershell = rawClient.endsWith(".ps1");
-          const client = wantsPowershell ? rawClient.slice(0, -".ps1".length) : rawClient;
-          if (!isSetupClientTarget(client)) {
+          const slug = wantsPowershell ? rawClient.slice(0, -".ps1".length) : rawClient;
+          const client = normalizeSetupClientTarget(slug);
+          if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude, vscode (append .ps1 for the Windows PowerShell installer).`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode (append .ps1 for the Windows PowerShell installer).`,
             });
             return;
           }

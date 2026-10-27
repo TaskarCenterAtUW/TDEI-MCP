@@ -1,14 +1,25 @@
-export type SetupClientTarget = "codex" | "opencode" | "claude" | "vscode";
+export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode";
 
 const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "codex",
   "opencode",
-  "claude",
+  "claude-cli",
+  "claude-desktop",
   "vscode",
 ];
 
 export function isSetupClientTarget(value: string): value is SetupClientTarget {
   return (SETUP_CLIENTS as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve a client slug from the setup URL, folding the deprecated `claude`
+ * alias to `claude-cli` (Claude Code). Returns undefined for unknown slugs.
+ */
+export function normalizeSetupClientTarget(value: string): SetupClientTarget | undefined {
+  const slug = value.toLowerCase();
+  if (slug === "claude") return "claude-cli";
+  return isSetupClientTarget(slug) ? slug : undefined;
 }
 
 function setupUrls(baseUrl: string): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
@@ -95,8 +106,29 @@ function configureOpenCode() {
   return filePath;
 }
 
-function configureClaude() {
+function configureClaudeCli() {
   const filePath = path.join(home, ".claude.json");
+  ensureDir(filePath);
+  const root = readJsonOrEmpty(filePath);
+  root.mcpServers =
+    typeof root.mcpServers === "object" && root.mcpServers !== null
+      ? root.mcpServers
+      : {};
+  root.mcpServers.tdei = {
+    type: "http",
+    url: mcpUrl,
+  };
+  fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
+  return filePath;
+}
+
+function configureClaudeDesktop() {
+  const filePath =
+    process.platform === "darwin"
+      ? path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+      : process.platform === "win32"
+        ? path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json")
+        : path.join(home, ".config", "Claude", "claude_desktop_config.json");
   ensureDir(filePath);
   const root = readJsonOrEmpty(filePath);
   root.mcpServers =
@@ -135,7 +167,8 @@ function configureVsCode() {
 let writtenPath;
 if (client === "codex") writtenPath = configureCodex();
 else if (client === "opencode") writtenPath = configureOpenCode();
-else if (client === "claude") writtenPath = configureClaude();
+else if (client === "claude-cli") writtenPath = configureClaudeCli();
+else if (client === "claude-desktop") writtenPath = configureClaudeDesktop();
 else if (client === "vscode") writtenPath = configureVsCode();
 else {
   console.error("Unsupported client:", client);
@@ -212,8 +245,11 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp"): string 
     "  # OpenCode (~/.config/opencode/opencode.json)",
     `  curl -fsSL ${setupBase}/opencode | sh`,
     "",
-    "  # Claude Code (~/.claude.json)",
-    `  curl -fsSL ${setupBase}/claude | sh`,
+    "  # Claude Code CLI (~/.claude.json)",
+    `  curl -fsSL ${setupBase}/claude-cli | sh`,
+    "",
+    "  # Claude Desktop (claude_desktop_config.json)",
+    `  curl -fsSL ${setupBase}/claude-desktop | sh`,
     "",
     "  # VS Code (User/mcp.json)",
     `  curl -fsSL ${setupBase}/vscode | sh`,
@@ -226,8 +262,11 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp"): string 
     "  # OpenCode (%USERPROFILE%\\.config\\opencode\\opencode.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/opencode.ps1 | iex`,
     "",
-    "  # Claude Code (%USERPROFILE%\\.claude.json)",
-    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/claude.ps1 | iex`,
+    "  # Claude Code CLI (%USERPROFILE%\\.claude.json)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/claude-cli.ps1 | iex`,
+    "",
+    "  # Claude Desktop (%APPDATA%\\Claude\\claude_desktop_config.json)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/claude-desktop.ps1 | iex`,
     "",
     "  # VS Code (%APPDATA%\\Code\\User\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/vscode.ps1 | iex`,
