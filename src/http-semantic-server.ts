@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
+import { TDEI_LLM_CACHE_INSTRUCTIONS } from "./intents/descriptions.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
@@ -15,10 +16,15 @@ export interface HttpSemanticServerOptions {
 export function createHttpSemanticServer(
   options: HttpSemanticServerOptions,
 ): McpServer {
-  const server = new McpServer({
-    name: "tdei-mcp",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "tdei-mcp",
+      version: "0.1.0",
+    },
+    {
+      instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
+    },
+  );
   const module = new SemanticIntentModule({
     operations: new HttpTdeiOperations(options.apiUrl, options.fetchImpl),
     places: options.places ?? {

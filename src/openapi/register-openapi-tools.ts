@@ -20,7 +20,7 @@ export type OpenApiToolCall = (
 
 export interface RegisterOpenApiToolsOptions {
   hiddenOperations?: ReadonlySet<string>;
-  isAllowed?: (operationName: string) => boolean;
+  isAllowed?: (operationName: string, tags?: string[]) => boolean;
   onCall?: OpenApiToolCall;
   mapResult?: (result: Awaited<ReturnType<OpenApiToolCall>>) => unknown;
   mapError?: (error: unknown) => unknown;
@@ -31,10 +31,14 @@ export interface OpenApiToolRegistrationResult {
   discovered: number;
   registered: number;
   skipped: number;
-  toolSchemas: Map<string, { description?: string | undefined; inputSchema: unknown }>;
+  toolSchemas: Map<string, { description?: string | undefined; inputSchema: unknown; tags?: string[] }>;
 }
 
 const registeredToolsByServer = new WeakMap<McpServer, Set<string>>();
+const compiledInputSchemas = new WeakMap<
+  object,
+  ReturnType<typeof fromJsonSchema<Record<string, unknown>>>
+>();
 
 export function sanitizeJsonSchema(node: unknown): unknown {
   if (Array.isArray(node)) {
@@ -95,23 +99,48 @@ export async function registerOpenApiTools(
 
   const toolSchemas = new Map<
     string,
-    { description?: string | undefined; inputSchema: unknown }
+    { description?: string | undefined; inputSchema: unknown; tags?: string[] }
   >();
   let skipped = 0;
   for (const tool of listed.tools) {
-    if (hidden.has(tool.name) || !isAllowed(tool.name)) {
+    const toolTags = Array.isArray((tool as { tags?: unknown }).tags)
+      ? ((tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string"))
+      : [];
+    if (hidden.has(tool.name) || !isAllowed(tool.name, toolTags)) {
       skipped += 1;
       continue;
     }
     if (registered.has(tool.name)) continue;
 
-    const inputSchema = fromJsonSchema<Record<string, unknown>>(
-      sanitizeJsonSchema(structuredClone(tool.inputSchema)) as Record<string, unknown>,
-    );
+    let inputSchema: ReturnType<typeof fromJsonSchema<Record<string, unknown>>> | undefined;
+    if (tool.inputSchema !== null && typeof tool.inputSchema === "object") {
+      inputSchema = compiledInputSchemas.get(tool.inputSchema);
+      if (!inputSchema) {
+        inputSchema = fromJsonSchema<Record<string, unknown>>(
+          sanitizeJsonSchema(structuredClone(tool.inputSchema)) as Record<string, unknown>,
+        );
+        compiledInputSchemas.set(tool.inputSchema, inputSchema);
+      }
+    } else {
+      inputSchema = fromJsonSchema<Record<string, unknown>>(
+        sanitizeJsonSchema(structuredClone(tool.inputSchema)) as Record<string, unknown>,
+      );
+    }
+    // Ensure tag label survives even when the provider omitted it from description
+    // (e.g. fake clients in tests). OpenApiMcpClient already prefixes, so skip if present.
+    let description = tool.description;
+    if (toolTags.length > 0) {
+      const prefix = `[${toolTags.join(", ")}]`;
+      if (!description) {
+        description = prefix;
+      } else if (!description.startsWith(prefix)) {
+        description = `${prefix} ${description}`;
+      }
+    }
     server.registerTool(
       tool.name,
       {
-        ...(tool.description !== undefined ? { description: tool.description } : {}),
+        ...(description !== undefined ? { description } : {}),
         inputSchema,
       },
       async (args) => {
@@ -127,10 +156,11 @@ export async function registerOpenApiTools(
     );
     registered.add(tool.name);
     toolSchemas.set(tool.name, {
-      description: tool.description,
+      description,
       inputSchema: tool.inputSchema,
+      ...(toolTags.length > 0 ? { tags: toolTags } : {}),
     });
-    logger(`[openapi-tools] registered ${tool.name}`);
+    logger(`[openapi-tools] registered ${tool.name}${toolTags.length > 0 ? ` [${toolTags.join(", ")}]` : ""}`);
   }
 
   return {

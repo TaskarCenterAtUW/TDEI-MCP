@@ -44,11 +44,17 @@ function normalizeBasePath(value: string | undefined): string {
   return leading.replace(/\/+$/, "") || "/";
 }
 
-function sendJson(response: ServerResponse, status: number, value: unknown): void {
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  value: unknown,
+  extraHeaders?: Record<string, string>,
+): void {
   const body = JSON.stringify(value);
   response.writeHead(status, {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(body),
+    ...extraHeaders,
   });
   response.end(body);
 }
@@ -62,6 +68,7 @@ function applyCors(
   if (!origin) return true;
   if (!allowedOrigins.has(origin)) return false;
   response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
   response.setHeader("Vary", "Origin");
   return true;
 }
@@ -87,7 +94,7 @@ function toWebRequest(request: IncomingMessage, body: string, host: string): Req
   return new Request(new URL(request.url ?? "/", `http://${host}`), {
     method: request.method ?? "GET",
     headers,
-    ...(["GET", "HEAD"].includes(request.method ?? "GET") ? {} : { body }),
+    ...(["GET", "HEAD", "DELETE"].includes(request.method ?? "GET") ? {} : { body }),
   });
 }
 
@@ -146,6 +153,8 @@ export async function serveOpenApiHttp(
             "Access-Control-Allow-Origin": request.headers.origin ?? "",
             "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Mcp-Session-Id",
             "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+            "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
+            "Vary": "Origin",
           });
           response.end();
           return;
@@ -155,7 +164,7 @@ export async function serveOpenApiHttp(
           return;
         }
 
-        const body = ["GET", "HEAD"].includes(request.method)
+        const body = ["GET", "HEAD", "DELETE"].includes(request.method)
           ? ""
           : await readBody(request, maximum);
         const webRequest = toWebRequest(request, body, request.headers.host ?? host);
@@ -165,7 +174,15 @@ export async function serveOpenApiHttp(
             requestHeaders = await httpOptions.headersForRequest(webRequest);
           } catch (error) {
             if (error instanceof OpenApiAuthenticationError) {
-              sendJson(response, 401, { code: "MCP_UNAUTHORIZED", message: error.message });
+              const safeDesc = error.message.replace(/"/g, "'");
+              sendJson(
+                response,
+                401,
+                { code: "MCP_UNAUTHORIZED", message: error.message },
+                {
+                  "WWW-Authenticate": `Bearer realm="openapi-mcp", error="invalid_token", error_description="${safeDesc}"`,
+                },
+              );
               return;
             }
             throw error;

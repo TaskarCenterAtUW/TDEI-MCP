@@ -23,6 +23,17 @@ export interface SsoLoginStart {
   loginUrl: string;
   callbackUrl: string;
   completion: Promise<void>;
+  state?: string | undefined;
+}
+
+export interface SsoLoginOptions {
+  state?: string | undefined;
+}
+
+export interface ValidateTokenOptions {
+  fetchImpl?: typeof fetch | undefined;
+  cache?: Map<string, number> | undefined;
+  ttlMs?: number | undefined;
 }
 
 export interface SsoLogoutStart {

@@ -19,6 +19,7 @@ export interface HttpServeOverrides {
 interface ResolvedHttpOptions {
   fetchImpl: typeof fetch | undefined;
   places: PlaceResolver;
+  tokenValidationCache: Map<string, number>;
 }
 
 function buildLoginUrl(): string {
@@ -28,22 +29,37 @@ function buildLoginUrl(): string {
   return loginUrl.toString();
 }
 
-function sendJson(response: ServerResponse, status: number, data: unknown): void {
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  data: unknown,
+  extraHeaders?: Record<string, string>,
+): void {
   const body = JSON.stringify(data);
   response.writeHead(status, {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(body),
+    ...extraHeaders,
   });
   response.end(body);
 }
 
 function unauthorized(response: ServerResponse, code: string, message: string, extra?: Record<string, unknown>): void {
-  sendJson(response, 401, {
-    code,
-    message,
-    loginUrl: buildLoginUrl(),
-    ...extra,
-  });
+  const loginUrl = buildLoginUrl();
+  const oauthError = code === "TDEI_SSO_REQUIRED" ? "invalid_request" : "invalid_token";
+  const safeDesc = message.replace(/"/g, "'");
+  const wwwAuthenticate = `Bearer realm="tdei-mcp", error="${oauthError}", error_description="${safeDesc}", authorization_uri="${loginUrl}"`;
+  sendJson(
+    response,
+    401,
+    {
+      code,
+      message,
+      loginUrl,
+      ...extra,
+    },
+    { "WWW-Authenticate": wwwAuthenticate },
+  );
 }
 
 function checkCors(request: IncomingMessage, response: ServerResponse): boolean {
@@ -51,6 +67,7 @@ function checkCors(request: IncomingMessage, response: ServerResponse): boolean 
   if (!origin) return true;
   if (getConfig().corsOrigins.includes(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate");
     response.setHeader("Vary", "Origin");
     return true;
   }
@@ -77,7 +94,7 @@ function toWebRequest(request: IncomingMessage, bodyText: string, host: string):
   return new Request(url, {
     method: request.method ?? "GET",
     headers,
-    ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: bodyText }),
+    ...(request.method === "GET" || request.method === "HEAD" || request.method === "DELETE" ? {} : { body: bodyText }),
   });
 }
 
@@ -120,6 +137,8 @@ async function handleMcpRequest(
       "Access-Control-Allow-Origin": request.headers.origin ?? "",
       "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Mcp-Session-Id",
       "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
+      "Vary": "Origin",
     });
     response.end();
     return;
@@ -134,13 +153,11 @@ async function handleMcpRequest(
   const bearer = match[1].trim();
 
   const ephemeralAuth = injectAccessToken(bearer);
-  // fetchImpl is test-only injection: when provided, swap it in for the
-  // single validateToken() probe, then restore. Otherwise validateToken()
-  // uses the ambient global fetch (which tests mock directly).
-  const originalFetch = globalThis.fetch;
-  if (options.fetchImpl) globalThis.fetch = options.fetchImpl;
   try {
-    await ephemeralAuth.validateToken();
+    await ephemeralAuth.validateToken({
+      fetchImpl: options.fetchImpl,
+      cache: options.tokenValidationCache,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "TDEI_TOKEN_EXPIRED") {
@@ -149,8 +166,6 @@ async function handleMcpRequest(
       unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true, retryable: false });
     }
     return;
-  } finally {
-    globalThis.fetch = originalFetch;
   }
 
   const server = createHttpSemanticServer({
@@ -162,7 +177,7 @@ async function handleMcpRequest(
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
     await server.connect(transport);
-    const bodyText = request.method === "GET" || request.method === "HEAD" ? "" : await readBody(request);
+    const bodyText = request.method === "GET" || request.method === "HEAD" || request.method === "DELETE" ? "" : await readBody(request);
     let parsed: unknown;
     if (bodyText) {
       try {
@@ -200,6 +215,7 @@ export async function serveHttp(
   const resolved: ResolvedHttpOptions = {
     fetchImpl: options.fetchImpl,
     places: createConfiguredPlaceResolver(httpConfig, options.fetchImpl),
+    tokenValidationCache: new Map<string, number>(),
   };
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;
@@ -212,8 +228,13 @@ export async function serveHttp(
           sendJson(response, 404, { code: "TDEI_NOT_FOUND", message: `Unknown path ${url.pathname}.` });
           return;
         }
-        if (request.method !== "POST" && request.method !== "GET" && request.method !== "OPTIONS") {
-          sendJson(response, 405, { code: "TDEI_METHOD_NOT_ALLOWED", message: "Use POST for JSON-RPC or GET for SSE." });
+        if (
+          request.method !== "POST" &&
+          request.method !== "GET" &&
+          request.method !== "DELETE" &&
+          request.method !== "OPTIONS"
+        ) {
+          sendJson(response, 405, { code: "TDEI_METHOD_NOT_ALLOWED", message: "Use POST for JSON-RPC, GET for SSE, or DELETE." });
           return;
         }
         await handleMcpRequest(request, response, resolved, host);

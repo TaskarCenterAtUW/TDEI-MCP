@@ -115,6 +115,9 @@ test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(response.status, 401);
+    const wwwAuth = response.headers.get("www-authenticate") ?? "";
+    assert.match(wwwAuth, /^Bearer realm="tdei-mcp"/);
+    assert.match(wwwAuth, /error="invalid_request"/);
     const body = (await response.json()) as Record<string, unknown>;
     assert.equal(body.code, "TDEI_SSO_REQUIRED");
     assert.match(String(body.message), /tdei_sso_login/);
@@ -234,5 +237,53 @@ test("HTTP MCP tools/call list my project groups returns parsed live array (not 
     }
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("HTTP server caches token validation probes across repeated requests, supports DELETE, and does not mutate globalThis.fetch", async () => {
+  const sentinelFetch = globalThis.fetch;
+  let probeCalls = 0;
+  let globalFetchMutated = false;
+
+  const customFetch = (async (input: unknown, init?: RequestInit) => {
+    if (globalThis.fetch !== sentinelFetch) {
+      globalFetchMutated = true;
+    }
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/api/v1/project-groups")) {
+      probeCalls += 1;
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return sentinelFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+
+  const handle = await serveHttp({ fetchImpl: customFetch }, { port: TEST_PORT + 2 });
+  try {
+    const first = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "cached-bearer");
+    assert.equal(first.status, 200);
+    const second = await postMcp(`${handle.url}/mcp`, mcpBody(2, "tools/list"), "cached-bearer");
+    assert.equal(second.status, 200);
+    assert.equal(probeCalls, 1, "second request with same bearer should use cached validation");
+    assert.equal(globalFetchMutated, false, "globalThis.fetch must not be mutated");
+
+    const delResponse = await fetch(`${handle.url}/mcp`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer cached-bearer" },
+    });
+    assert.notEqual(delResponse.status, 405, "DELETE /mcp must not return 405 Method Not Allowed");
+
+    const optionsResponse = await fetch(`${handle.url}/mcp`, {
+      method: "OPTIONS",
+    });
+    assert.equal(optionsResponse.status, 204);
+    assert.match(
+      optionsResponse.headers.get("access-control-expose-headers") ?? "",
+      /Mcp-Session-Id.*WWW-Authenticate/i,
+    );
+  } finally {
+    await handle.close();
   }
 });

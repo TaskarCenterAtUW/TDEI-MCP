@@ -16,6 +16,7 @@ import { loadConfigFile } from "./config-file.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
+import { TDEI_LLM_CACHE_INSTRUCTIONS } from "./intents/descriptions.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 
@@ -115,10 +116,15 @@ export async function createServer(
   const auth = dependencies.authManager;
   const openApiClient = dependencies.openApiMcpClient;
 
-  const server = new McpServer({
-    name: "tdei-mcp",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "tdei-mcp",
+      version: "0.1.0",
+    },
+    {
+      instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
+    },
+  );
   const openApiToolsLifecycle = new OpenApiToolsLifecycle(
     server,
     auth,

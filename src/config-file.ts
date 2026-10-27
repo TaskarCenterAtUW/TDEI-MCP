@@ -11,6 +11,8 @@ const EndpointsSchema = z.object({
   mode: z.enum(["all", "allow", "deny"]).default("all"),
   allow: z.array(z.string().min(1)).default([]),
   deny: z.array(z.string().min(1)).default([]),
+  allowTags: z.array(z.string().min(1)).default([]),
+  denyTags: z.array(z.string().min(1)).default([]),
 });
 
 const WorkflowStepSchema = z.object({
@@ -28,17 +30,17 @@ const WorkflowSchema = z.object({
 
 const ConfigFileSchema = z.object({
   $schema: z.string().optional(),
-  endpoints: EndpointsSchema.default({ mode: "all", allow: [], deny: [] }),
+  endpoints: EndpointsSchema.default({ mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] }),
   workflows: z.array(WorkflowSchema).default([]),
 });
 
-export interface EndpointFilter { mode: "all" | "allow" | "deny"; allow: string[]; deny: string[]; }
+export interface EndpointFilter { mode: "all" | "allow" | "deny"; allow: string[]; deny: string[]; allowTags?: string[]; denyTags?: string[]; }
 export interface WorkflowStepDef { id: string; tool: string; ask?: string[]; input: Record<string, unknown>; }
 export interface WorkflowDef { name: string; description?: string; steps: WorkflowStepDef[]; }
 export interface LoadedConfig { path: string; exists: boolean; filter: EndpointFilter; workflows: WorkflowDef[]; warnings: string[]; }
 
 export const DEFAULT_CONFIG_JSON = JSON.stringify(
-  { $schema: "./tdei.config.schema.json", endpoints: { mode: "all", allow: [], deny: [] }, workflows: [] },
+  { $schema: "./tdei.config.schema.json", endpoints: { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] }, workflows: [] },
   null, 2,
 ) + "\n";
 
@@ -49,12 +51,12 @@ export function resolveConfigPath(): string {
 
 function fallback(path: string, exists: boolean, warning: string): LoadedConfig {
   if (warning) console.error(warning);
-  return { path, exists, filter: { mode: "all", allow: [], deny: [] }, workflows: [], warnings: warning ? [warning] : [] };
+  return { path, exists, filter: { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] }, workflows: [], warnings: warning ? [warning] : [] };
 }
 
 export function loadConfigFile(explicitPath?: string): LoadedConfig {
   const path = explicitPath ?? resolveConfigPath();
-  if (!existsSync(path)) return { path, exists: false, filter: { mode: "all", allow: [], deny: [] }, workflows: [], warnings: [] };
+  if (!existsSync(path)) return { path, exists: false, filter: { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] }, workflows: [], warnings: [] };
   let raw: string;
   try { raw = readFileSync(path, "utf8"); }
   catch (error) { return fallback(path, true, `[tdei-config] cannot read ${path}: ${error instanceof Error ? error.message : String(error)} — using allow-all, no workflows`); }
@@ -86,7 +88,7 @@ export function loadConfigFile(explicitPath?: string): LoadedConfig {
       stepIds.add(s.id);
     }
   }
-  return { path, exists: true, filter: { mode: endpoints.mode, allow: [...endpoints.allow], deny: [...endpoints.deny] }, workflows: workflows as WorkflowDef[], warnings: [] };
+  return { path, exists: true, filter: { mode: endpoints.mode, allow: [...endpoints.allow], deny: [...endpoints.deny], allowTags: [...(endpoints.allowTags ?? [])], denyTags: [...(endpoints.denyTags ?? [])] }, workflows: workflows as WorkflowDef[], warnings: [] };
 }
 
 export function ensureDefaultConfig(explicitPath?: string): string {
@@ -97,9 +99,15 @@ export function ensureDefaultConfig(explicitPath?: string): string {
   return path;
 }
 
-export function isToolAllowed(toolName: string, filter: EndpointFilter): boolean {
+export function isToolAllowed(toolName: string, filter: EndpointFilter, tags: string[] = []): boolean {
   if (toolName.startsWith(BUILTIN_TOOL_PREFIX)) return true;
   if (CONNECTOR_AUTH_TOOLS.has(toolName)) return true;
+  const allowTags = filter.allowTags ?? [];
+  const denyTags = filter.denyTags ?? [];
+  // Tag deny wins: hide tools in excluded categories (e.g. ["GTFS Flex"]).
+  if (denyTags.length > 0 && tags.some((t) => denyTags.includes(t))) return false;
+  // Tag allow: when set, only tools in included categories pass (e.g. ["OSW", "Common APIs"]).
+  if (allowTags.length > 0 && !tags.some((t) => allowTags.includes(t))) return false;
   if (filter.mode === "all") return true;
   if (filter.mode === "allow") return filter.allow.includes(toolName);
   return !filter.deny.includes(toolName);

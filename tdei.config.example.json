@@ -1,6 +1,6 @@
 {
   "$schema": "./tdei.config.schema.json",
-  "endpoints": { "mode": "all", "allow": [], "deny": [] },
+  "endpoints": { "mode": "all", "allow": [], "deny": [], "allowTags": [], "denyTags": [] },
   "workflows": [
     {
       "name": "download_osw_dataset_bundle",

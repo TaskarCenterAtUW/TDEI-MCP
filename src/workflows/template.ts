@@ -15,6 +15,9 @@ export function getPath(obj: unknown, parts: string[]): unknown {
       }
       current = current[index];
     } else if (typeof current === "object") {
+      if (!Object.prototype.hasOwnProperty.call(current, part)) {
+        return undefined;
+      }
       current = (current as Record<string, unknown>)[part];
     } else {
       return undefined;
@@ -49,7 +52,9 @@ function resolveRef(ref: string, ctx: TemplateContext): unknown {
         `invalid template ref "{{${trimmed}}}": expected {{steps.<id>.output[.<path>]}}`,
       );
     }
-    const entry = ctx.steps[parts[1]];
+    const entry = Object.prototype.hasOwnProperty.call(ctx.steps, parts[1])
+      ? ctx.steps[parts[1]]
+      : undefined;
     if (entry === undefined) {
       throw new Error(`unknown template ref "{{${trimmed}}}"`);
     }

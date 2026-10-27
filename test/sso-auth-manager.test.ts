@@ -98,3 +98,78 @@ test("MCP callback completion exchanges code when the browser cannot reach loopb
     globalThis.fetch = originalFetch;
   }
 });
+
+test("startSsoLogin enforces expected state when provided and rejects cross-site subresource callbacks", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.pathname === "/api/v1/sso-login") {
+      return new Response(JSON.stringify({
+        access_token: "csrf-verified-token",
+        expires_in: 3600,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+
+  const auth = new AuthManager();
+  try {
+    const login = await auth.startSsoLogin({ state: "csrf-nonce-123" });
+    const loginUrl = new URL(login.loginUrl);
+    assert.equal(loginUrl.searchParams.get("state"), "csrf-nonce-123");
+
+    // Cross-site subresource fetch (e.g. <img>/<script> CSRF probe) is rejected with 403
+    const crossSiteRes = await originalFetch(
+      "http://127.0.0.1:18765/callback?code=abc&state=csrf-nonce-123",
+      {
+        headers: {
+          "Sec-Fetch-Site": "cross-site",
+          "Sec-Fetch-Mode": "no-cors",
+        },
+      },
+    );
+    assert.equal(crossSiteRes.status, 403);
+    assert.equal(crossSiteRes.headers.get("x-content-type-options"), "nosniff");
+
+    // Mismatched state is rejected while keeping pendingLogin alive
+    await assert.rejects(
+      () => auth.completeSsoLogin("http://127.0.0.1:18765/callback?code=abc&state=wrong-state"),
+      /state mismatch/,
+    );
+
+    // Matching state succeeds
+    await auth.completeSsoLogin("http://127.0.0.1:18765/callback?code=abc&state=csrf-nonce-123");
+    await login.completion;
+    assert.equal(await auth.getAccessToken(), "csrf-verified-token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("seedInjectedToken decodes JWT exp claim and sanitizeAuthErrorDetail strips HTML and caps length", async () => {
+  const { injectAccessToken, extractJwtExpirationMs, sanitizeAuthErrorDetail } = await import(
+    "../src/auth/auth-manager.js"
+  );
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const pastExpSeconds = Math.floor(Date.now() / 1000) - 60;
+  const expiredPayload = Buffer.from(JSON.stringify({ sub: "u1", exp: pastExpSeconds })).toString("base64url");
+  const expiredJwt = `${header}.${expiredPayload}.sig`;
+
+  assert.equal(extractJwtExpirationMs(expiredJwt), pastExpSeconds * 1000);
+
+  let calledFetch = false;
+  const expiredMgr = injectAccessToken(expiredJwt);
+  await assert.rejects(
+    () =>
+      expiredMgr.validateToken(async () => {
+        calledFetch = true;
+        return new Response("[]", { status: 200 });
+      }),
+    /TDEI_TOKEN_EXPIRED/,
+  );
+  assert.equal(calledFetch, false, "expired JWT must fail local expiry check without probing upstream");
+
+  const sanitized = sanitizeAuthErrorDetail("<html><body><h1>Error</h1>\n<script>alert(1)</script>" + "x".repeat(300));
+  assert.equal(sanitized.includes("<"), false);
+  assert.ok(sanitized.length <= 203);
+});

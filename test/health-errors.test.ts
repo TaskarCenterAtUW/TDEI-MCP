@@ -38,6 +38,17 @@ test("truncateText caps at 256KB with flag", () => {
   assert.equal(small.text, "hello");
 });
 
+test("truncateText slices multi-byte UTF-8 safely on codepoint boundaries", () => {
+  // Place a 4-byte emoji ("🌍", 4 UTF-8 bytes) so that MAX_OUTPUT_BYTES cuts right through it.
+  const prefix = "a".repeat(MAX_OUTPUT_BYTES - 2);
+  const input = `${prefix}🌍${"b".repeat(100)}`;
+  const { text, truncated } = truncateText(input);
+  assert.equal(truncated, true);
+  assert.equal(text.includes("\uFFFD"), false, "must not contain UTF-8 replacement char U+FFFD");
+  const [bodyPart] = text.split('\n{"truncated":true');
+  assert.equal(Buffer.byteLength(bodyPart!, "utf-8"), MAX_OUTPUT_BYTES - 2);
+});
+
 test("tdei-client.ts is gone", async () => {
   const { execSync } = await import("node:child_process");
   // Scoped to src: no production code may reference the deleted dead client.

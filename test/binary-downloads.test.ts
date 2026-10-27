@@ -117,3 +117,109 @@ test("isDownloadTool only matches binary streaming tools", () => {
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listDatasetFiles"), false);
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listServices"), false);
 });
+
+test("streaming download resumes with HTTP Range after mid-stream interruption", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tdei-download-resume-"));
+  const payload = zipBytes();
+  const half = Math.floor(payload.byteLength / 2);
+  const rangeHeaders: Array<string | null> = [];
+  let attempt = 0;
+
+  const fetchImpl = (async (input: unknown, init?: RequestInit) => {
+    attempt += 1;
+    const req = new Request(input as URL, init);
+    rangeHeaders.push(req.headers.get("Range"));
+    if (attempt === 1) {
+      let sentFirstChunk = false;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!sentFirstChunk) {
+            sentFirstChunk = true;
+            controller.enqueue(new Uint8Array(payload.subarray(0, half)));
+            return;
+          }
+          controller.error(new Error("simulated socket reset"));
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Length": String(payload.byteLength),
+        },
+      });
+    }
+    const rest = payload.subarray(half);
+    return new Response(new Uint8Array(rest), {
+      status: 206,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Length": String(rest.byteLength),
+      },
+    });
+  }) as typeof fetch;
+
+  const downloads = new BinaryTdeiDownloads({
+    baseUrl: "https://api.example.test",
+    fetchImpl,
+    outputDir: dir,
+  });
+
+  const result = await downloads.download(
+    "getOswFile",
+    { tdei_dataset_id: "resume-ds" },
+    { accessToken: "tok" },
+  );
+
+  assert.equal(result.status, "resumed");
+  assert.equal(result.attempts, 2);
+  assert.equal(result.bytes, payload.byteLength);
+  assert.deepEqual(rangeHeaders, [null, `bytes=${half}-`]);
+  assert.deepEqual(readFileSync(result.path), payload);
+  assert.match(result.message, /resumed/i);
+});
+
+test("streaming download restarts from byte 0 when server returns 200 instead of 206 on retry", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tdei-download-restart-"));
+  const payload = zipBytes();
+  let attempt = 0;
+
+  const fetchImpl = (async () => {
+    attempt += 1;
+    if (attempt === 1) {
+      // Return truncated body with Content-Length larger than actual bytes
+      return new Response(new Uint8Array(payload.subarray(0, 40)), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Length": String(payload.byteLength),
+        },
+      });
+    }
+    return new Response(new Uint8Array(payload), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Length": String(payload.byteLength),
+      },
+    });
+  }) as typeof fetch;
+
+  const downloads = new BinaryTdeiDownloads({
+    baseUrl: "https://api.example.test",
+    fetchImpl,
+    outputDir: dir,
+  });
+
+  const result = await downloads.download(
+    "getOswFile",
+    { tdei_dataset_id: "restart-ds" },
+    { accessToken: "tok" },
+  );
+
+  assert.equal(result.status, "restarted");
+  assert.equal(result.attempts, 2);
+  assert.equal(result.bytes, payload.byteLength);
+  assert.deepEqual(readFileSync(result.path), payload);
+  assert.match(result.message, /restarted/i);
+});

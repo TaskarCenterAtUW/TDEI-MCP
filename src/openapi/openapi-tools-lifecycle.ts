@@ -26,7 +26,7 @@ type OpenApiToolRegistrar = typeof registerTdeiOpenApiTools;
 type RegistrarClient = Parameters<OpenApiToolRegistrar>[1];
 type DownloadHandler = Pick<BinaryTdeiDownloads, "download">;
 
-const ALLOW_ALL: EndpointFilter = { mode: "all", allow: [], deny: [] };
+const ALLOW_ALL: EndpointFilter = { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] };
 
 interface UnknownFilterId {
   section: "allow" | "deny";
@@ -75,24 +75,44 @@ function toMcpResult(value: unknown): McpCallResult {
 function deniedFor(
   filter: EndpointFilter,
   discoveredNames: string[],
+  tagsByName: Map<string, string[]> = new Map(),
 ): Set<string> {
+  const denied = new Set<string>();
+  const allowTags = filter.allowTags ?? [];
+  const denyTags = filter.denyTags ?? [];
+  for (const name of discoveredNames) {
+    if (CONNECTOR_AUTH_TOOLS.has(name) || name.startsWith(BUILTIN_TOOL_PREFIX)) continue;
+    const tags = tagsByName.get(name) ?? [];
+    if (denyTags.length > 0 && tags.some((t) => denyTags.includes(t))) {
+      denied.add(name);
+      continue;
+    }
+    if (allowTags.length > 0 && !tags.some((t) => allowTags.includes(t))) {
+      denied.add(name);
+      continue;
+    }
+  }
+
   if (filter.mode === "deny") {
-    return new Set(filter.deny);
+    for (const id of filter.deny) denied.add(id);
+    return denied;
   }
 
   if (filter.mode === "allow") {
     const allowed = new Set(filter.allow);
-    return new Set(
-      discoveredNames.filter(
-        (name) =>
-          !allowed.has(name) &&
-          !CONNECTOR_AUTH_TOOLS.has(name) &&
-          !name.startsWith(BUILTIN_TOOL_PREFIX),
-      ),
-    );
+    for (const name of discoveredNames) {
+      if (
+        !allowed.has(name) &&
+        !CONNECTOR_AUTH_TOOLS.has(name) &&
+        !name.startsWith(BUILTIN_TOOL_PREFIX)
+      ) {
+        denied.add(name);
+      }
+    }
+    return denied;
   }
 
-  return new Set<string>();
+  return denied;
 }
 
 export class OpenApiToolsLifecycle {
@@ -101,7 +121,7 @@ export class OpenApiToolsLifecycle {
     Promise.resolve();
   private allToolSchemas = new Map<
     string,
-    { description?: string | undefined; inputSchema: unknown }
+    { description?: string | undefined; inputSchema: unknown; tags?: string[] }
   >();
   private denied = new Set<string>();
 
@@ -166,6 +186,12 @@ export class OpenApiToolsLifecycle {
     // already-discovered list via a stub client (no second child spawn).
     const listed = await this.openApiSession.listTools();
     const discoveredNames = listed.tools.map((tool) => tool.name);
+    const tagsByName = new Map<string, string[]>(
+      listed.tools.map((tool) => [tool.name, Array.isArray((tool as { tags?: unknown }).tags)
+        ? ((tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string"))
+        : []]),
+    );
+    const knownTags = new Set<string>([...tagsByName.values()].flat());
 
     // Unknown allow/deny IDs fall back to allow-all in memory —
     // the single registrar call below runs with the effective filter.
@@ -177,6 +203,16 @@ export class OpenApiToolsLifecycle {
           `[tdei-config] unknown operationId in ${cfg.path}: endpoints.${section}[${index}] "${id}" does not match any discovered tool — using allow-all`,
         );
       }
+      effectiveFilter = { ...ALLOW_ALL };
+    }
+    // Unknown tags also fall back to allow-all to avoid silently loading nothing.
+    const unknownTags = [...(cfg.filter.allowTags ?? []), ...(cfg.filter.denyTags ?? [])].filter(
+      (t) => !knownTags.has(t),
+    );
+    if (unknownTags.length > 0) {
+      console.error(
+        `[tdei-config] unknown tags in ${cfg.path}: ${[...new Set(unknownTags)].join(", ")} do not match any discovered OpenAPI tags (${[...knownTags].join(", ") || "none"}) — using allow-all`,
+      );
       effectiveFilter = { ...ALLOW_ALL };
     }
 
@@ -200,7 +236,7 @@ export class OpenApiToolsLifecycle {
       }
     }
 
-    const denied = deniedFor(effectiveFilter, discoveredNames);
+    const denied = deniedFor(effectiveFilter, discoveredNames, tagsByName);
     this.denied = denied;
     // Workflow steps route through the version gate too. This closure only
     // fires post-load (when MCP clients invoke workflow tools and the

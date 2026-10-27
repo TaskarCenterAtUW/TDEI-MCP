@@ -193,3 +193,50 @@ test("HTTP adapter uploads dataset and metadata to the selected target", async (
   assert.ok(metadataFile instanceof File);
   assert.deepEqual(JSON.parse(await metadataFile.text()), metadata);
 });
+
+test("HTTP adapter rejects unsupported upload file extensions and retries transient 503 on upload", async () => {
+  let attempts = 0;
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Response("temporarily unavailable", { status: 503 });
+      }
+      return new Response("retried-job", { status: 202 });
+    },
+  );
+
+  await assert.rejects(
+    () =>
+      adapter.validateDataset(
+        {
+          dataType: "osw",
+          asset: {
+            kind: "inline_base64",
+            name: "malware.sh",
+            mediaType: "application/x-sh",
+            data: "ZWNobyBoZWxsbw==",
+          },
+        },
+        { accessToken: "bearer-A" },
+      ),
+    /Unsupported dataset file extension "\.sh"/,
+  );
+  assert.equal(attempts, 0);
+
+  const job = await adapter.validateDataset(
+    {
+      dataType: "osw",
+      asset: {
+        kind: "inline_base64",
+        name: "dataset.zip",
+        mediaType: "application/zip",
+        data: "UEsDBA==",
+      },
+    },
+    { accessToken: "bearer-A" },
+  );
+  assert.equal(attempts, 2);
+  assert.equal(job.jobId, "retried-job");
+});

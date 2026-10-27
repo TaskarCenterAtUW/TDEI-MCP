@@ -1,17 +1,32 @@
 import SwaggerParser from "@apidevtools/swagger-parser";
-import { readFile } from "node:fs/promises";
-import { basename, isAbsolute } from "node:path";
+import { openAsBlob } from "node:fs";
+import { stat } from "node:fs/promises";
+import { basename, extname, isAbsolute } from "node:path";
 
 type JsonObject = Record<string, unknown>;
 
+export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  ".zip",
+  ".json",
+  ".geojson",
+  ".osm",
+  ".osc",
+  ".xml",
+]);
+
 export async function loadOpenApiDocument(specUrl: string): Promise<JsonObject> {
-  return await SwaggerParser.dereference(specUrl) as JsonObject;
+  const isRemote = /^https?:\/\//i.test(specUrl);
+  const doc = isRemote
+    ? await SwaggerParser.dereference(specUrl, { resolve: { file: false } })
+    : await SwaggerParser.dereference(specUrl);
+  return doc as unknown as JsonObject;
 }
 
 export interface OpenApiToolDefinition {
   name: string;
   description?: string;
   inputSchema: JsonObject;
+  tags?: string[];
 }
 
 interface OpenApiParameter extends JsonObject {
@@ -28,6 +43,7 @@ interface OpenApiOperation extends JsonObject {
   operationId?: string;
   summary?: string;
   description?: string;
+  tags?: string[];
   parameters?: OpenApiParameter[];
   requestBody?: {
     required?: boolean;
@@ -35,6 +51,16 @@ interface OpenApiOperation extends JsonObject {
   };
   responses?: Record<string, unknown>;
 }
+
+interface CompiledSpecCacheEntry {
+  tools: OpenApiToolDefinition[];
+  operations: Map<string, CompiledOperation>;
+}
+
+const compiledSpecCache = new WeakMap<
+  Record<string, unknown>,
+  Map<string, CompiledSpecCacheEntry>
+>();
 
 interface CompiledOperation {
   method: string;
@@ -54,6 +80,7 @@ export interface OpenApiMcpClientOptions {
   operationName?: (operationId: string) => string;
   logger?: (message: string) => void;
   allowLocalFileUploads?: boolean;
+  allowedUploadExtensions?: ReadonlySet<string>;
 }
 
 export class OpenApiHttpError extends Error {
@@ -91,8 +118,12 @@ function responseStatuses(operation: OpenApiOperation): string[] {
 function descriptionFor(operation: OpenApiOperation): string | undefined {
   const base = operation.description ?? operation.summary;
   const statuses = responseStatuses(operation);
-  if (statuses.length === 0) return base;
-  return `${base ? `${base} | ` : ""}Returns: ${statuses.join(", ")}`;
+  const withReturns = statuses.length === 0 ? base : `${base ? `${base} | ` : ""}Returns: ${statuses.join(", ")}`;
+  const tags = Array.isArray(operation.tags) ? operation.tags.filter((t) => typeof t === "string" && t.trim().length > 0) : [];
+  if (tags.length === 0) return withReturns;
+  const prefix = `[${tags.join(", ")}]`;
+  if (!withReturns) return prefix;
+  return withReturns.startsWith(prefix) ? withReturns : `${prefix} ${withReturns}`;
 }
 
 function bodySchema(operation: OpenApiOperation): { mediaType: string; schema: JsonObject } | undefined {
@@ -169,15 +200,46 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
   url.searchParams.append(name, String(value));
 }
 
+function uploadMimeType(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".zip": return "application/zip";
+    case ".json": return "application/json";
+    case ".geojson": return "application/geo+json";
+    case ".osm":
+    case ".osc":
+    case ".xml": return "application/xml";
+    default: return "application/octet-stream";
+  }
+}
+
 async function appendFormValue(
   form: FormData,
   name: string,
   value: unknown,
   binary: boolean,
+  allowedExtensions: ReadonlySet<string> = ALLOWED_UPLOAD_EXTENSIONS,
 ): Promise<void> {
   if (binary && typeof value === "string" && isAbsolute(value)) {
-    const bytes = await readFile(value);
-    form.append(name, new File([bytes], basename(value)));
+    const ext = extname(value).toLowerCase();
+    if (!allowedExtensions.has(ext)) {
+      throw new Error(
+        `Unsupported upload file extension "${ext || "(none)"}" for "${basename(value)}". Allowed extensions: ${[...allowedExtensions].join(", ")}.`,
+      );
+    }
+    let fileStat;
+    try {
+      fileStat = await stat(value);
+    } catch {
+      throw new Error(`Upload file "${value}" does not exist or is not readable.`);
+    }
+    if (!fileStat.isFile()) {
+      throw new Error(`Upload path "${value}" must point to a regular file.`);
+    }
+    if (fileStat.size === 0) {
+      throw new Error(`Upload file "${basename(value)}" is empty (0 bytes).`);
+    }
+    const blob = await openAsBlob(value, { type: uploadMimeType(value) });
+    form.append(name, blob, basename(value));
     return;
   }
   if (value instanceof Blob) {
@@ -200,6 +262,7 @@ export class OpenApiMcpClient {
   private readonly operationName: (operationId: string) => string;
   private readonly logger: (message: string) => void;
   private readonly allowLocalFileUploads: boolean;
+  private readonly allowedUploadExtensions: ReadonlySet<string>;
   private tools: OpenApiToolDefinition[] | undefined;
   private operations = new Map<string, CompiledOperation>();
 
@@ -213,6 +276,7 @@ export class OpenApiMcpClient {
     this.operationName = options.operationName ?? defaultOperationName;
     this.logger = options.logger ?? ((message) => console.error(message));
     this.allowLocalFileUploads = options.allowLocalFileUploads ?? false;
+    this.allowedUploadExtensions = options.allowedUploadExtensions ?? ALLOWED_UPLOAD_EXTENSIONS;
     const specUrl = options.specUrl;
     this.loadSpecImpl = options.loadSpec ?? (() => loadOpenApiDocument(specUrl!));
   }
@@ -249,26 +313,30 @@ export class OpenApiMcpClient {
     }
     url.pathname = new URL(path.replace(/^\/+/, ""), `${this.apiUrl.replace(/\/+$/, "")}/`).pathname;
 
-    let body: BodyInit | undefined;
+    let buildBody: (() => Promise<BodyInit | undefined>) = async () => undefined;
     const requestBody = operation.requestBody;
     const selectedBody = requestBody ? bodySchema({ requestBody }) : undefined;
+    const isMultipart = selectedBody?.mediaType === "multipart/form-data";
     if (selectedBody) {
       const values = Object.fromEntries(
         [...operation.bodyPropertyNames]
           .filter((key) => args[key] !== undefined)
           .map((key) => [key, args[key]]),
       );
-      if (selectedBody.mediaType === "multipart/form-data") {
-        const form = new FormData();
-        for (const [key, value] of Object.entries(values)) {
-          await appendFormValue(
-            form,
-            key,
-            value,
-            operation.binaryBodyProperties.has(key) && this.allowLocalFileUploads,
-          );
-        }
-        body = form;
+      if (isMultipart) {
+        buildBody = async () => {
+          const form = new FormData();
+          for (const [key, value] of Object.entries(values)) {
+            await appendFormValue(
+              form,
+              key,
+              value,
+              operation.binaryBodyProperties.has(key) && this.allowLocalFileUploads,
+              this.allowedUploadExtensions,
+            );
+          }
+          return form;
+        };
       } else if (selectedBody.mediaType === "application/x-www-form-urlencoded") {
         const form = new URLSearchParams();
         for (const [key, value] of Object.entries(values)) {
@@ -276,23 +344,50 @@ export class OpenApiMcpClient {
           else form.append(key, String(value));
         }
         headers.set("Content-Type", selectedBody.mediaType);
-        body = form;
+        buildBody = async () => form;
       } else if (selectedBody.mediaType === "application/json") {
         headers.set("Content-Type", selectedBody.mediaType);
-        body = JSON.stringify(operation.bodyPropertyNames.has("requestBody") ? args.requestBody : values);
+        const serialized = JSON.stringify(
+          operation.bodyPropertyNames.has("requestBody") ? args.requestBody : values,
+        );
+        buildBody = async () => serialized;
       } else {
         headers.set("Content-Type", selectedBody.mediaType);
-        body = String(args.requestBody ?? Object.values(values)[0] ?? "");
+        const serialized = String(args.requestBody ?? Object.values(values)[0] ?? "");
+        buildBody = async () => serialized;
       }
     }
 
-    const response = await this.fetchImpl(url, {
-      method: operation.method.toUpperCase(),
-      headers,
-      ...(body === undefined ? {} : { body }),
-    });
-    const contentType = response.headers.get("content-type") ?? "";
-    const text = await response.text();
+    const maxAttempts = isMultipart ? 2 : 1;
+    let response: Response | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const body = await buildBody();
+      try {
+        response = await this.fetchImpl(url, {
+          method: operation.method.toUpperCase(),
+          headers,
+          ...(body === undefined ? {} : { body }),
+        });
+        if (isMultipart && attempt < maxAttempts && [408, 429, 502, 503, 504].includes(response.status)) {
+          await response.body?.cancel().catch(() => undefined);
+          continue;
+        }
+        break;
+      } catch (error) {
+        if (attempt < maxAttempts) {
+          continue;
+        }
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          isMultipart
+            ? `Multipart upload for "${name}" failed after ${attempt} attempt(s): ${reason}`
+            : reason,
+        );
+      }
+    }
+    const finalResponse = response!;
+    const contentType = finalResponse.headers.get("content-type") ?? "";
+    const text = await finalResponse.text();
     let value: unknown = text;
     if (text && contentType.includes("json")) {
       try {
@@ -301,10 +396,10 @@ export class OpenApiMcpClient {
         value = text;
       }
     }
-    if (!response.ok) {
+    if (!finalResponse.ok) {
       throw new OpenApiHttpError(
-        `Upstream API request failed with status ${response.status}.`,
-        response.status,
+        `Upstream API request failed with status ${finalResponse.status}.`,
+        finalResponse.status,
         value,
       );
     }
@@ -329,6 +424,30 @@ export class OpenApiMcpClient {
     if (this.tools) return;
     const spec = await this.loadSpecImpl();
     const paths = isObject(spec.paths) ? spec.paths : {};
+
+    const nameSignatureParts: string[] = [];
+    for (const [path, pathItemValue] of Object.entries(paths)) {
+      if (!isObject(pathItemValue)) continue;
+      for (const [method, operationValue] of Object.entries(pathItemValue)) {
+        if (!HTTP_METHODS.has(method) || !isObject(operationValue)) continue;
+        const operation = operationValue as OpenApiOperation;
+        if (!operation.operationId) continue;
+        nameSignatureParts.push(`${method}:${path}:${this.operationName(operation.operationId)}`);
+      }
+    }
+    const nameSignature = nameSignatureParts.join("|");
+    const cachedBySpec = compiledSpecCache.get(spec);
+    const cachedEntry = cachedBySpec?.get(nameSignature);
+    if (cachedEntry) {
+      this.tools = cachedEntry.tools.map((tool) => ({
+        ...tool,
+        ...(tool.tags ? { tags: [...tool.tags] } : {}),
+      }));
+      this.operations = new Map(cachedEntry.operations);
+      this.logger(`[openapi] loaded ${this.tools.length} operations from cache`);
+      return;
+    }
+
     const tools: OpenApiToolDefinition[] = [];
     const operations = new Map<string, CompiledOperation>();
 
@@ -353,10 +472,14 @@ export class OpenApiMcpClient {
         const parameters = [...sharedParameters, ...ownParameters];
         const compiled = compileInputSchema(parameters, operation);
         const description = descriptionFor(operation);
+        const tags = Array.isArray(operation.tags)
+          ? operation.tags.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+          : [];
         tools.push({
           name,
           ...(description ? { description } : {}),
           inputSchema: compiled.schema,
+          ...(tags.length > 0 ? { tags: [...tags] } : {}),
         });
         operations.set(name, {
           method,
@@ -368,6 +491,19 @@ export class OpenApiMcpClient {
         });
       }
     }
+
+    let specMap = compiledSpecCache.get(spec);
+    if (!specMap) {
+      specMap = new Map<string, CompiledSpecCacheEntry>();
+      compiledSpecCache.set(spec, specMap);
+    }
+    specMap.set(nameSignature, {
+      tools: tools.map((tool) => ({
+        ...tool,
+        ...(tool.tags ? { tags: [...tool.tags] } : {}),
+      })),
+      operations: new Map(operations),
+    });
 
     this.operations = operations;
     this.tools = tools;

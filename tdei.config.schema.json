@@ -9,7 +9,9 @@
       "properties": {
         "mode": { "enum": ["all", "allow", "deny"], "default": "all" },
         "allow": { "type": "array", "items": { "type": "string" }, "default": [] },
-        "deny": { "type": "array", "items": { "type": "string" }, "default": [] }
+        "deny": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "allowTags": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "denyTags": { "type": "array", "items": { "type": "string" }, "default": [] }
       },
       "additionalProperties": false
     },

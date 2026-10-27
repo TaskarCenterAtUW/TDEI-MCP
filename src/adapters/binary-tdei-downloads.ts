@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import type { RequestContext } from "../intents/types.js";
@@ -11,6 +11,7 @@ export interface BinaryDownloadOptions {
   /** Absolute directory downloads are written under. Defaults to cwd. */
   outputDir?: string;
   timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface DownloadedFile {
@@ -18,19 +19,27 @@ export interface DownloadedFile {
   path: string;
   bytes: number;
   contentType?: string;
+  status: "completed" | "resumed" | "restarted";
+  attempts: number;
+  message: string;
 }
+
+const RETRYABLE_DOWNLOAD_STATUSES = new Set([408, 429, 502, 503, 504]);
 
 /**
  * Binary-safe counterpart to DirectMultipartTdeiMutations.
  *
  * Generic MCP text results cannot safely carry ZIP payloads. Binary download
- * tools therefore stream raw bytes to a local file with fetch + arrayBuffer().
+ * tools therefore stream raw bytes directly to disk with Content-Length
+ * verification and automatic Range-resume / full-restart fallback on transient
+ * stream or network failures.
  */
 export class BinaryTdeiDownloads {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly outputDir: string;
+  private readonly maxRetries: number;
 
   constructor(private readonly options: BinaryDownloadOptions) {
     this.baseUrl = options.baseUrl.endsWith("/")
@@ -39,6 +48,7 @@ export class BinaryTdeiDownloads {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 300_000;
     this.outputDir = resolve(options.outputDir ?? process.cwd());
+    this.maxRetries = Math.max(0, options.maxRetries ?? 2);
   }
 
   static readonly DOWNLOAD_TOOLS = new Set([
@@ -59,34 +69,162 @@ export class BinaryTdeiDownloads {
     context: RequestContext,
   ): Promise<DownloadedFile> {
     const path = this.routeFor(tool, input);
-    const response = await this.fetchImpl(new URL(path, this.baseUrl), {
-      method: "GET",
-      headers: {
-        Accept: "application/octet-stream, application/json",
-        Authorization: `Bearer ${await this.token(context)}`,
-      },
-      redirect: "error",
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    if (!response.ok) {
-      throw new TdeiHttpError(
-        `TDEI download failed with status ${response.status}.`,
-        response.status,
-        await safeErrorBody(response),
-      );
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
     const filename = filenameFor(tool, input);
     const filePath = join(this.outputDir, filename);
+    const partPath = `${filePath}.part`;
     await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, bytes);
-    const contentType = response.headers.get("content-type") ?? undefined;
-    return {
-      tool,
-      path: filePath,
-      bytes: bytes.byteLength,
-      ...(contentType ? { contentType } : {}),
-    };
+    await rm(partPath, { force: true }).catch(() => undefined);
+
+    const totalAttempts = this.maxRetries + 1;
+    let bytesWritten = 0;
+    let expectedTotalBytes: number | undefined;
+    let recoveryStatus: DownloadedFile["status"] = "completed";
+    let forceRestart = false;
+    let lastError: unknown;
+
+    try {
+      for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+        if (forceRestart && bytesWritten > 0) {
+          await rm(partPath, { force: true }).catch(() => undefined);
+          bytesWritten = 0;
+          expectedTotalBytes = undefined;
+          recoveryStatus = "restarted";
+          forceRestart = false;
+        }
+
+        const resumeOffset = bytesWritten;
+        const headers: Record<string, string> = {
+          Accept: "application/octet-stream, application/json",
+          Authorization: `Bearer ${await this.token(context)}`,
+        };
+        if (resumeOffset > 0) {
+          headers.Range = `bytes=${resumeOffset}-`;
+        }
+
+        let response: Response;
+        try {
+          response = await this.fetchImpl(new URL(path, this.baseUrl), {
+            method: "GET",
+            headers,
+            redirect: "error",
+            signal: AbortSignal.timeout(this.timeoutMs),
+          });
+        } catch (error) {
+          lastError = error;
+          if (attempt < totalAttempts) {
+            continue;
+          }
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `TDEI download failed for ${tool} after ${attempt} attempt(s) (${bytesWritten} bytes received): ${reason}`,
+          );
+        }
+
+        // If the server rejects our Range header with 416, fall back to a full restart from byte 0.
+        if (response.status === 416 && resumeOffset > 0 && attempt < totalAttempts) {
+          await response.body?.cancel().catch(() => undefined);
+          forceRestart = true;
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorBody = await safeErrorBody(response);
+          const httpError = new TdeiHttpError(
+            `TDEI download failed for ${tool} with status ${response.status} (attempt ${attempt}/${totalAttempts}).`,
+            response.status,
+            errorBody,
+          );
+          lastError = httpError;
+          if (attempt < totalAttempts && RETRYABLE_DOWNLOAD_STATUSES.has(response.status)) {
+            continue;
+          }
+          throw httpError;
+        }
+
+        // Determine whether we are appending (206 Partial Content) or writing from offset 0 (200 OK).
+        const isPartial = resumeOffset > 0 && response.status === 206;
+        if (resumeOffset > 0) {
+          recoveryStatus = isPartial ? "resumed" : "restarted";
+        }
+        if (!isPartial && bytesWritten > 0) {
+          bytesWritten = 0;
+          expectedTotalBytes = undefined;
+        }
+
+        const contentLengthHeader = response.headers.get("content-length");
+        const parsedLength = contentLengthHeader !== null ? Number(contentLengthHeader) : NaN;
+        if (Number.isFinite(parsedLength) && parsedLength >= 0) {
+          expectedTotalBytes = isPartial ? resumeOffset + parsedLength : parsedLength;
+        }
+
+        try {
+          const handle = await open(partPath, isPartial ? "a" : "w");
+          try {
+            if (response.body) {
+              const reader = response.body.getReader();
+              try {
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  if (value && value.byteLength > 0) {
+                    await handle.write(value);
+                    bytesWritten += value.byteLength;
+                  }
+                }
+              } finally {
+                reader.releaseLock();
+              }
+            } else {
+              const fallbackBytes = Buffer.from(await response.arrayBuffer());
+              if (fallbackBytes.byteLength > 0) {
+                await handle.write(fallbackBytes);
+                bytesWritten += fallbackBytes.byteLength;
+              }
+            }
+          } finally {
+            await handle.close();
+          }
+
+          if (expectedTotalBytes !== undefined && bytesWritten < expectedTotalBytes) {
+            throw new Error(
+              `Incomplete download stream for ${tool}: received ${bytesWritten} of ${expectedTotalBytes} expected bytes.`,
+            );
+          }
+
+          await rename(partPath, filePath);
+          const contentType = response.headers.get("content-type") ?? undefined;
+          const statusLabel =
+            recoveryStatus === "completed"
+              ? `completed in ${attempt} attempt(s)`
+              : `${recoveryStatus} after transient failure in ${attempt} attempt(s)`;
+          return {
+            tool,
+            path: filePath,
+            bytes: bytesWritten,
+            ...(contentType ? { contentType } : {}),
+            status: recoveryStatus,
+            attempts: attempt,
+            message: `Downloaded ${bytesWritten} bytes to ${filePath} (${statusLabel}).`,
+          };
+        } catch (streamError) {
+          lastError = streamError;
+          if (attempt < totalAttempts) {
+            continue;
+          }
+          const reason = streamError instanceof Error ? streamError.message : String(streamError);
+          throw new Error(
+            `TDEI download stream failed for ${tool} after ${attempt} attempt(s) (${bytesWritten} bytes received): ${reason}`,
+          );
+        }
+      }
+
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(`TDEI download failed for ${tool}.`);
+    } catch (error) {
+      await rm(partPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private routeFor(tool: string, input: Record<string, unknown>): string {

@@ -1,22 +1,74 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { getConfig, TDEI_SSO_CLIENT_ID } from "../config.js";
 import type {
   AuthStatus,
+  SsoLoginOptions,
   SsoLoginStart,
   SsoLogoutStart,
   TokenResponse,
+  ValidateTokenOptions,
 } from "./types.js";
 
 const DEFAULT_TOKEN_LIFETIME_SECONDS = 29 * 60;
 const REFRESH_SAFETY_WINDOW_MS = 2 * 60 * 1000;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TOKEN_VALIDATION_TTL_MS = 60 * 1000;
+const MAX_TOKEN_CACHE_ENTRIES = 1000;
+const MAX_CALLBACK_PARAM_LENGTH = 1024;
+const MAX_AUTH_ERROR_DETAIL_LENGTH = 200;
+
+const CALLBACK_SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Cache-Control": "no-store",
+} as const;
+
+export function sanitizeAuthErrorDetail(raw: string, maxLength = MAX_AUTH_ERROR_DETAIL_LENGTH): string {
+  const withoutTags = raw.replace(/<[^>]*>/g, " ");
+  const withoutControl = withoutTags.replace(/[\u0000-\u001f\u007f]+/g, " ");
+  const collapsed = withoutControl.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "No additional error details provided";
+  if (collapsed.length <= maxLength) return collapsed;
+  return `${collapsed.slice(0, maxLength)}...`;
+}
+
+export function extractJwtExpirationMs(token: string): number | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3 || !parts[1]) return undefined;
+  try {
+    const decoded = Buffer.from(parts[1], "base64url").toString("utf-8");
+    const payload = JSON.parse(decoded) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > 0) {
+      return payload.exp * 1000;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function isValidCallbackParam(value: string): boolean {
+  return value.length > 0 && value.length <= MAX_CALLBACK_PARAM_LENGTH && !/[\u0000-\u0020\u007f]/.test(value);
+}
+
+function safeEqualStrings(left: string, right: string): boolean {
+  const leftBuf = Buffer.from(left, "utf-8");
+  const rightBuf = Buffer.from(right, "utf-8");
+  if (leftBuf.byteLength !== rightBuf.byteLength) return false;
+  return timingSafeEqual(leftBuf, rightBuf);
+}
+
+function hashTokenCacheKey(apiUrl: string, token: string): string {
+  return createHash("sha256").update(`${apiUrl}:${token}`).digest("hex");
+}
 
 interface PendingLogin extends SsoLoginStart {
   server: Server;
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  expectedState?: string | undefined;
 }
 
 interface PendingLogout extends SsoLogoutStart {
@@ -34,6 +86,7 @@ export class AuthManager {
   private pendingLogout: PendingLogout | undefined;
   private refreshPromise: Promise<void> | undefined;
   private loginExchangePromise: Promise<void> | undefined;
+  private validatedUntil: number | undefined;
 
   getTokenVersion(): number {
     return this.tokenVersion;
@@ -56,12 +109,17 @@ export class AuthManager {
     };
   }
 
-  async startSsoLogin(): Promise<SsoLoginStart> {
+  async startSsoLogin(options?: SsoLoginOptions): Promise<SsoLoginStart> {
     if (this.pendingLogin) return this.publicLogin(this.pendingLogin);
     if (this.pendingLogout) {
       const reject = this.pendingLogout.reject;
       this.finishPendingLogout();
       reject(new Error("TDEI SSO logout cancelled by a new login"));
+    }
+
+    const expectedState = options?.state?.trim();
+    if (expectedState !== undefined && !isValidCallbackParam(expectedState)) {
+      throw new Error("TDEI SSO state parameter is invalid");
     }
 
     const callbackUrl = new URL(getConfig().ssoCallbackUrl);
@@ -77,19 +135,28 @@ export class AuthManager {
       const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
       if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
-        response.writeHead(404, { "Content-Type": "text/plain" });
+        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
         response.end("Not found");
         return;
       }
+
+      const secFetchSite = request.headers["sec-fetch-site"];
+      const secFetchMode = request.headers["sec-fetch-mode"];
+      if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
+        response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+        response.end("Forbidden cross-site callback request");
+        return;
+      }
+
       try {
         await this.completeSsoLogin(requestUrl.toString());
 
-        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
         response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
       } catch (error) {
         const loginError = error instanceof Error ? error : new Error(String(error));
-        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
-        response.end(loginError.message);
+        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+        response.end(sanitizeAuthErrorDetail(loginError.message));
       }
     });
 
@@ -114,6 +181,9 @@ export class AuthManager {
     const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
     loginUrl.searchParams.set("redirect_uri", callbackUrl.toString());
     loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
+    if (expectedState) {
+      loginUrl.searchParams.set("state", expectedState);
+    }
 
     const timeout = setTimeout(() => {
       const error = new Error("TDEI SSO login timed out");
@@ -127,6 +197,7 @@ export class AuthManager {
       loginUrl: loginUrl.toString(),
       callbackUrl: callbackUrl.toString(),
       completion,
+      ...(expectedState ? { state: expectedState, expectedState } : {}),
       server,
       resolve: resolveCompletion,
       reject: rejectCompletion,
@@ -146,10 +217,16 @@ export class AuthManager {
     }
 
     const providerError = received.searchParams.get("error");
-    if (providerError) throw new Error(`TDEI SSO failed: ${providerError}`);
-    const code = received.searchParams.get("code");
-    const state = received.searchParams.get("state");
+    if (providerError) throw new Error(`TDEI SSO failed: ${sanitizeAuthErrorDetail(providerError)}`);
+    const code = received.searchParams.get("code")?.trim() ?? "";
+    const state = received.searchParams.get("state")?.trim() ?? "";
     if (!code || !state) throw new Error("TDEI SSO callback is missing code or state");
+    if (!isValidCallbackParam(code) || !isValidCallbackParam(state)) {
+      throw new Error("TDEI SSO callback contains invalid code or state parameter");
+    }
+    if (pending.expectedState && !safeEqualStrings(state, pending.expectedState)) {
+      throw new Error("TDEI SSO callback state mismatch");
+    }
 
     if (this.loginExchangePromise) return this.loginExchangePromise;
     this.loginExchangePromise = this.requestTokens(
@@ -192,26 +269,52 @@ export class AuthManager {
   seedInjectedToken(token: string, expiresInSeconds?: number): void {
     this.accessToken = token;
     this.refreshToken = undefined;
+    this.validatedUntil = undefined;
     this.tokenVersion += 1;
-    const lifetime =
-      typeof expiresInSeconds === "number" && expiresInSeconds >= 0
-        ? expiresInSeconds
-        : DEFAULT_TOKEN_LIFETIME_SECONDS;
-    this.expiresAt = Date.now() + lifetime * 1000;
+    if (typeof expiresInSeconds === "number" && expiresInSeconds >= 0) {
+      this.expiresAt = Date.now() + expiresInSeconds * 1000;
+      return;
+    }
+    const jwtExpirationMs = extractJwtExpirationMs(token);
+    this.expiresAt = jwtExpirationMs ?? (Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000);
   }
 
   /**
    * Stateless validation for an injected Bearer: local expiry check first
    * (never attempts refresh — the server holds no refresh_token), then one
-   * lightweight TDEI probe. Throws TDEI_TOKEN_EXPIRED / TDEI_TOKEN_INVALID.
+   * lightweight TDEI probe (cached for up to ttlMs). Throws TDEI_TOKEN_EXPIRED / TDEI_TOKEN_INVALID.
    */
-  async validateToken(): Promise<void> {
+  async validateToken(options?: typeof fetch | ValidateTokenOptions): Promise<void> {
     if (!this.hasUsableAccessToken()) {
       throw new Error("TDEI_TOKEN_EXPIRED");
     }
+    const resolvedOptions: ValidateTokenOptions =
+      typeof options === "function" ? { fetchImpl: options } : (options ?? {});
+    const fetchImpl = resolvedOptions.fetchImpl ?? fetch;
+    const ttlMs = resolvedOptions.ttlMs ?? DEFAULT_TOKEN_VALIDATION_TTL_MS;
+    const apiUrl = getConfig().apiUrl;
+    const now = Date.now();
+    const cacheKey = resolvedOptions.cache && this.accessToken
+      ? hashTokenCacheKey(apiUrl, this.accessToken)
+      : undefined;
+
+    if (this.validatedUntil && now < this.validatedUntil) {
+      return;
+    }
+    if (cacheKey && resolvedOptions.cache) {
+      const cachedUntil = resolvedOptions.cache.get(cacheKey);
+      if (cachedUntil !== undefined) {
+        if (now < cachedUntil) {
+          this.validatedUntil = cachedUntil;
+          return;
+        }
+        resolvedOptions.cache.delete(cacheKey);
+      }
+    }
+
     let response: Response;
     try {
-      response = await fetch(new URL("/api/v1/project-groups", `${getConfig().apiUrl}/`), {
+      response = await fetchImpl(new URL("/api/v1/project-groups", `${apiUrl}/`), {
         method: "GET",
         headers: { Accept: "application/json", Authorization: `Bearer ${this.accessToken}` },
       });
@@ -222,6 +325,22 @@ export class AuthManager {
       throw new Error("TDEI_TOKEN_INVALID");
     }
     await response.body?.cancel().catch(() => undefined);
+
+    if (ttlMs > 0) {
+      const maxValidUntil = this.expiresAt
+        ? Math.min(now + ttlMs, this.expiresAt - REFRESH_SAFETY_WINDOW_MS)
+        : now + ttlMs;
+      if (maxValidUntil > now) {
+        this.validatedUntil = maxValidUntil;
+        if (cacheKey && resolvedOptions.cache) {
+          if (resolvedOptions.cache.size >= MAX_TOKEN_CACHE_ENTRIES) {
+            const oldestKey = resolvedOptions.cache.keys().next().value;
+            if (oldestKey !== undefined) resolvedOptions.cache.delete(oldestKey);
+          }
+          resolvedOptions.cache.set(cacheKey, maxValidUntil);
+        }
+      }
+    }
   }
 
   async logout(): Promise<SsoLogoutStart> {
@@ -247,7 +366,7 @@ export class AuthManager {
       const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
       if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
-        response.writeHead(404, { "Content-Type": "text/plain" });
+        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
         response.end("Not found");
         return;
       }
@@ -255,15 +374,15 @@ export class AuthManager {
       const providerError = requestUrl.searchParams.get("error");
       this.finishPendingLogout();
       if (providerError) {
-        const error = new Error(`TDEI SSO logout failed: ${providerError}`);
+        const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
         rejectCompletion(error);
-        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
-        response.end(error.message);
+        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+        response.end(sanitizeAuthErrorDetail(error.message));
         return;
       }
 
       resolveCompletion();
-      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
       response.end("<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>");
     });
 
@@ -333,7 +452,7 @@ export class AuthManager {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      const details = await response.text();
+      const details = sanitizeAuthErrorDetail(await response.text());
       console.error(`[auth] ${action} failed with status ${response.status}`);
       throw new Error(response.status === 401
         ? `${action} failed: invalid or expired authorization response`
@@ -347,11 +466,14 @@ export class AuthManager {
   private storeTokens(tokens: TokenResponse): void {
     this.accessToken = tokens.access_token;
     this.refreshToken = tokens.refresh_token ?? this.refreshToken;
+    this.validatedUntil = undefined;
     this.tokenVersion += 1;
-    const lifetime = typeof tokens.expires_in === "number" && tokens.expires_in > 0
-      ? tokens.expires_in
-      : DEFAULT_TOKEN_LIFETIME_SECONDS;
-    this.expiresAt = Date.now() + lifetime * 1000;
+    if (typeof tokens.expires_in === "number" && tokens.expires_in > 0) {
+      this.expiresAt = Date.now() + tokens.expires_in * 1000;
+      return;
+    }
+    const jwtExpirationMs = extractJwtExpirationMs(tokens.access_token);
+    this.expiresAt = jwtExpirationMs ?? (Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000);
   }
 
   private hasUsableAccessToken(): boolean {
@@ -359,7 +481,12 @@ export class AuthManager {
   }
 
   private publicLogin(login: PendingLogin): SsoLoginStart {
-    return { loginUrl: login.loginUrl, callbackUrl: login.callbackUrl, completion: login.completion };
+    return {
+      loginUrl: login.loginUrl,
+      callbackUrl: login.callbackUrl,
+      completion: login.completion,
+      ...(login.state ? { state: login.state } : {}),
+    };
   }
 
   private publicLogout(logout: PendingLogout): SsoLogoutStart {
@@ -386,6 +513,7 @@ export class AuthManager {
     this.accessToken = undefined;
     this.refreshToken = undefined;
     this.expiresAt = undefined;
+    this.validatedUntil = undefined;
   }
 }
 

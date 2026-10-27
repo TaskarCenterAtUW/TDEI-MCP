@@ -29,3 +29,53 @@ test("step-2 failure aborts with transcript preserving step-1", async () => {
   assert.match(String(error.message), /s2/);
   assert.match(String(error.message), /boom/);
 });
+
+test("template interpolation blocks Object.prototype property lookups", async () => {
+  const deps = {
+    async callTool() {
+      return { id: "d1" };
+    },
+    toolSchemas: schemas,
+  };
+  for (const forbidden of ["{{user.toString}}", "{{user.__proto__}}", "{{user.constructor}}"]) {
+    const def = {
+      name: "proto_guard",
+      steps: [
+        {
+          id: "s1",
+          tool: "a",
+          ask: [],
+          input: { x: forbidden },
+        },
+      ],
+    };
+    await assert.rejects(
+      () => runWorkflow(def as never, { x: "safe" }, deps as never),
+      /unknown template ref/,
+    );
+  }
+});
+
+test("registerWorkflows tracks registered workflow names per McpServer instance", async () => {
+  const { McpServer } = await import("@modelcontextprotocol/server");
+  const { registerWorkflows } = await import("../src/workflows/register.js");
+  const serverA = new McpServer({ name: "a", version: "1.0.0" });
+  const serverB = new McpServer({ name: "b", version: "1.0.0" });
+  const workflows = [
+    {
+      name: "sample_flow",
+      description: "Sample flow",
+      steps: [{ id: "s1", tool: "a", ask: ["x"], input: { x: "{{user.x}}" } }],
+    },
+  ];
+  const deps = {
+    async callTool() { return {}; },
+    toolSchemas: schemas,
+    denied: new Set<string>(),
+    configPath: "tdei.config.json",
+  };
+  const countA = registerWorkflows(serverA, workflows as never, deps);
+  const countB = registerWorkflows(serverB, workflows as never, deps);
+  assert.deepEqual(countA.registered, ["workflow_sample_flow"]);
+  assert.deepEqual(countB.registered, ["workflow_sample_flow"]);
+});

@@ -123,11 +123,31 @@ export function formatError(err: unknown): { isError: true; content: [{ type: "t
 }
 
 export function truncateText(text: string): { text: string; truncated: boolean } {
-  if (Buffer.byteLength(text, "utf-8") <= MAX_OUTPUT_BYTES) {
+  const bytes = Buffer.from(text, "utf-8");
+  if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
     return { text, truncated: false };
   }
   let end = MAX_OUTPUT_BYTES;
-  while (end > 0 && (text.charCodeAt(end) & 0xc0) === 0x80) end -= 1;
+  // Walk back past UTF-8 continuation bytes (10xxxxxx).
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  // If `end` lands on a multi-byte leading byte whose sequence was split by MAX_OUTPUT_BYTES,
+  // exclude that incomplete leading sequence as well.
+  if (end > 0) {
+    let leadIndex = end - 1;
+    while (leadIndex >= 0 && (bytes[leadIndex]! & 0xc0) === 0x80) leadIndex -= 1;
+    if (leadIndex >= 0) {
+      const leadByte = bytes[leadIndex]!;
+      const expectedLength =
+        (leadByte & 0x80) === 0x00 ? 1
+        : (leadByte & 0xe0) === 0xc0 ? 2
+        : (leadByte & 0xf0) === 0xe0 ? 3
+        : (leadByte & 0xf8) === 0xf0 ? 4
+        : 1;
+      if (leadIndex + expectedLength > end) {
+        end = leadIndex;
+      }
+    }
+  }
   const suffix = `\n{"truncated":true,"hint":${JSON.stringify(TRUNCATION_HINT)}}`;
-  return { text: text.slice(0, end) + suffix, truncated: true };
+  return { text: bytes.subarray(0, end).toString("utf-8") + suffix, truncated: true };
 }

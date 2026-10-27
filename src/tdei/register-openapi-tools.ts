@@ -45,13 +45,13 @@ function truncateResult<T>(result: T): T {
 export async function registerTdeiOpenApiTools(
   server: McpServer,
   client: TdeiOpenApiToolClient = openApiMcpClient,
-  filter: EndpointFilter = { mode: "all", allow: [], deny: [] },
+  filter: EndpointFilter = { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] },
   onCall?: TdeiOpenApiToolCall,
 ): Promise<TdeiOpenApiToolRegistrationResult> {
   console.error("[openapi-tools] discovering TDEI OpenAPI tools");
   const result = await registerOpenApiTools(server, client, {
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
-    isAllowed: (name) => isToolAllowed(name, filter),
+    isAllowed: (name, tags) => isToolAllowed(name, filter, tags ?? []),
     ...(onCall ? { onCall } : {}),
     mapResult: (result) => truncateResult(normalizeOpenApiToolResult(result)),
     mapError: formatError,
