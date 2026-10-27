@@ -64,6 +64,15 @@ export function writeCodexEntry(toml: string, entry: ServerEntry, env: Record<st
   return upsertTomlBlock(toml, "[mcp_servers.tdei]", body);
 }
 
+export function writeCodexRemoteEntry(toml: string, remoteUrl: string): string {
+  const body = [
+    `url = ${JSON.stringify(remoteUrl)}`,
+    "startup_timeout_sec = 120",
+    "tool_timeout_sec = 120",
+  ].join("\n");
+  return upsertTomlBlock(toml, "[mcp_servers.tdei]", body);
+}
+
 export function readCodexEntry(toml: string): {
   found: boolean;
   env: Record<string, string>;
@@ -153,6 +162,10 @@ export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Reco
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", { ...entry, env }, pathForError);
 }
 
+export function writeClaudeRemoteEntry(jsonText: string, remoteUrl: string, pathForError = "claude_desktop_config.json"): string {
+  return upsertJsonEntry(jsonText, "mcpServers", "tdei", { type: "http", url: remoteUrl }, pathForError);
+}
+
 export function readClaudeEntry(jsonText: string): ReturnType<typeof readJsonEntry> {
   return readJsonEntry(jsonText, "mcpServers", "tdei");
 }
@@ -163,6 +176,10 @@ export function vscodeConfigPath(cwd: string = process.cwd()): string {
 
 export function writeVscodeEntry(jsonText: string, entry: ServerEntry, env: Record<string, string>, pathForError = "mcp.json"): string {
   return upsertJsonEntry(jsonText, "servers", "tdei", { ...entry, env }, pathForError);
+}
+
+export function writeVscodeRemoteEntry(jsonText: string, remoteUrl: string, pathForError = "mcp.json"): string {
+  return upsertJsonEntry(jsonText, "servers", "tdei", { type: "http", url: remoteUrl }, pathForError);
 }
 
 export function readVscodeEntry(jsonText: string): ReturnType<typeof readJsonEntry> {

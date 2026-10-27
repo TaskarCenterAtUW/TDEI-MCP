@@ -110,8 +110,8 @@ test("http.ts import has no side effects on singletons", async () => {
   assert.equal(openapi.openApiMcpClient.isConnected(), false);
 });
 
-test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
-  const handle = await serveHttp({}, { port: TEST_PORT });
+test("POST /mcp without token when requireBearerAuth=true returns 401 naming tdei_sso_login", async () => {
+  const handle = await serveHttp({ requireBearerAuth: true }, { port: TEST_PORT });
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(response.status, 401);
@@ -124,6 +124,76 @@ test("POST /mcp without token returns 401 naming tdei_sso_login", async () => {
     assert.ok(String(body.loginUrl).includes("/api/v1/sso-redirect"));
   } finally {
     await handle.close();
+  }
+});
+
+test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login via /auth/callback, and serves /mcp/setup/codex", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/api/v1/sso-login")) {
+      return new Response(
+        JSON.stringify({
+          access_token: "sso-fetched-token",
+          refresh_token: "sso-refresh-token",
+          expires_in: 1800,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.includes("/api/v1/project-groups")) {
+      const req = input instanceof Request ? input : new Request(String(input), init);
+      return new Response(
+        JSON.stringify([
+          {
+            tdei_project_group_id: "pg-1",
+            project_group_name: `AuthHeader=${req.headers.get("Authorization")}`,
+          },
+        ]),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+
+  const handle = await serveHttp({ fetchImpl: globalThis.fetch }, { port: TEST_PORT + 3 });
+  try {
+    const setupOverview = await fetch(`${handle.url}/mcp/setup`);
+    assert.equal(setupOverview.status, 200);
+    assert.match(await setupOverview.text(), /\/mcp\/setup\/codex/);
+
+    const codexScriptRes = await fetch(`${handle.url}/mcp/setup/codex`);
+    assert.equal(codexScriptRes.status, 200);
+    const codexScript = await codexScriptRes.text();
+    assert.match(codexScript, /\[mcp_servers\.tdei\]/);
+    assert.doesNotMatch(codexScript, /bearer_token_env_var/);
+
+    const listRes = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    assert.equal(listRes.status, 200);
+    const listText = await listRes.text();
+    assert.match(listText, /tdei_sso_login/);
+    assert.match(listText, /tdei_sso_complete/);
+
+    const loginCall = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(2, "tools/call", { name: "tdei_sso_login", arguments: {} }),
+    );
+    assert.equal(loginCall.status, 200);
+    assert.match(await loginCall.text(), /login_pending/);
+
+    const callbackRes = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
+    assert.equal(callbackRes.status, 200);
+    assert.match(await callbackRes.text(), /Login complete/);
+
+    const groupsCall = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(3, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+    );
+    assert.equal(groupsCall.status, 200);
+    assert.match(await groupsCall.text(), /AuthHeader=Bearer sso-fetched-token/);
+  } finally {
+    await handle.close();
+    globalThis.fetch = originalFetch;
   }
 });
 

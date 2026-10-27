@@ -9,7 +9,8 @@ import { verifyServer } from "./verify.js";
 import {
   CLIENTS, buildServerEntry, claudeConfigPath, codexConfigPath, formatManual,
   readClaudeEntry, readCodexEntry, readVscodeEntry, vscodeConfigPath,
-  writeClaudeEntry, writeCodexEntry, writeVscodeEntry, switchCodexEnv,
+  writeClaudeEntry, writeClaudeRemoteEntry, writeCodexEntry, writeCodexRemoteEntry,
+  writeVscodeEntry, writeVscodeRemoteEntry, switchCodexEnv,
   type ClientName, type ServerEntry,
 } from "./clients.js";
 
@@ -214,11 +215,18 @@ function readEntry(client: ClientName, current: string): {
   return readVscodeEntry(current);
 }
 
+function writeRemoteEntry(client: ClientName, current: string, remoteUrl: string, path: string): string {
+  if (client === "codex") return writeCodexRemoteEntry(current, remoteUrl);
+  if (client === "claude") return writeClaudeRemoteEntry(current, remoteUrl, path);
+  return writeVscodeRemoteEntry(current, remoteUrl, path);
+}
+
 export async function runInit(
   deps: Deps,
   opts: {
     env?: string;
     url?: string;
+    remote?: string;
     client?: ClientName;
     port?: number;
     serverPath?: string;
@@ -230,6 +238,46 @@ export async function runInit(
   },
 ): Promise<{ client: ClientName; apiUrl: string; callbackUrl: string }> {
   if (opts.client !== undefined) assertClient(opts.client);
+  if (opts.remote) {
+    let parsedRemote: URL;
+    try {
+      parsedRemote = new URL(opts.remote);
+    } catch {
+      throw new Error(`--remote must be a valid http(s) URL (received ${opts.remote})`);
+    }
+    if (parsedRemote.protocol !== "http:" && parsedRemote.protocol !== "https:") {
+      throw new Error(`--remote must use http:// or https:// (received ${opts.remote})`);
+    }
+    if (!parsedRemote.pathname || parsedRemote.pathname === "/") {
+      parsedRemote.pathname = "/mcp";
+    }
+    const remoteUrl = parsedRemote.toString();
+    const client = opts.client ?? (await deps.prompter.chooseClient());
+    const callbackUrl = `${parsedRemote.origin}/auth/callback`;
+    if (client === "custom") {
+      deps.log(`Manual remote MCP setup:\n  URL: ${remoteUrl}`);
+      deps.log(formatSetupReport({ status: "manual remote setup", client, apiUrl: remoteUrl }));
+      return { client, apiUrl: remoteUrl, callbackUrl };
+    }
+    const home = opts.home ?? process.env.HOME ?? "";
+    const cwd = opts.cwd ?? process.cwd();
+    const path = clientPaths(client, home, cwd);
+    const current = await readExisting(deps, path);
+    const updated = writeRemoteEntry(client, current, remoteUrl, path);
+    await deps.mkdir(dirname(path));
+    if (current) await deps.writeFile(`${path}.tdei.bak`, current);
+    await deps.writeFile(path, updated);
+    if ((await deps.readFile(path)) !== updated) {
+      throw new Error(`configuration readback failed: ${path}`);
+    }
+    deps.log(formatSetupReport({
+      status: "ready (remote HTTP)",
+      client,
+      apiUrl: remoteUrl,
+      configPath: path,
+    }));
+    return { client, apiUrl: remoteUrl, callbackUrl };
+  }
   if (opts.envFile && (opts.env || opts.url || opts.port !== undefined)) {
     throw new Error("--env-file cannot be combined with --env, --url, or --port");
   }

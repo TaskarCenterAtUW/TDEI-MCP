@@ -217,3 +217,20 @@ test("failed MCP verification leaves the existing Codex config unchanged", async
   assert.equal(fs.files.get("/h/.codex/config.toml"), existing);
   assert.equal(fs.files.get("/h/.codex/config.toml.tdei.bak"), undefined);
 });
+
+test("runInit with --remote writes Codex HTTP URL without hardcoded token", async () => {
+  const fs = memFs();
+  const d = deps(fs, {
+    chooseEnv: async () => ({ env: "dev" }),
+    chooseClient: async () => "codex" as const,
+  });
+  await runInit(d as never, {
+    home: "/h",
+    client: "codex",
+    remote: "http://192.168.50.11:8080/mcp",
+  });
+  const toml = fs.files.get("/h/.codex/config.toml") ?? "";
+  assert.match(toml, /\[mcp_servers\.tdei\]/);
+  assert.match(toml, /url = "http:\/\/192\.168\.50\.11:8080\/mcp"/);
+  assert.doesNotMatch(toml, /bearer_token_env_var/);
+});

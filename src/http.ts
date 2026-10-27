@@ -2,13 +2,16 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 
 import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
-import { injectAccessToken } from "./auth/auth-manager.js";
-import { createHttpSemanticServer } from "./http-semantic-server.js";
+import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/auth-manager.js";
+import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
+import { isSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview } from "./http-setup-script.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
+import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 
 export interface HttpServeOptions {
   fetchImpl?: typeof fetch;
+  requireBearerAuth?: boolean;
 }
 
 export interface HttpServeOverrides {
@@ -20,6 +23,9 @@ interface ResolvedHttpOptions {
   fetchImpl: typeof fetch | undefined;
   places: PlaceResolver;
   tokenValidationCache: Map<string, number>;
+  requireBearerAuth: boolean;
+  sessionAuth: AuthManager;
+  sessionOpenApiClient: OpenApiMcpClient;
 }
 
 function buildLoginUrl(): string {
@@ -126,6 +132,7 @@ async function handleMcpRequest(
   response: ServerResponse,
   options: ResolvedHttpOptions,
   host: string,
+  publicBaseUrl: string,
 ): Promise<void> {
   if (!checkCors(request, response)) {
     sendJson(response, 403, { code: "TDEI_ORIGIN_FORBIDDEN", message: "Origin not allowed." });
@@ -144,36 +151,52 @@ async function handleMcpRequest(
     return;
   }
 
-  const authHeader = request.headers.authorization ?? "";
-  const match = /^Bearer (.+)$/.exec(authHeader.trim());
-  if (!match) {
+  const authHeader = (request.headers.authorization ?? "").trim();
+  let server;
+  if (authHeader.length > 0) {
+    const match = /^Bearer (.+)$/.exec(authHeader);
+    if (!match || !match[1]?.trim()) {
+      unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
+      return;
+    }
+    const bearer = match[1].trim();
+
+    const ephemeralAuth = injectAccessToken(bearer);
+    try {
+      await ephemeralAuth.validateToken({
+        fetchImpl: options.fetchImpl,
+        cache: options.tokenValidationCache,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "TDEI_TOKEN_EXPIRED") {
+        unauthorized(response, message, "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", { refresh_hint: true, retryable: true });
+      } else {
+        unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true, retryable: false });
+      }
+      return;
+    }
+
+    server = createHttpSemanticServer({
+      accessToken: bearer,
+      apiUrl: getConfig().apiUrl,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      places: options.places,
+    });
+  } else if (options.requireBearerAuth) {
     unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
     return;
-  }
-  const bearer = match[1].trim();
-
-  const ephemeralAuth = injectAccessToken(bearer);
-  try {
-    await ephemeralAuth.validateToken({
-      fetchImpl: options.fetchImpl,
-      cache: options.tokenValidationCache,
+  } else {
+    server = await createReadyHttpSemanticServer({
+      authManager: options.sessionAuth,
+      openApiMcpClient: options.sessionOpenApiClient,
+      apiUrl: getConfig().apiUrl,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      places: options.places,
+      publicBaseUrl,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message === "TDEI_TOKEN_EXPIRED") {
-      unauthorized(response, message, "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", { refresh_hint: true, retryable: true });
-    } else {
-      unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true, retryable: false });
-    }
-    return;
   }
 
-  const server = createHttpSemanticServer({
-    accessToken: bearer,
-    apiUrl: getConfig().apiUrl,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    places: options.places,
-  });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
     await server.connect(transport);
@@ -212,18 +235,115 @@ export async function serveHttp(
     }));
     process.exit(1);
   }
+  const sessionAuth = new AuthManager();
+  const sessionOpenApiClient = new OpenApiMcpClient({
+    apiUrl: httpConfig.apiUrl,
+    specUrl: httpConfig.specUrl,
+    headersProvider: async () => ({
+      Authorization: `Bearer ${await sessionAuth.getAccessToken()}`,
+    }),
+    allowLocalFileUploads: true,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
   const resolved: ResolvedHttpOptions = {
     fetchImpl: options.fetchImpl,
     places: createConfiguredPlaceResolver(httpConfig, options.fetchImpl),
     tokenValidationCache: new Map<string, number>(),
+    requireBearerAuth: options.requireBearerAuth ?? false,
+    sessionAuth,
+    sessionOpenApiClient,
   };
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;
   const basePath = httpConfig.httpBasePath;
+  const callbackPort = Number(new URL(httpConfig.ssoCallbackUrl).port) || 8765;
+
   const server: Server = createHttpServer((request, response) => {
     void (async () => {
       try {
-        const url = new URL(request.url ?? "/", `http://${request.headers.host ?? host}`);
+        const reqHost = request.headers.host ?? `${host}:${port}`;
+        const publicBaseUrl = `http://${reqHost}`;
+        const url = new URL(request.url ?? "/", publicBaseUrl);
+
+        if (
+          request.method === "GET" &&
+          (url.pathname === `${basePath}/setup` || url.pathname === "/setup")
+        ) {
+          const text = renderSetupOverview(publicBaseUrl, basePath);
+          response.writeHead(200, {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+          });
+          response.end(text);
+          return;
+        }
+
+        const setupMatch =
+          url.pathname.startsWith(`${basePath}/setup/`)
+            ? url.pathname.slice(`${basePath}/setup/`.length)
+            : url.pathname.startsWith("/setup/")
+              ? url.pathname.slice("/setup/".length)
+              : undefined;
+        if (request.method === "GET" && setupMatch !== undefined) {
+          const rawClient = setupMatch.replace(/\/+$/, "").toLowerCase();
+          const wantsPowershell = rawClient.endsWith(".ps1");
+          const client = wantsPowershell ? rawClient.slice(0, -".ps1".length) : rawClient;
+          if (!isSetupClientTarget(client)) {
+            sendJson(response, 404, {
+              code: "TDEI_SETUP_CLIENT_UNKNOWN",
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude, vscode (append .ps1 for the Windows PowerShell installer).`,
+            });
+            return;
+          }
+          const script = wantsPowershell
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort);
+          response.writeHead(200, {
+            "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
+            "Cache-Control": "no-store",
+          });
+          response.end(script);
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          (url.pathname === "/auth/callback" || url.pathname === "/callback")
+        ) {
+          const secFetchSite = request.headers["sec-fetch-site"];
+          const secFetchMode = request.headers["sec-fetch-mode"];
+          if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
+            response.writeHead(403, {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            response.end("Forbidden cross-site callback request");
+            return;
+          }
+          try {
+            const expectedCallback = new URL(getConfig().ssoCallbackUrl);
+            expectedCallback.search = url.search;
+            await sessionAuth.completeSsoLogin(expectedCallback.toString());
+            void sessionOpenApiClient.listTools().catch(() => undefined);
+            response.writeHead(200, {
+              "Content-Type": "text/html; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
+          } catch (error) {
+            const detail = sanitizeAuthErrorDetail(error instanceof Error ? error.message : String(error));
+            response.writeHead(401, {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            response.end(detail);
+          }
+          return;
+        }
+
         if (url.pathname !== basePath) {
           sendJson(response, 404, { code: "TDEI_NOT_FOUND", message: `Unknown path ${url.pathname}.` });
           return;
@@ -237,7 +357,7 @@ export async function serveHttp(
           sendJson(response, 405, { code: "TDEI_METHOD_NOT_ALLOWED", message: "Use POST for JSON-RPC, GET for SSE, or DELETE." });
           return;
         }
-        await handleMcpRequest(request, response, resolved, host);
+        await handleMcpRequest(request, response, resolved, host, publicBaseUrl);
       } catch (error) {
         console.error("[http] request failed:", error instanceof Error ? error.message : String(error));
         if (!response.headersSent) {
@@ -260,6 +380,7 @@ export async function serveHttp(
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
   const close = async (): Promise<void> => {
+    await sessionOpenApiClient.close().catch(() => undefined);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
   const shutdown = (): void => {

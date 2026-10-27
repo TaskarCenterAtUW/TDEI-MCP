@@ -23,7 +23,7 @@ function detectCheckout(): LocalCheckout | undefined {
 function usage(): string {
   return [
     "Usage:",
-    "  tdei-mcp init [--env dev|stage|prod | --url <https-url> | --env-file <path>] [--client codex|claude|vscode|custom] [--port <n>]",
+    "  tdei-mcp init [--env dev|stage|prod | --url <https-url> | --env-file <path> | --remote <http(s)-mcp-url>] [--client codex|claude|vscode|custom] [--port <n>]",
     "  tdei-mcp switch base-url [--env dev|stage|prod] [--url <https-url>] [--client codex|claude|vscode]",
     "",
     "First setup: tdei-mcp init. Change environment: tdei-mcp switch base-url.",
@@ -81,7 +81,7 @@ const depsBase = {
 try {
   if (sub === "init" || sub === "switch") {
     const flags = sub === "switch" ? rest.slice(1) : rest;
-    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port", "--env-file"] : [])]);
+    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port", "--env-file", "--remote"] : [])]);
     for (let index = 0; index < flags.length; index += 1) {
       if (!valued.has(flags[index] as string)) throw new Error(`unknown option ${flags[index]}; run tdei-mcp --help`);
       if (!flags[index + 1] || flags[index + 1]?.startsWith("--")) {
@@ -96,6 +96,7 @@ try {
       const portFlag = flag(rest, "--port");
       const envFlag = flag(rest, "--env");
       const urlFlag = flag(rest, "--url");
+      const remoteFlag = flag(rest, "--remote");
       const clientFlag = flag(rest, "--client");
       const envFileFlag = flag(rest, "--env-file");
       const local = detectCheckout();
@@ -115,6 +116,7 @@ try {
         serverPath,
         ...(envFlag ? { env: envFlag } : {}),
         ...(urlFlag ? { url: urlFlag } : {}),
+        ...(remoteFlag ? { remote: remoteFlag } : {}),
         ...(envFileFlag ? { envFile: resolve(envFileFlag) } : {}),
         ...(clientFlag ? { client: clientFlag as ClientName } : {}),
         ...(portFlag === undefined ? {} : { port: assertPort(portFlag) }),
