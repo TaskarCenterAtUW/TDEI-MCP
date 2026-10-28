@@ -4,6 +4,8 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
 import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/auth-manager.js";
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
+import { renderStatusPage } from "./http-status-page.js";
+import { checkHealth } from "./server.js";
 import { normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview } from "./http-setup-script.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
@@ -264,6 +266,33 @@ export async function serveHttp(
         const reqHost = request.headers.host ?? `${host}:${port}`;
         const publicBaseUrl = `http://${reqHost}`;
         const url = new URL(request.url ?? "/", publicBaseUrl);
+
+        if (request.method === "GET" && url.pathname === "/") {
+          const html = renderStatusPage(publicBaseUrl, basePath);
+          response.writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          });
+          response.end(html);
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/health") {
+          try {
+            const report = await checkHealth(
+              { auth: sessionAuth, openapi: sessionOpenApiClient },
+              { ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
+            );
+            sendJson(response, 200, report, { "Cache-Control": "no-store" });
+          } catch (error) {
+            sendJson(response, 500, {
+              code: "TDEI_HEALTH_FAILED",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return;
+        }
 
         if (
           request.method === "GET" &&
