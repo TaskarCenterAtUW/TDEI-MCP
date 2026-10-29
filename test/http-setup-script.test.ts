@@ -15,7 +15,8 @@ import {
   type SetupClientTarget,
 } from "../src/http-setup-script.js";
 import { renderStatusPage } from "../src/http-status-page.js";
-import { resolvePublicBaseUrl, serveHttp } from "../src/http.js";
+import { resolvePublicBaseUrl } from "../src/http.js";
+import { serveTestHttp } from "./helpers/test-http-server.js";
 
 // Installer runs below spawn a detached SSO callback relay for remote servers;
 // suppress it in tests so no relay process outlives the suite and holds port 8765.
@@ -197,10 +198,9 @@ test("status page shows per-client restart steps in clear view", () => {
   assert.match(html, /tdei_sso_login/);
 });
 
-const SETUP_PORT = 18090;
-
 test("setup endpoints serve sh + ps1 installers and reject unknown clients", async () => {
-  const handle = await serveHttp({}, { port: SETUP_PORT });
+  const handle = await serveTestHttp({});
+  const escapedOrigin = handle.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
     const overview = await fetch(`${handle.url}/mcp/setup`);
     assert.equal(overview.status, 200);
@@ -216,7 +216,7 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     const psText = await ps.text();
     assert.match(psText, /\$ErrorActionPreference/);
     assert.match(psText, /configureCodex/);
-    assert.match(psText, /http:\/\/127\.0\.0\.1:18090\/mcp/);
+    assert.match(psText, new RegExp(`${escapedOrigin}/mcp`));
 
     const bogus = await fetch(`${handle.url}/mcp/setup/bogus.ps1`);
     assert.equal(bogus.status, 404);
@@ -273,33 +273,32 @@ test("resolvePublicBaseUrl prefers env override, then X-Forwarded-Proto", () => 
   );
 });
 
-const PROXY_PORT = 18091;
-
 test("status page and setup catalogue advertise https behind a TLS proxy", async () => {
-  const handle = await serveHttp({}, { port: PROXY_PORT });
+  const handle = await serveTestHttp({});
+  const actualPort = new URL(handle.url).port;
   try {
     const headers = { "x-forwarded-proto": "https" };
     const html = await (await fetch(`${handle.url}/`, { headers })).text();
-    assert.match(html, new RegExp(`https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp`));
-    assert.doesNotMatch(html, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${PROXY_PORT}`));
+    assert.match(html, new RegExp(`https://127\\.0\\.0\\.1:${actualPort}/mcp`));
+    assert.doesNotMatch(html, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${actualPort}`));
 
     const overview = await (await fetch(`${handle.url}/mcp/setup`, { headers })).text();
-    assert.match(overview, new RegExp(`curl -fsSL https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex \\| sh`));
-    assert.match(overview, new RegExp(`irm https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex\\.ps1 \\| iex`));
+    assert.match(overview, new RegExp(`curl -fsSL https://127\\.0\\.0\\.1:${actualPort}/mcp/setup/codex \\| sh`));
+    assert.match(overview, new RegExp(`irm https://127\\.0\\.0\\.1:${actualPort}/mcp/setup/codex\\.ps1 \\| iex`));
 
     const sh = await (await fetch(`${handle.url}/mcp/setup/codex`, { headers })).text();
-    assert.match(sh, new RegExp(`https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp`));
+    assert.match(sh, new RegExp(`https://127\\.0\\.0\\.1:${actualPort}/mcp`));
 
     // Without the proxy header the container-local http origin is kept.
     const plain = await (await fetch(`${handle.url}/mcp/setup`)).text();
-    assert.match(plain, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex \\| sh`));
+    assert.match(plain, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${actualPort}/mcp/setup/codex \\| sh`));
   } finally {
     await handle.close();
   }
 });
 
 test("TDEI_PUBLIC_BASE_URL override wins over proxy headers", async () => {
-  const handle = await serveHttp({}, { port: PROXY_PORT + 1 });
+  const handle = await serveTestHttp({});
   const prev = process.env.TDEI_PUBLIC_BASE_URL;
   process.env.TDEI_PUBLIC_BASE_URL = "https://mcp.example.com";
   try {

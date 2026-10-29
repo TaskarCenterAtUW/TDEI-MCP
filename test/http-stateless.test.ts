@@ -80,11 +80,7 @@ test("validateToken accepts good bearer on probe success", async () => {
   }
 });
 
-import { serveHttp } from "../src/http.js";
-
-// Fixed test port passed via overrides (static imports hoist above any env
-// assignment, so config already evaluated by the time module code runs).
-const TEST_PORT = 18080;
+import { serveTestHttp } from "./helpers/test-http-server.js";
 
 function mcpBody(id: number, method: string, params: unknown = {}) {
   return JSON.stringify({ jsonrpc: "2.0", id, method, params });
@@ -111,7 +107,7 @@ test("http.ts import has no side effects on singletons", async () => {
 });
 
 test("POST /mcp without token when requireBearerAuth=true returns 401 naming tdei_sso_login", async () => {
-  const handle = await serveHttp({ requireBearerAuth: true }, { port: TEST_PORT });
+  const handle = await serveTestHttp({ requireBearerAuth: true });
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(response.status, 401);
@@ -156,7 +152,7 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
 
-  const handle = await serveHttp({ fetchImpl: globalThis.fetch }, { port: TEST_PORT + 3 });
+  const handle = await serveTestHttp({ fetchImpl: globalThis.fetch });
   try {
     const setupOverview = await fetch(`${handle.url}/mcp/setup`);
     assert.equal(setupOverview.status, 200);
@@ -207,7 +203,7 @@ test("POST /mcp with bad bearer returns 401 before creating an MCP server", asyn
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
   try {
-    const handle = await serveHttp({}, { port: TEST_PORT });
+    const handle = await serveTestHttp({});
     try {
       const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
       assert.equal(response.status, 401);
@@ -233,7 +229,7 @@ test("good bearer serves semantic tools and request bearers stay isolated", asyn
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
   try {
-    const handle = await serveHttp({}, { port: TEST_PORT });
+    const handle = await serveTestHttp({});
     try {
       const list = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "good-A");
       assert.equal(list.status, 200);
@@ -274,7 +270,7 @@ test("HTTP MCP tools/call list my project groups returns parsed live array (not 
   }) as typeof fetch;
 
   try {
-    const handle = await serveHttp({}, { port: TEST_PORT + 1 });
+    const handle = await serveTestHttp({});
     try {
       const init = await postMcp(
         `${handle.url}/mcp`,
@@ -330,7 +326,7 @@ test("HTTP server caches token validation probes across repeated requests, suppo
     return sentinelFetch(input as RequestInfo, init);
   }) as typeof fetch;
 
-  const handle = await serveHttp({ fetchImpl: customFetch }, { port: TEST_PORT + 2 });
+  const handle = await serveTestHttp({ fetchImpl: customFetch });
   try {
     const first = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "cached-bearer");
     assert.equal(first.status, 200);

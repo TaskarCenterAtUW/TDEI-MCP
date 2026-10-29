@@ -22,6 +22,12 @@ export interface HttpSemanticServerOptions {
   fetchImpl?: typeof fetch;
   places?: PlaceResolver;
   publicBaseUrl?: string;
+  /**
+   * Bind the loopback SSO callback listener on login/logout (default true).
+   * The Streamable HTTP server already serves /auth/callback on its own
+   * port, so it passes false and SSO never holds a second port.
+   */
+  ssoCallbackListener?: boolean | undefined;
 }
 
 function normalizeCallbackUrlForComplete(input: string, configuredCallbackUrl: string): string {
@@ -86,6 +92,7 @@ export function createHttpSemanticServer(
   );
 
   if (auth) {
+    const bindCallbackListener = options.ssoCallbackListener ?? true;
     const openApiLifecycle = options.openApiMcpClient
       ? new OpenApiToolsLifecycle(
           server,
@@ -116,7 +123,7 @@ export function createHttpSemanticServer(
             };
           }
 
-          const login = await auth.startSsoLogin();
+          const login = await auth.startSsoLogin({ bindCallbackListener });
           void login.completion
             .then(async () => {
               if (openApiLifecycle) {
@@ -238,8 +245,8 @@ export function createHttpSemanticServer(
       async () => {
         try {
           const logout = openApiLifecycle
-            ? await openApiLifecycle.logout()
-            : await auth.logout();
+            ? await openApiLifecycle.logout({ bindCallbackListener })
+            : await auth.logout({ bindCallbackListener });
           void logout.completion.catch(() => undefined);
           return {
             content: [

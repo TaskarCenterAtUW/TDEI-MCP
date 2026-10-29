@@ -6,6 +6,7 @@ import type {
   AuthStatus,
   SsoLoginOptions,
   SsoLoginStart,
+  SsoLogoutOptions,
   SsoLogoutStart,
   TokenResponse,
   ValidateTokenOptions,
@@ -64,7 +65,7 @@ function hashTokenCacheKey(apiUrl: string, token: string): string {
 }
 
 interface PendingLogin extends SsoLoginStart {
-  server: Server;
+  server: Server | undefined;
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
@@ -72,7 +73,7 @@ interface PendingLogin extends SsoLoginStart {
 }
 
 interface PendingLogout extends SsoLogoutStart {
-  server: Server;
+  server: Server | undefined;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }
@@ -131,7 +132,13 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
-    const server = createServer(async (request, response) => {
+    // The stdio transport needs its own loopback listener; an HTTP server
+    // that already serves /auth/callback on its own port opts out so SSO
+    // login never holds a second port (and can never EADDRINUSE against a
+    // parallel process). Completion then arrives via completeSsoLogin().
+    let server: Server | undefined;
+    if (options?.bindCallbackListener ?? true) {
+      const listener = createServer(async (request, response) => {
       const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
       if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
@@ -158,24 +165,26 @@ export class AuthManager {
         response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
         response.end(sanitizeAuthErrorDetail(loginError.message));
       }
-    });
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (error: Error) => {
-          server.off("listening", onListening);
-          reject(error);
-        };
-        const onListening = () => {
-          server.off("error", onError);
-          resolve();
-        };
-        server.once("error", onError);
-        server.once("listening", onListening);
-        server.listen(Number(callbackUrl.port), callbackUrl.hostname);
       });
-    } catch (error) {
-      throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onError = (error: Error) => {
+            listener.off("listening", onListening);
+            reject(error);
+          };
+          const onListening = () => {
+            listener.off("error", onError);
+            resolve();
+          };
+          listener.once("error", onError);
+          listener.once("listening", onListening);
+          listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
+        });
+      } catch (error) {
+        throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      server = listener;
     }
 
     const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
@@ -343,7 +352,7 @@ export class AuthManager {
     }
   }
 
-  async logout(): Promise<SsoLogoutStart> {
+  async logout(options?: SsoLogoutOptions): Promise<SsoLogoutStart> {
     if (this.pendingLogout) return this.publicLogout(this.pendingLogout);
 
     if (this.pendingLogin) {
@@ -362,48 +371,48 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
-    const server = createServer((request, response) => {
-      const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
+    const server: Server | undefined = (options?.bindCallbackListener ?? true)
+      ? await new Promise<Server>((resolve, reject) => {
+        const listener = createServer((request, response) => {
+          const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
-      if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
-        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end("Not found");
-        return;
-      }
+          if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
+            response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+            response.end("Not found");
+            return;
+          }
 
-      const providerError = requestUrl.searchParams.get("error");
-      this.finishPendingLogout();
-      if (providerError) {
-        const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
-        rejectCompletion(error);
-        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end(sanitizeAuthErrorDetail(error.message));
-        return;
-      }
+          const providerError = requestUrl.searchParams.get("error");
+          this.finishPendingLogout();
+          if (providerError) {
+            const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
+            rejectCompletion(error);
+            response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+            response.end(sanitizeAuthErrorDetail(error.message));
+            return;
+          }
 
-      resolveCompletion();
-      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-      response.end("<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>");
-    });
+          resolveCompletion();
+          response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end("<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>");
+        });
 
-    try {
-      await new Promise<void>((resolve, reject) => {
         const onError = (error: Error) => {
-          server.off("listening", onListening);
+          listener.off("listening", onListening);
+          listener.close();
           reject(error);
         };
         const onListening = () => {
-          server.off("error", onError);
-          resolve();
+          listener.off("error", onError);
+          resolve(listener);
         };
-        server.once("error", onError);
-        server.once("listening", onListening);
-        server.listen(Number(callbackUrl.port), callbackUrl.hostname);
-      });
-    } catch (error) {
-      server.close();
-      throw new Error(`Unable to start TDEI SSO logout callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+        listener.once("error", onError);
+        listener.once("listening", onListening);
+        listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
+      }).catch((error: unknown) => {
+        throw new Error(`Unable to start TDEI SSO logout callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      : undefined;
 
     const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
     logoutUrl.searchParams.set("redirect_uri", callbackUrl.toString());
@@ -498,7 +507,7 @@ export class AuthManager {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingLogin = undefined;
-    pending.server.close();
+    pending.server?.close();
   }
 
   private finishPendingLogout(): void {
@@ -506,7 +515,7 @@ export class AuthManager {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingLogout = undefined;
-    pending.server.close();
+    pending.server?.close();
   }
 
   private clearTokens(): void {
