@@ -42,18 +42,18 @@
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",
     "check:stdio": "node --env-file=.env --import tsx scripts/stdio-check.ts",
     "lint": "tsc --noEmit",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
-    "@modelcontextprotocol/client": "^2.3.1",
-    "@modelcontextprotocol/server": "^2.3.1",
-    "zod": "^4.0.0"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^24.13.4",
+    "@types/node": "^26.6.6",
     "husky": "^9.1.7",
-    "tsx": "^4.0.0",
-    "typescript": "^6.0.0"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
