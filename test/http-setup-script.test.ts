@@ -201,6 +201,27 @@ test("status page shows per-client restart steps in clear view", () => {
   assert.match(html, /tdei_sso_login/);
 });
 
+test("status page builder generates install/update/uninstall commands with no manual edits", () => {
+  const html = renderStatusPage("http://192.168.50.11:3000", "/mcp");
+  for (const id of ["tdei-harness", "tdei-os", "tdei-action", "tdei-command", "tdei-hint"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `builder must render #${id}`);
+  }
+  for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"]) {
+    assert.match(html, new RegExp(`<option value="${client}">`), `client dropdown must offer ${client}`);
+  }
+  for (const action of ["install", "update", "uninstall"]) {
+    assert.match(html, new RegExp(`<option value="${action}">`), `command dropdown must offer ${action}`);
+  }
+  assert.match(html, /<option value="sh">/, "os dropdown must offer macOS / Linux");
+  assert.match(html, /<option value="ps1">/, "os dropdown must offer Windows");
+  // Default (no-JS) command is a working installer, and the live builder
+  // covers every combination without the user editing the command text.
+  assert.match(html, /curl -fsSL http:\/\/192\.168\.50\.11:3000\/mcp\/setup\/codex \| sh/);
+  assert.match(html, /TDEI_SETUP_BASE/);
+  assert.match(html, /action \+ '\/' \+ client|action === 'install' \? client/);
+  assert.match(html, /\.ps1 \| iex/);
+});
+
 test("setup endpoints serve sh + ps1 installers and reject unknown clients", async () => {
   const handle = await serveTestHttp({});
   const escapedOrigin = handle.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
