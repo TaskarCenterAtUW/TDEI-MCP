@@ -41,6 +41,7 @@
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",
     "check:stdio": "node --env-file=.env --import tsx scripts/stdio-check.ts",
+    "test:smoke": "node --import tsx scripts/smoke-test.ts",
     "lint": "tsc --noEmit",
     "prepare": "husky || true"
   },
