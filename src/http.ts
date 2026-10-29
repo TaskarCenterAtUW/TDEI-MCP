@@ -88,6 +88,32 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf-8");
 }
 
+/**
+ * Public origin clients should use for this server (status page, setup
+ * catalogue, installer scripts). The container usually receives plain HTTP
+ * from a TLS-terminating proxy (e.g. Azure Container Apps), so the scheme
+ * cannot be assumed. Precedence:
+ *   1. `TDEI_PUBLIC_BASE_URL` env override (canonical public origin).
+ *   2. `X-Forwarded-Proto` request header set by the proxy.
+ *   3. Plain `http://` (direct local requests).
+ */
+export function resolvePublicBaseUrl(input: {
+  hostHeader?: string | undefined;
+  forwardedProto?: string | string[] | undefined;
+  envOverride?: string | undefined;
+  fallbackHost: string;
+}): string {
+  const override = (input.envOverride ?? "").trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(override)) return override;
+  const rawProto = Array.isArray(input.forwardedProto)
+    ? (input.forwardedProto[0] ?? "")
+    : (input.forwardedProto ?? "");
+  const proto = rawProto.split(",")[0]?.trim().toLowerCase();
+  const scheme = proto === "https" || proto === "http" ? proto : "http";
+  const host = (input.hostHeader ?? "").trim() || input.fallbackHost;
+  return `${scheme}://${host}`;
+}
+
 function toWebRequest(request: IncomingMessage, bodyText: string, host: string): Request {
   const url = new URL(request.url ?? "/", `http://${host}`);
   const headers = new Headers();
@@ -264,7 +290,12 @@ export async function serveHttp(
     void (async () => {
       try {
         const reqHost = request.headers.host ?? `${host}:${port}`;
-        const publicBaseUrl = `http://${reqHost}`;
+        const publicBaseUrl = resolvePublicBaseUrl({
+          hostHeader: reqHost,
+          forwardedProto: request.headers["x-forwarded-proto"],
+          envOverride: process.env.TDEI_PUBLIC_BASE_URL,
+          fallbackHost: `${host}:${port}`,
+        });
         const url = new URL(request.url ?? "/", publicBaseUrl);
 
         if (request.method === "GET" && url.pathname === "/") {

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { buildServerEntry, formatManual, readClaudeEntry, readCodexEntry, writeClaudeEntry, writeCodexEntry } from "../src/init/clients.js";
+import { buildServerEntry, formatManual, readClaudeEntry, readCodexEntry, writeClaudeEntry, writeClaudeRemoteEntry, writeCodexEntry } from "../src/init/clients.js";
 import { findFreePort } from "../src/init/ports.js";
 
 const ENV = { TDEI_API_URL: "https://api-dev.tdei.us", TDEI_SSO_CALLBACK_URL: "http://127.0.0.1:8765/callback" };
@@ -45,6 +45,18 @@ test("claude writer upserts mcpServers.tdei, invalid JSON throws", () => {
   assert.equal(JSON.parse(out).mcpServers.tdei.command, "/usr/bin/node");
   assert.equal(readClaudeEntry(out).env.TDEI_API_URL, "https://api-dev.tdei.us");
   assert.throws(() => writeClaudeEntry("{oops", entry, ENV), /not valid JSON/);
+});
+
+test("claude remote writer registers a stdio mcp-remote bridge, not a remote entry", () => {
+  const http = JSON.parse(writeClaudeRemoteEntry("", "http://192.168.50.11:3000/mcp")).mcpServers.tdei;
+  assert.equal(http.command, "npx");
+  assert.deepEqual(http.args, ["-y", "mcp-remote", "http://192.168.50.11:3000/mcp", "--allow-http"]);
+  assert.equal(http.type, undefined);
+  assert.equal(http.url, undefined);
+  assert.equal(readClaudeEntry(JSON.stringify({ mcpServers: { tdei: http } })).found, true);
+
+  const https = JSON.parse(writeClaudeRemoteEntry("", "https://tdei.example.org/mcp")).mcpServers.tdei;
+  assert.deepEqual(https.args, ["-y", "mcp-remote", "https://tdei.example.org/mcp"]);
 });
 
 test("formatManual prints command, args, env", () => {

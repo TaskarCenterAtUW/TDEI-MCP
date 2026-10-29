@@ -41,7 +41,8 @@
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",
     "check:stdio": "node --env-file=.env --import tsx scripts/stdio-check.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepare": "husky"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.4",
+    "husky": "^9.1.7",
     "tsx": "^4.0.0",
     "typescript": "^6.0.0"
   }

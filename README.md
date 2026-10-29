@@ -330,6 +330,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_HTTP_HOST` | No | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides) |
 | `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
 | `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
+| `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 

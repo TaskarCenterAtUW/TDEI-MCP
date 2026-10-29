@@ -67,6 +67,16 @@ function readJsonOrEmpty(filePath) {
   }
 }
 
+// Claude Desktop's claude_desktop_config.json schema accepts stdio servers
+// only (command/args/env). A remote { type: "http", url } entry is dropped at
+// launch with "Skipped invalid MCP server config entries", so bridge to the
+// Streamable HTTP endpoint through mcp-remote instead.
+function claudeDesktopStdioEntry(endpoint) {
+  const args = ["-y", "mcp-remote", endpoint];
+  if (new URL(endpoint).protocol === "http:") args.push("--allow-http");
+  return { command: "npx", args };
+}
+
 function configureCodex() {
   const filePath = path.join(home, ".codex", "config.toml");
   ensureDir(filePath);
@@ -135,10 +145,7 @@ function configureClaudeDesktop() {
     typeof root.mcpServers === "object" && root.mcpServers !== null
       ? root.mcpServers
       : {};
-  root.mcpServers.tdei = {
-    type: "http",
-    url: mcpUrl,
-  };
+  root.mcpServers.tdei = claudeDesktopStdioEntry(mcpUrl);
   fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
   return filePath;
 }
@@ -175,8 +182,23 @@ else {
   process.exit(1);
 }
 
+const restartByClient = {
+  codex: "Quit and reopen Codex, then start a new chat (run /mcp to verify tdei appears).",
+  opencode: "Quit and reopen OpenCode, then start a new session so it reloads opencode.json.",
+  "claude-cli": "Exit Claude Code and start a new session so it picks up ~/.claude.json.",
+  "claude-desktop": "Fully quit Claude Desktop (Cmd+Q on macOS / File > Exit on Windows - closing the window is not enough), reopen it, then start a new chat.",
+  vscode: "Reload VS Code (Cmd/Ctrl+Shift+P -> Developer: Reload Window) or quit and reopen it, then start a new chat.",
+};
+
 console.log(\`[tdei-mcp] Configured \${client} in \${writtenPath}\`);
 console.log(\`[tdei-mcp] Endpoint: \${mcpUrl} (no hardcoded token; authenticate via tdei_sso_login tool call)\`);
+if (client === "claude-desktop") {
+  console.log("[tdei-mcp] Claude Desktop accepts stdio servers only; registered a local npx mcp-remote bridge.");
+}
+console.log("");
+console.log("[tdei-mcp] === RESTART REQUIRED ===");
+console.log(\`[tdei-mcp] \${restartByClient[client] || "Restart your MCP client, then start a new chat."}\`);
+console.log("[tdei-mcp] Then ask your agent to log in to TDEI (it calls tdei_sso_login).");
 
 const parsedMcp = new URL(mcpUrl);
 const isLoopbackServer =
@@ -184,7 +206,7 @@ const isLoopbackServer =
   parsedMcp.hostname === "localhost" ||
   parsedMcp.hostname === "::1";
 
-if (!isLoopbackServer) {
+if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
   const relayDir = path.join(home, ".tdei-mcp");
   fs.mkdirSync(relayDir, { recursive: true });
   const relayScript = path.join(relayDir, "sso-callback-relay.cjs");
@@ -271,7 +293,18 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp"): string 
     "  # VS Code (%APPDATA%\\Code\\User\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/vscode.ps1 | iex`,
     "",
-    "After running the setup script, start your MCP client and ask it to log in to TDEI (calls tdei_sso_login).",
+    "=== RESTART REQUIRED (do this right after the installer) ===",
+    "The client only picks up the new tdei entry on a full restart. Closing a",
+    "chat window is not enough — restart the app, then start a NEW chat/session:",
+    "",
+    "  # Codex:            quit and reopen Codex, then new chat (run /mcp to verify tdei).",
+    "  # OpenCode:         quit and reopen OpenCode, then start a new session.",
+    "  # Claude Code CLI:  exit Claude Code and start a new session (reloads ~/.claude.json).",
+    "  # Claude Desktop:   fully quit with Cmd+Q (macOS) or File > Exit (Windows),",
+    "  #                   reopen it, then start a new chat.",
+    "  # VS Code:          Cmd/Ctrl+Shift+P -> Developer: Reload Window (or quit + reopen).",
+    "",
+    "Then ask your agent to log in to TDEI (it calls tdei_sso_login).",
     "",
   ].join("\n");
 }

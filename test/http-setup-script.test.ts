@@ -14,7 +14,12 @@ import {
   renderSetupOverview,
   type SetupClientTarget,
 } from "../src/http-setup-script.js";
-import { serveHttp } from "../src/http.js";
+import { renderStatusPage } from "../src/http-status-page.js";
+import { resolvePublicBaseUrl, serveHttp } from "../src/http.js";
+
+// Installer runs below spawn a detached SSO callback relay for remote servers;
+// suppress it in tests so no relay process outlives the suite and holds port 8765.
+process.env.TDEI_NO_RELAY = "1";
 
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode"];
 
@@ -56,6 +61,10 @@ test("overview advertises sh (mac/ubuntu) and ps1 (windows) installers", () => {
   const custom = renderSetupOverview("http://h:1", "/custom");
   assert.match(custom, /\/custom\/setup\/codex \| sh/);
   assert.match(custom, /\/custom\/setup\/codex\.ps1 \| iex/);
+  // Restart instructions must be in clear view, not buried.
+  assert.match(overview, /RESTART REQUIRED/);
+  assert.match(overview, /Claude Desktop:.*Cmd\+Q/);
+  assert.match(overview, /tdei_sso_login/);
 });
 
 test("ps1 installer carries defaults and cleans up its temp file", () => {
@@ -108,13 +117,84 @@ test("claude-desktop program targets the Desktop config, not the CLI file", () =
           ? join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
           : join(home, ".config", "Claude", "claude_desktop_config.json");
     const doc = JSON.parse(readFileSync(expected, "utf-8")) as {
-      mcpServers: { tdei: { type: string; url: string } };
+      mcpServers: { tdei: { command: string; args: string[]; type?: string; url?: string } };
     };
-    assert.equal(doc.mcpServers.tdei.url, "http://192.168.50.11:8080/mcp");
-    assert.equal(doc.mcpServers.tdei.type, "http");
+    // Claude Desktop rejects remote ({type:"http",url}) entries outright, so the
+    // installer must register a stdio mcp-remote bridge instead.
+    assert.equal(doc.mcpServers.tdei.command, "npx");
+    assert.deepEqual(doc.mcpServers.tdei.args, [
+      "-y",
+      "mcp-remote",
+      "http://192.168.50.11:8080/mcp",
+      "--allow-http",
+    ]);
+    assert.equal(doc.mcpServers.tdei.type, undefined);
+    assert.equal(doc.mcpServers.tdei.url, undefined);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("claude-desktop bridge omits --allow-http for https endpoints", () => {
+  const ps = renderClientSetupPowershell("claude-desktop", "https://tdei.example.org", 8765);
+  const js = `${ps.split("$setupJs = @'\n")[1]!.split("\n'@")[0]!}\n`;
+  const home = mkdtempSync(join(tmpdir(), "tdei-desktop-https-"));
+  try {
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, js);
+    execFileSync(
+      process.execPath,
+      [tmp, "claude-desktop", "https://tdei.example.org/mcp", "https://tdei.example.org/auth/callback", "8765"],
+      { env: { ...process.env, HOME: home } },
+    );
+    const expected =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+          : join(home, ".config", "Claude", "claude_desktop_config.json");
+    const doc = JSON.parse(readFileSync(expected, "utf-8")) as {
+      mcpServers: { tdei: { command: string; args: string[] } };
+    };
+    assert.deepEqual(doc.mcpServers.tdei.args, ["-y", "mcp-remote", "https://tdei.example.org/mcp"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("installer stdout prints a clear restart step for every client", () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-restart-"));
+  try {
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, getClientSetupJs());
+    const expected: Record<SetupClientTarget, RegExp> = {
+      codex: /Quit and reopen Codex/,
+      opencode: /Quit and reopen OpenCode/,
+      "claude-cli": /Exit Claude Code/,
+      "claude-desktop": /Fully quit Claude Desktop.*Cmd\+Q/,
+      vscode: /Reload VS Code|Reload Window/,
+    };
+    for (const client of CLIENTS) {
+      const out = execFileSync(
+        process.execPath,
+        [tmp, client, "https://tdei.example.org/mcp", "https://tdei.example.org/auth/callback", "8765"],
+        { env: { ...process.env, HOME: home } },
+      ).toString();
+      assert.match(out, /RESTART REQUIRED/, `${client} must print a restart banner`);
+      assert.match(out, expected[client], `${client} must print its own restart step`);
+      assert.match(out, /tdei_sso_login/);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("status page shows per-client restart steps in clear view", () => {
+  const html = renderStatusPage("http://192.168.50.11:3000", "/mcp");
+  assert.match(html, /Restart required/);
+  assert.match(html, /Cmd\+Q/);
+  assert.match(html, /Reload Window/);
+  assert.match(html, /tdei_sso_login/);
 });
 
 const SETUP_PORT = 18090;
@@ -154,6 +234,83 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     assert.equal(legacy.status, 200);
     assert.match(await legacy.text(), /\.claude\.json/);
   } finally {
+    await handle.close();
+  }
+});
+
+test("resolvePublicBaseUrl prefers env override, then X-Forwarded-Proto", () => {
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h:1", fallbackHost: "f:2" }),
+    "http://h:1",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https", fallbackHost: "f:2" }),
+    "https://h",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: ["https", "http"], fallbackHost: "f:2" }),
+    "https://h",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https, http", fallbackHost: "f:2" }),
+    "https://h",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "gopher", fallbackHost: "f:2" }),
+    "http://h",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ fallbackHost: "f:2" }),
+    "http://f:2",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "http", envOverride: "https://mcp.example.com/", fallbackHost: "f:2" }),
+    "https://mcp.example.com",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https", envOverride: "ftp://mcp.example.com", fallbackHost: "f:2" }),
+    "https://h",
+  );
+});
+
+const PROXY_PORT = 18091;
+
+test("status page and setup catalogue advertise https behind a TLS proxy", async () => {
+  const handle = await serveHttp({}, { port: PROXY_PORT });
+  try {
+    const headers = { "x-forwarded-proto": "https" };
+    const html = await (await fetch(`${handle.url}/`, { headers })).text();
+    assert.match(html, new RegExp(`https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp`));
+    assert.doesNotMatch(html, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${PROXY_PORT}`));
+
+    const overview = await (await fetch(`${handle.url}/mcp/setup`, { headers })).text();
+    assert.match(overview, new RegExp(`curl -fsSL https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex \\| sh`));
+    assert.match(overview, new RegExp(`irm https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex\\.ps1 \\| iex`));
+
+    const sh = await (await fetch(`${handle.url}/mcp/setup/codex`, { headers })).text();
+    assert.match(sh, new RegExp(`https://127\\.0\\.0\\.1:${PROXY_PORT}/mcp`));
+
+    // Without the proxy header the container-local http origin is kept.
+    const plain = await (await fetch(`${handle.url}/mcp/setup`)).text();
+    assert.match(plain, new RegExp(`curl -fsSL http://127\\.0\\.0\\.1:${PROXY_PORT}/mcp/setup/codex \\| sh`));
+  } finally {
+    await handle.close();
+  }
+});
+
+test("TDEI_PUBLIC_BASE_URL override wins over proxy headers", async () => {
+  const handle = await serveHttp({}, { port: PROXY_PORT + 1 });
+  const prev = process.env.TDEI_PUBLIC_BASE_URL;
+  process.env.TDEI_PUBLIC_BASE_URL = "https://mcp.example.com";
+  try {
+    const headers = { "x-forwarded-proto": "http" };
+    const overview = await (await fetch(`${handle.url}/mcp/setup`, { headers })).text();
+    assert.match(overview, /curl -fsSL https:\/\/mcp\.example\.com\/mcp\/setup\/codex \| sh/);
+    const html = await (await fetch(`${handle.url}/`, { headers })).text();
+    assert.match(html, /https:\/\/mcp\.example\.com\/mcp/);
+  } finally {
+    if (prev === undefined) delete process.env.TDEI_PUBLIC_BASE_URL;
+    else process.env.TDEI_PUBLIC_BASE_URL = prev;
     await handle.close();
   }
 });
