@@ -206,7 +206,7 @@ const isLoopbackServer =
   parsedMcp.hostname === "localhost" ||
   parsedMcp.hostname === "::1";
 
-if (!isLoopbackServer) {
+if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
   const relayDir = path.join(home, ".tdei-mcp");
   fs.mkdirSync(relayDir, { recursive: true });
   const relayScript = path.join(relayDir, "sso-callback-relay.cjs");

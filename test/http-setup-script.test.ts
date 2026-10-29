@@ -17,6 +17,10 @@ import {
 import { renderStatusPage } from "../src/http-status-page.js";
 import { resolvePublicBaseUrl, serveHttp } from "../src/http.js";
 
+// Installer runs below spawn a detached SSO callback relay for remote servers;
+// suppress it in tests so no relay process outlives the suite and holds port 8765.
+process.env.TDEI_NO_RELAY = "1";
+
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode"];
 
 test("sh and ps1 installers embed the identical node program", () => {
@@ -295,7 +299,7 @@ test("status page and setup catalogue advertise https behind a TLS proxy", async
 });
 
 test("TDEI_PUBLIC_BASE_URL override wins over proxy headers", async () => {
-  const handle = await serveHttp({}, { port: PROXY_PORT });
+  const handle = await serveHttp({}, { port: PROXY_PORT + 1 });
   const prev = process.env.TDEI_PUBLIC_BASE_URL;
   process.env.TDEI_PUBLIC_BASE_URL = "https://mcp.example.com";
   try {
