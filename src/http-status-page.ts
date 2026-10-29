@@ -34,6 +34,7 @@ function escapeHtml(value: string): string {
 export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp"): string {
   const urls = statusPageUrls(publicBaseUrl, basePath);
   const e = escapeHtml;
+  const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -55,10 +56,19 @@ button { cursor: pointer; }
 .muted { opacity: 0.75; font-size: 13px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .cmd { position: relative; }
-.cmd pre { padding-right: 72px; margin: 0; }
-.copy-btn { position: absolute; top: 8px; right: 8px; font-size: 12px; line-height: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #8886; background: #8882; color: inherit; }
-.copy-btn:hover { background: #8884; }
-.copy-btn.inline { position: static; margin-left: 8px; padding: 3px 8px; vertical-align: middle; }
+.cmd pre { padding-right: 52px; margin: 0; }
+.copy-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px; border: 1px solid #8886; background: #fff; color: #606060; opacity: 0; transition: opacity 0.15s ease-in-out; }
+@media (prefers-color-scheme: dark) { .copy-btn { background: #28282e; color: #b8b8c0; border-color: #555; } }
+.cmd:hover .copy-btn, .cmd:focus-within .copy-btn, .copy-btn:focus-visible { opacity: 1; }
+@media (hover: none) { .copy-btn { opacity: 1; } }
+.copy-btn:hover { background: #ececee; }
+@media (prefers-color-scheme: dark) { .copy-btn:hover { background: #3a3a42; } }
+.copy-btn svg { width: 16px; height: 16px; display: block; }
+.copy-btn .icon-check { display: none; }
+.copy-btn.copied { opacity: 1; color: #22a06b; }
+.copy-btn.copied .icon-check { display: block; }
+.copy-btn.copied .icon-copy { display: none; }
+.copy-btn.inline { position: static; margin-left: 8px; width: 28px; height: 28px; vertical-align: middle; opacity: 1; }
 .detail-cell code { word-break: break-all; }
 </style>
 </head>
@@ -79,14 +89,14 @@ button { cursor: pointer; }
 <h2>Install on a client machine</h2>
 <p>No tokens are written to disk. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
 <div class="grid">
-<div><h3>Codex</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy Codex install command">Copy</button><pre>curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div></div>
-<div><h3>OpenCode</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy OpenCode install command">Copy</button><pre>curl -fsSL ${e(urls.setupBase)}/opencode | sh</pre></div></div>
-<div><h3>Claude Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy Claude Code install command">Copy</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-cli | sh</pre></div></div>
-<div><h3>Claude Desktop</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy Claude Desktop install command">Copy</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-desktop | sh</pre></div></div>
-<div><h3>VS Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy VS Code install command">Copy</button><pre>curl -fsSL ${e(urls.setupBase)}/vscode | sh</pre></div></div>
+<div><h3>Codex</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Codex install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div></div>
+<div><h3>OpenCode</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy OpenCode install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/opencode | sh</pre></div></div>
+<div><h3>Claude Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-cli | sh</pre></div></div>
+<div><h3>Claude Desktop</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Desktop install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-desktop | sh</pre></div></div>
+<div><h3>VS Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy VS Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/vscode | sh</pre></div></div>
 </div>
 <h3>Windows PowerShell</h3>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy aria-label="Copy Windows PowerShell install command">Copy</button><pre>Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${e(urls.setupBase)}/codex.ps1 | iex</pre></div>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Windows PowerShell install command">${copyIcons}</button><pre>Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${e(urls.setupBase)}/codex.ps1 | iex</pre></div>
 <p class="muted">Replace <code>codex</code> with <code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, or <code>vscode</code>. Full catalogue: <code>${e(urls.setupBase)}</code></p>
 <h3>Restart required — do this right after the installer</h3>
 <p>The client only picks up the new <code>tdei</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
@@ -102,10 +112,10 @@ button { cursor: pointer; }
 <h3>Details</h3>
 <table>
 <tbody>
-<tr><th>MCP endpoint</th><td class="detail-cell" data-copy-wrap><code>${e(urls.mcpUrl)}</code><button type="button" class="copy-btn inline" data-copy aria-label="Copy MCP endpoint">Copy</button></td></tr>
-<tr><th>SSO callback (this server)</th><td class="detail-cell" data-copy-wrap><code>${e(urls.callbackUrl)}</code><button type="button" class="copy-btn inline" data-copy aria-label="Copy SSO callback URL">Copy</button></td></tr>
-<tr><th>Health JSON</th><td class="detail-cell" data-copy-wrap><code>${e(urls.healthUrl)}</code><button type="button" class="copy-btn inline" data-copy aria-label="Copy health URL">Copy</button></td></tr>
-<tr><th>Setup catalogue</th><td class="detail-cell" data-copy-wrap><code>${e(urls.setupBase)}</code><button type="button" class="copy-btn inline" data-copy aria-label="Copy setup catalogue URL">Copy</button></td></tr>
+<tr><th>MCP endpoint</th><td class="detail-cell" data-copy-wrap><code>${e(urls.mcpUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy MCP endpoint">${copyIcons}</button></td></tr>
+<tr><th>SSO callback (this server)</th><td class="detail-cell" data-copy-wrap><code>${e(urls.callbackUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy SSO callback URL">${copyIcons}</button></td></tr>
+<tr><th>Health JSON</th><td class="detail-cell" data-copy-wrap><code>${e(urls.healthUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy health URL">${copyIcons}</button></td></tr>
+<tr><th>Setup catalogue</th><td class="detail-cell" data-copy-wrap><code>${e(urls.setupBase)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy setup catalogue URL">${copyIcons}</button></td></tr>
 </tbody>
 </table>
 </section>
@@ -147,12 +157,16 @@ async function copyTextFromButton(btn) {
       document.execCommand('copy');
       ta.remove();
     }
-    const prev = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = prev; }, 1500);
+    const prevLabel = btn.getAttribute('aria-label') || 'Copy';
+    btn.classList.add('copied');
+    btn.setAttribute('aria-label', 'Copied');
+    btn.title = 'Copied';
+    setTimeout(() => { btn.classList.remove('copied'); btn.setAttribute('aria-label', prevLabel); btn.title = 'Copy'; }, 1500);
   } catch (err) {
-    btn.textContent = 'Failed';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    const prevLabel = btn.getAttribute('aria-label') || 'Copy';
+    btn.setAttribute('aria-label', 'Failed to copy');
+    btn.title = 'Failed';
+    setTimeout(() => { btn.setAttribute('aria-label', prevLabel); btn.title = 'Copy'; }, 1500);
   }
 }
 document.querySelectorAll('[data-copy]').forEach((btn) => {
