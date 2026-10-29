@@ -162,8 +162,20 @@ export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Reco
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", { ...entry, env }, pathForError);
 }
 
+/**
+ * Claude Desktop's `claude_desktop_config.json` only accepts stdio servers
+ * (`command`/`args`/`env`); a remote `{ type: "http", url }` entry is dropped at
+ * launch ("Skipped invalid MCP server config entries"). Bridge to the
+ * Streamable HTTP endpoint through `mcp-remote` instead.
+ */
+export function claudeDesktopStdioEntry(remoteUrl: string): { command: string; args: string[] } {
+  const args = ["-y", "mcp-remote", remoteUrl];
+  if (new URL(remoteUrl).protocol === "http:") args.push("--allow-http");
+  return { command: "npx", args };
+}
+
 export function writeClaudeRemoteEntry(jsonText: string, remoteUrl: string, pathForError = "claude_desktop_config.json"): string {
-  return upsertJsonEntry(jsonText, "mcpServers", "tdei", { type: "http", url: remoteUrl }, pathForError);
+  return upsertJsonEntry(jsonText, "mcpServers", "tdei", claudeDesktopStdioEntry(remoteUrl), pathForError);
 }
 
 export function readClaudeEntry(jsonText: string): ReturnType<typeof readJsonEntry> {
