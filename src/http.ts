@@ -6,7 +6,7 @@ import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
-import { normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview } from "./http-setup-script.js";
+import { isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
@@ -359,17 +359,26 @@ export async function serveHttp(
           const rawClient = setupMatch.replace(/\/+$/, "").toLowerCase();
           const wantsPowershell = rawClient.endsWith(".ps1");
           const slug = wantsPowershell ? rawClient.slice(0, -".ps1".length) : rawClient;
-          const client = normalizeSetupClientTarget(slug);
+          const parts = slug.split("/").filter((part) => part.length > 0);
+          let action: SetupScriptAction = "install";
+          let clientSlug: string | undefined;
+          if (parts.length === 1) {
+            clientSlug = parts[0];
+          } else if (parts.length === 2 && parts[0] !== undefined && isSetupScriptAction(parts[0])) {
+            action = parts[0];
+            clientSlug = parts[1];
+          }
+          const client = clientSlug !== undefined ? normalizeSetupClientTarget(clientSlug) : undefined;
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode (append .ps1 for the Windows PowerShell installer).`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall or uninstall/ to remove the tdei entry, e.g. update/codex.`,
             });
             return;
           }
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort);
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action);
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",
