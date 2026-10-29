@@ -9,7 +9,8 @@
   },
   "bin": {
     "tdei-mcp": "dist/index.js",
-    "tdei-mcp-init": "dist/init.js"
+    "tdei-mcp-init": "dist/init.js",
+    "tdei-mcp-multi": "dist/multi-serve.js"
   },
   "exports": {
     ".": {
@@ -27,15 +28,19 @@
     "README.md",
     ".env.example",
     "tdei.config.schema.json",
-    "tdei.config.example.json"
+    "tdei.config.example.json",
+    "mcps.schema.json",
+    "mcps.example.json"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:multi": "tsx src/multi-serve.ts",
     "build": "node scripts/clean-dist.mjs && tsc",
     "start": "node dist/index.js",
+    "start:multi": "node dist/multi-serve.js",
     "prepublishOnly": "npm run build",
     "test": "node --import tsx --test test/**/*.test.ts",
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",

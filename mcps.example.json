@@ -1,0 +1,15 @@
+{
+  "$schema": "./mcps.schema.json",
+  "host": "127.0.0.1",
+  "basePort": 3000,
+  "servers": [
+    {
+      "name": "tdei-core",
+      "apiUrl": "https://api-dev.tdei.us"
+    },
+    {
+      "name": "tdei-workspace",
+      "apiUrl": "https://api-stage.tdei.us"
+    }
+  ]
+}
