@@ -28,6 +28,12 @@ export interface SsoLoginStart {
 
 export interface SsoLoginOptions {
   state?: string | undefined;
+  /**
+   * Bind the loopback SSO callback listener (default true). HTTP servers
+   * that already serve /auth/callback on their own port pass false so SSO
+   * login never grabs a second port.
+   */
+  bindCallbackListener?: boolean | undefined;
 }
 
 export interface ValidateTokenOptions {
@@ -40,4 +46,12 @@ export interface SsoLogoutStart {
   logoutUrl: string;
   callbackUrl: string;
   completion: Promise<void>;
+}
+
+export interface SsoLogoutOptions {
+  /**
+   * Bind the loopback SSO callback listener (default true). See
+   * SsoLoginOptions.bindCallbackListener.
+   */
+  bindCallbackListener?: boolean | undefined;
 }

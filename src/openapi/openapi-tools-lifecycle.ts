@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 
 import type { AuthManager } from "../auth/auth-manager.js";
-import type { SsoLogoutStart } from "../auth/types.js";
+import type { SsoLogoutOptions, SsoLogoutStart } from "../auth/types.js";
 import type { OpenApiMcpClient } from "../openapi/openapi-mcp-client.js";
 import type { registerTdeiOpenApiTools } from "../tdei/register-openapi-tools.js";
 import {
@@ -267,10 +267,10 @@ export class OpenApiToolsLifecycle {
     }
   }
 
-  logout(): Promise<SsoLogoutStart> {
+  logout(options?: SsoLogoutOptions): Promise<SsoLogoutStart> {
     return this.serialize(async () => {
       try {
-        return await this.authSession.logout();
+        return await this.authSession.logout(options);
       } finally {
         await this.openApiSession.close();
         this.state = "unloaded";

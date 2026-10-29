@@ -14,6 +14,13 @@ import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 export interface HttpServeOptions {
   fetchImpl?: typeof fetch;
   requireBearerAuth?: boolean;
+  /**
+   * Bind the loopback SSO callback listener on tdei_sso_login/logout
+   * (default true). Tests pass false: the server already serves
+   * /auth/callback on its own (ephemeral) port, so SSO never holds a
+   * second fixed port and parallel test processes cannot EADDRINUSE.
+   */
+  ssoCallbackListener?: boolean | undefined;
 }
 
 export interface HttpServeOverrides {
@@ -26,6 +33,7 @@ interface ResolvedHttpOptions {
   places: PlaceResolver;
   tokenValidationCache: Map<string, number>;
   requireBearerAuth: boolean;
+  ssoCallbackListener: boolean;
   sessionAuth: AuthManager;
   sessionOpenApiClient: OpenApiMcpClient;
 }
@@ -210,6 +218,7 @@ async function handleMcpRequest(
       apiUrl: getConfig().apiUrl,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
+      ssoCallbackListener: options.ssoCallbackListener,
     });
   } else if (options.requireBearerAuth) {
     unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
@@ -222,6 +231,7 @@ async function handleMcpRequest(
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       publicBaseUrl,
+      ssoCallbackListener: options.ssoCallbackListener,
     });
   }
 
@@ -278,6 +288,7 @@ export async function serveHttp(
     places: createConfiguredPlaceResolver(httpConfig, options.fetchImpl),
     tokenValidationCache: new Map<string, number>(),
     requireBearerAuth: options.requireBearerAuth ?? false,
+    ssoCallbackListener: options.ssoCallbackListener ?? true,
     sessionAuth,
     sessionOpenApiClient,
   };
