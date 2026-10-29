@@ -235,10 +235,26 @@ macOS / Ubuntu (needs `sh` + `node`):
     curl -fsSL http://127.0.0.1:3000/mcp/setup/claude-cli | sh     # Claude Code CLI (~/.claude.json)
     curl -fsSL http://127.0.0.1:3000/mcp/setup/claude-desktop | sh # Claude Desktop (claude_desktop_config.json)
     curl -fsSL http://127.0.0.1:3000/mcp/setup/vscode | sh         # VS Code (User/mcp.json)
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/cursor | sh         # Cursor (~/.cursor/mcp.json)
 
 Windows (PowerShell 5.1+ with `node` on PATH — same targets, `.ps1` suffix):
 
     Set-ExecutionPolicy Bypass -Scope Process -Force; irm http://127.0.0.1:3000/mcp/setup/codex.ps1 | iex
+
+Update / reinstall (MCP broken, e.g. after the server moved — safe to
+re-run, replaces only the `tdei` entry, then restart the app and start a new
+chat):
+
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/update/codex | sh   # swap in your client; .ps1 on Windows
+
+Uninstall (removes only the `tdei` entry, keeps every other entry):
+
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/uninstall/codex | sh
+
+Fix-it flow for a colleague: 1) run the update command, 2) fully restart the
+app (Desktop: Cmd+Q / File > Exit — closing the window is not enough),
+3) start a NEW chat and log in again via `tdei_sso_login`. Still broken?
+Uninstall, restart, reinstall.
 
 After running a script, start the MCP client and ask it to log in to TDEI
 (calls `tdei_sso_login`). When the server address is not loopback, the script

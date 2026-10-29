@@ -94,10 +94,18 @@ button { cursor: pointer; }
 <div><h3>Claude Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-cli | sh</pre></div></div>
 <div><h3>Claude Desktop</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Desktop install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-desktop | sh</pre></div></div>
 <div><h3>VS Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy VS Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/vscode | sh</pre></div></div>
+<div><h3>Cursor</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Cursor install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/cursor | sh</pre></div></div>
 </div>
+<h3>Update / reinstall (fixes most issues)</h3>
+<p>MCP stopped working (e.g. the server moved)? Re-run the update command for your client, then restart the app and start a new chat. Safe to re-run — it replaces only the <code>tdei</code> entry.</p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy update command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/update/codex | sh</pre></div>
+<p class="muted">Replace <code>update/codex</code> with <code>update/&lt;your-client&gt;</code> (<code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, <code>vscode</code>, <code>cursor</code>). Windows: <code>irm ${e(urls.setupBase)}/update/codex.ps1 | iex</code>. Still broken? Uninstall, restart, then reinstall.</p>
+<h3>Uninstall</h3>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy uninstall command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/uninstall/codex | sh</pre></div>
+<p class="muted">Removes only the <code>tdei</code> entry — every other MCP server entry is kept. Same client swap and <code>.ps1</code> rule as above.</p>
 <h3>Windows PowerShell</h3>
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Windows PowerShell install command">${copyIcons}</button><pre>Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${e(urls.setupBase)}/codex.ps1 | iex</pre></div>
-<p class="muted">Replace <code>codex</code> with <code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, or <code>vscode</code>. Full catalogue: <code>${e(urls.setupBase)}</code></p>
+<p class="muted">Replace <code>codex</code> with <code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, <code>vscode</code>, or <code>cursor</code>. Full catalogue: <code>${e(urls.setupBase)}</code></p>
 <h3>Restart required — do this right after the installer</h3>
 <p>The client only picks up the new <code>tdei</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
 <table>
@@ -107,6 +115,7 @@ button { cursor: pointer; }
 <tr><th>Claude Code</th><td>Exit Claude Code and start a new session (reloads <code>~/.claude.json</code>).</td></tr>
 <tr><th>Claude Desktop</th><td>Fully quit with <code>Cmd+Q</code> (macOS) or <code>File &gt; Exit</code> (Windows), reopen it, then start a new chat.</td></tr>
 <tr><th>VS Code</th><td><code>Cmd/Ctrl+Shift+P</code> &rarr; <code>Developer: Reload Window</code> (or quit + reopen).</td></tr>
+<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code>tdei</code>).</td></tr>
 </tbody>
 </table>
 <h3>Details</h3>
@@ -124,9 +133,10 @@ button { cursor: pointer; }
 <h2>Installation readme (short)</h2>
 <ol>
 <li>Run one installer above on the <em>client</em> machine (needs <code>sh</code> + <code>node 22+</code>).</li>
-<li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>.</li>
+<li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>; Cursor — quit + reopen.</li>
 <li>Ask the agent to log in: it calls <code>tdei_sso_login</code> and gives you a browser URL.</li>
 <li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>).</li>
+<li>MCP broken later (server moved, entry stale)? Re-run the installer as an <em>update</em> (<code>curl -fsSL ${e(urls.setupBase)}/update/&lt;client&gt; | sh</code>), restart the app, start a new chat. To remove TDEI instead: <code>curl -fsSL ${e(urls.setupBase)}/uninstall/&lt;client&gt; | sh</code>.</li>
 </ol>
 <p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo (quickstart via <code>npx -y tdei-mcp init</code>, HTTP mode, Docker, troubleshooting). Hosted validation/upload accepts <code>inline_base64</code> up to 10MB; local stdio accepts absolute <code>local_path</code> assets.</p>
 </section>

@@ -8,10 +8,12 @@ import test from "node:test";
 import {
   getClientSetupJs,
   isSetupClientTarget,
+  isSetupScriptAction,
   normalizeSetupClientTarget,
   renderClientSetupPowershell,
   renderClientSetupScript,
   renderSetupOverview,
+  setupActionPath,
   type SetupClientTarget,
 } from "../src/http-setup-script.js";
 import { renderStatusPage } from "../src/http-status-page.js";
@@ -22,7 +24,7 @@ import { serveTestHttp } from "./helpers/test-http-server.js";
 // suppress it in tests so no relay process outlives the suite and holds port 8765.
 process.env.TDEI_NO_RELAY = "1";
 
-const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode"];
+const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
 
 test("sh and ps1 installers embed the identical node program", () => {
   const shared = getClientSetupJs();
@@ -174,6 +176,7 @@ test("installer stdout prints a clear restart step for every client", () => {
       "claude-cli": /Exit Claude Code/,
       "claude-desktop": /Fully quit Claude Desktop.*Cmd\+Q/,
       vscode: /Reload VS Code|Reload Window/,
+      cursor: /reopen Cursor/,
     };
     for (const client of CLIENTS) {
       const out = execFileSync(
@@ -233,8 +236,112 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     const legacy = await fetch(`${handle.url}/mcp/setup/claude`);
     assert.equal(legacy.status, 200);
     assert.match(await legacy.text(), /\.claude\.json/);
+
+    const update = await fetch(`${handle.url}/mcp/setup/update/codex`);
+    assert.equal(update.status, 200);
+    assert.match(await update.text(), /ACTION="update"/);
+
+    const uninstall = await fetch(`${handle.url}/mcp/setup/uninstall/cursor`);
+    assert.equal(uninstall.status, 200);
+    assert.match(await uninstall.text(), /ACTION="uninstall"/);
+
+    const uninstallPs = await fetch(`${handle.url}/mcp/setup/uninstall/vscode.ps1`);
+    assert.equal(uninstallPs.status, 200);
+    assert.match(await uninstallPs.text(), /\$Action = 'uninstall'/);
+
+    const updateBogus = await fetch(`${handle.url}/mcp/setup/update/bogus`);
+    assert.equal(updateBogus.status, 404);
+    assert.match(await updateBogus.text(), /TDEI_SETUP_CLIENT_UNKNOWN/);
   } finally {
     await handle.close();
+  }
+});
+
+test("setup action helpers accept install/update/uninstall paths", () => {
+  assert.equal(isSetupScriptAction("install"), true);
+  assert.equal(isSetupScriptAction("update"), true);
+  assert.equal(isSetupScriptAction("uninstall"), true);
+  assert.equal(isSetupScriptAction("bogus"), false);
+  assert.equal(setupActionPath("codex"), "codex");
+  assert.equal(setupActionPath("codex", "install"), "codex");
+  assert.equal(setupActionPath("codex", "update"), "update/codex");
+  assert.equal(setupActionPath("cursor", "uninstall"), "uninstall/cursor");
+});
+
+test("overview advertises update and uninstall commands", () => {
+  const overview = renderSetupOverview("http://192.168.50.11:8080", "/mcp");
+  assert.match(overview, /curl -fsSL http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/update\/codex \| sh/);
+  assert.match(overview, /curl -fsSL http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/uninstall\/codex \| sh/);
+  assert.match(overview, /irm http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/update\/codex\.ps1 \| iex/);
+  assert.match(overview, /irm http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/uninstall\/codex\.ps1 \| iex/);
+});
+
+test("sh and ps1 wrappers pass the action through to the node program", () => {
+  for (const client of CLIENTS) {
+    const uninstallSh = renderClientSetupScript(client, "http://h:1", 8765, "uninstall");
+    assert.match(uninstallSh, /ACTION="uninstall"/);
+    assert.match(uninstallSh, /"\$ACTION" <<'EOF'/);
+
+    const updatePs = renderClientSetupPowershell(client, "http://h:1", 8765, "update");
+    assert.match(updatePs, /\$Action = 'update'/);
+    assert.match(updatePs, /"\$CallbackPort" \$Action/);
+    // The embedded program is identical across actions — only the wrapper arg differs.
+    const js = `${updatePs.split("$setupJs = @'\n")[1]!.split("\n'@")[0]!}\n`;
+    assert.equal(js, getClientSetupJs());
+  }
+});
+
+test("update reinstalls and uninstall removes only the tdei entry", () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-update-"));
+  try {
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, getClientSetupJs());
+    const run = (args: string[]) =>
+      execFileSync(process.execPath, [tmp, ...args], { env: { ...process.env, HOME: home } }).toString();
+
+    // JSON client: install, poison the entry + add a sibling, update, uninstall.
+    run(["opencode", "http://old:1/mcp", "http://old:1/auth/callback", "8765", "install"]);
+    const opencodeFile = join(home, ".config", "opencode", "opencode.json");
+    const doc = JSON.parse(readFileSync(opencodeFile, "utf-8")) as {
+      mcp: { tdei: { url: string }; other: { type: string } };
+    };
+    doc.mcp.tdei.url = "http://stale:9/mcp";
+    doc.mcp.other = { type: "local" };
+    writeFileSync(opencodeFile, JSON.stringify(doc, null, 2));
+    const updated = run(["opencode", "http://new:2/mcp", "http://new:2/auth/callback", "8765", "update"]);
+    assert.match(updated, /Updated opencode/);
+    const afterUpdate = JSON.parse(readFileSync(opencodeFile, "utf-8")) as {
+      mcp: { tdei: { url: string }; other: { type: string } };
+    };
+    assert.equal(afterUpdate.mcp.tdei.url, "http://new:2/mcp");
+    assert.deepEqual(afterUpdate.mcp.other, { type: "local" });
+
+    const removed = run(["opencode", "http://new:2/mcp", "http://new:2/auth/callback", "8765", "uninstall"]);
+    assert.match(removed, /Removed tdei entry/);
+    assert.match(removed, /RESTART REQUIRED/);
+    const afterUninstall = JSON.parse(readFileSync(opencodeFile, "utf-8")) as {
+      mcp: { tdei?: unknown; other: { type: string } };
+    };
+    assert.equal(afterUninstall.mcp.tdei, undefined);
+    assert.deepEqual(afterUninstall.mcp.other, { type: "local" });
+
+    const noop = run(["opencode", "http://new:2/mcp", "http://new:2/auth/callback", "8765", "uninstall"]);
+    assert.match(noop, /nothing to do/);
+
+    // TOML client: sibling sections survive update + uninstall.
+    run(["codex", "http://old:1/mcp", "http://old:1/auth/callback", "8765", "install"]);
+    const codexFile = join(home, ".codex", "config.toml");
+    writeFileSync(codexFile, `[other]\nfoo = 1\n\n${readFileSync(codexFile, "utf-8")}`);
+    run(["codex", "http://new:2/mcp", "http://new:2/auth/callback", "8765", "update"]);
+    const afterCodexUpdate = readFileSync(codexFile, "utf-8");
+    assert.match(afterCodexUpdate, /\[other\]/);
+    assert.match(afterCodexUpdate, /url = "http:\/\/new:2\/mcp"/);
+    run(["codex", "http://new:2/mcp", "http://new:2/auth/callback", "8765", "uninstall"]);
+    const afterCodexUninstall = readFileSync(codexFile, "utf-8");
+    assert.doesNotMatch(afterCodexUninstall, /mcp_servers\.tdei/);
+    assert.match(afterCodexUninstall, /\[other\]/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
