@@ -17,6 +17,7 @@ coverage/
 AGENTS.md
 .opencode/
 tdei.config.json
+mcps.json
 
 # Operating system files
 .DS_Store
