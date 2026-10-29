@@ -70,6 +70,9 @@ button { cursor: pointer; }
 .copy-btn.copied .icon-copy { display: none; }
 .copy-btn.inline { position: static; margin-left: 8px; width: 28px; height: 28px; vertical-align: middle; opacity: 1; }
 .detail-cell code { word-break: break-all; }
+.builder { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
+.builder label { display: block; font-size: 13px; font-weight: 600; }
+.builder select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font-size: 14px; border-radius: 8px; border: 1px solid #8886; background: inherit; color: inherit; }
 </style>
 </head>
 <body>
@@ -87,25 +90,34 @@ button { cursor: pointer; }
 
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
-<p>No tokens are written to disk. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
-<div class="grid">
-<div><h3>Codex</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Codex install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div></div>
-<div><h3>OpenCode</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy OpenCode install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/opencode | sh</pre></div></div>
-<div><h3>Claude Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-cli | sh</pre></div></div>
-<div><h3>Claude Desktop</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Claude Desktop install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/claude-desktop | sh</pre></div></div>
-<div><h3>VS Code</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy VS Code install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/vscode | sh</pre></div></div>
-<div><h3>Cursor</h3><div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Cursor install command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/cursor | sh</pre></div></div>
+<p>No tokens are written to disk. Pick your client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
+<div class="builder" role="group" aria-label="Command builder">
+<label>Client / harness
+<select id="tdei-harness">
+<option value="codex">Codex</option>
+<option value="opencode">OpenCode</option>
+<option value="claude-cli">Claude Code</option>
+<option value="claude-desktop">Claude Desktop</option>
+<option value="vscode">VS Code</option>
+<option value="cursor">Cursor</option>
+</select>
+</label>
+<label>Operating system
+<select id="tdei-os">
+<option value="sh">macOS / Linux</option>
+<option value="ps1">Windows</option>
+</select>
+</label>
+<label>Command
+<select id="tdei-action">
+<option value="install">Install</option>
+<option value="update">Update / reinstall (fixes most issues)</option>
+<option value="uninstall">Uninstall</option>
+</select>
+</label>
 </div>
-<h3>Update / reinstall (fixes most issues)</h3>
-<p>MCP stopped working (e.g. the server moved)? Re-run the update command for your client, then restart the app and start a new chat. Safe to re-run — it replaces only the <code>tdei</code> entry.</p>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy update command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/update/codex | sh</pre></div>
-<p class="muted">Replace <code>update/codex</code> with <code>update/&lt;your-client&gt;</code> (<code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, <code>vscode</code>, <code>cursor</code>). Windows: <code>irm ${e(urls.setupBase)}/update/codex.ps1 | iex</code>. Still broken? Uninstall, restart, then reinstall.</p>
-<h3>Uninstall</h3>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy uninstall command">${copyIcons}</button><pre>curl -fsSL ${e(urls.setupBase)}/uninstall/codex | sh</pre></div>
-<p class="muted">Removes only the <code>tdei</code> entry — every other MCP server entry is kept. Same client swap and <code>.ps1</code> rule as above.</p>
-<h3>Windows PowerShell</h3>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy Windows PowerShell install command">${copyIcons}</button><pre>Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${e(urls.setupBase)}/codex.ps1 | iex</pre></div>
-<p class="muted">Replace <code>codex</code> with <code>opencode</code>, <code>claude-cli</code>, <code>claude-desktop</code>, <code>vscode</code>, or <code>cursor</code>. Full catalogue: <code>${e(urls.setupBase)}</code></p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command">curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div>
+<p class="muted" id="tdei-hint">Writes the tdei entry for your client. Needs sh + node 22+ on the client machine.</p>
 <h3>Restart required — do this right after the installer</h3>
 <p>The client only picks up the new <code>tdei</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
 <table>
@@ -132,11 +144,11 @@ button { cursor: pointer; }
 <section class="card" aria-label="Readme">
 <h2>Installation readme (short)</h2>
 <ol>
-<li>Run one installer above on the <em>client</em> machine (needs <code>sh</code> + <code>node 22+</code>).</li>
+<li>Pick your client, OS, and command in the builder above, copy the generated command, and run it on the <em>client</em> machine (macOS/Linux needs <code>sh</code> + <code>node 22+</code>; Windows needs PowerShell + <code>node</code>).</li>
 <li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>; Cursor — quit + reopen.</li>
 <li>Ask the agent to log in: it calls <code>tdei_sso_login</code> and gives you a browser URL.</li>
 <li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>).</li>
-<li>MCP broken later (server moved, entry stale)? Re-run the installer as an <em>update</em> (<code>curl -fsSL ${e(urls.setupBase)}/update/&lt;client&gt; | sh</code>), restart the app, start a new chat. To remove TDEI instead: <code>curl -fsSL ${e(urls.setupBase)}/uninstall/&lt;client&gt; | sh</code>.</li>
+<li>MCP broken later (server moved, entry stale)? Pick <em>Update / reinstall</em> in the builder, run it, restart the app, start a new chat. To remove TDEI instead, pick <em>Uninstall</em>.</li>
 </ol>
 <p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo (quickstart via <code>npx -y tdei-mcp init</code>, HTTP mode, Docker, troubleshooting). Hosted validation/upload accepts <code>inline_base64</code> up to 10MB; local stdio accepts absolute <code>local_path</code> assets.</p>
 </section>
@@ -182,6 +194,27 @@ async function copyTextFromButton(btn) {
 document.querySelectorAll('[data-copy]').forEach((btn) => {
   btn.addEventListener('click', () => copyTextFromButton(btn));
 });
+const TDEI_SETUP_BASE = ${JSON.stringify(urls.setupBase).replace(/</g, "\\u003c")};
+const TDEI_ACTION_HINTS = {
+  install: 'Writes the tdei entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
+  update: 'Safe to re-run — replaces only the tdei entry, keeps every other entry. Run it, restart the app, start a new chat.',
+  uninstall: 'Removes only the tdei entry — every other MCP server entry is kept. Restart the app afterwards.'
+};
+function tdeiBuildCommand() {
+  const client = document.getElementById('tdei-harness').value;
+  const os = document.getElementById('tdei-os').value;
+  const action = document.getElementById('tdei-action').value;
+  const scriptPath = action === 'install' ? client : action + '/' + client;
+  const cmd = os === 'ps1'
+    ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + TDEI_SETUP_BASE + '/' + scriptPath + '.ps1 | iex'
+    : 'curl -fsSL ' + TDEI_SETUP_BASE + '/' + scriptPath + ' | sh';
+  document.getElementById('tdei-command').textContent = cmd;
+  document.getElementById('tdei-hint').textContent = TDEI_ACTION_HINTS[action] || '';
+}
+['tdei-harness', 'tdei-os', 'tdei-action'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', tdeiBuildCommand);
+});
+tdeiBuildCommand();
 async function load() {
   const dot = document.getElementById('dot');
   const ok = document.getElementById('ok');
