@@ -11,7 +11,7 @@ import type { PlaceResolver } from "./intents/place-resolver.js";
 import { errorResult } from "./mcp/responses.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
-import { publicAuthCallbackUrl } from "./sso-public-callback.js";
+import { REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 
 export interface HttpSemanticServerOptions {
@@ -24,8 +24,9 @@ export interface HttpSemanticServerOptions {
   places?: PlaceResolver;
   publicBaseUrl?: string;
   /**
-   * Gateway child slug. When set, SSO redirects the browser to
-   * `<publicBaseUrl>/auth/callback` and does not bind a loopback listener.
+   * Gateway child slug. When set, SSO redirects the browser to the
+   * Keycloak-registered loopback callback and does not bind a listener
+   * inside the container. A local relay forwards that hit to /auth/callback.
    */
   gatewaySlug?: string | undefined;
   /**
@@ -102,9 +103,7 @@ export function createHttpSemanticServer(
   if (auth) {
     const gatewaySlug = options.gatewaySlug?.trim() || undefined;
     const bindCallbackListener = gatewaySlug ? false : (options.ssoCallbackListener ?? true);
-    const browserRedirectUri = gatewaySlug && options.publicBaseUrl
-      ? publicAuthCallbackUrl(options.publicBaseUrl)
-      : undefined;
+    const browserRedirectUri = gatewaySlug ? REGISTERED_SSO_REDIRECT_URI : undefined;
     const ssoBrowserOptions = {
       bindCallbackListener,
       ...(browserRedirectUri ? { redirectUri: browserRedirectUri } : {}),
@@ -156,7 +155,7 @@ export function createHttpSemanticServer(
                   status: "login_pending",
                   loginUrl: login.loginUrl,
                   callbackUrl: browserRedirectUri ?? login.callbackUrl,
-                  message: "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here.",
+                  message: "Open loginUrl in your browser to sign in to TDEI. Keycloak returns the browser to http://127.0.0.1:8765/callback. The client installer runs a local relay there that forwards the login to this gateway. When the page says login complete, return here.",
                 }, null, 2),
               },
             ],

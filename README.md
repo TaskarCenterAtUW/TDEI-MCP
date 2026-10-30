@@ -323,8 +323,10 @@ workflow change — the Container App's ingress target port just has to match
 `$PORT` (default `3000`). Keep the app at one replica: the SSO session lives
 in the child process that receives the browser callback.
 
-The `tdei-mcp` OAuth client has one registered redirect,
-`https://<host>/auth/callback`. Every gateway child uses that address.
+The `tdei-mcp` OAuth client accepts `http://127.0.0.1:8765/callback`.
+Keycloak rejects the gateway's public https address. Every child sends
+the browser to that loopback URL. The client installer starts a relay on
+the user's machine that forwards the browser to `https://<host>/auth/callback`.
 Nginx asks each child in turn; the child that started login exchanges the
 code, and the others answer 404 without using it.
 
@@ -335,8 +337,10 @@ Verify every configured server over real MCP transport (handshake,
 node --import tsx scripts/multi-transport-check.ts --file mcps.json
 ```
 
-Browser SSO finishes on `GET /auth/callback`. Open the `loginUrl`
+Browser SSO finishes when Keycloak returns to `http://127.0.0.1:8765/callback`
+and the local relay delivers that to `GET /auth/callback`. Open the `loginUrl`
 from `tdei_sso_login`; the page says login complete when the session is stored.
+Re-run the client installer after deploy so the relay is listening.
 
 ## 4. Verify and use the connection
 

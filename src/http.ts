@@ -7,7 +7,7 @@ import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
 import { isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
-import { isAuthCallbackPath } from "./sso-public-callback.js";
+import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
@@ -306,7 +306,9 @@ export async function serveHttp(
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;
   const basePath = httpConfig.httpBasePath;
-  const callbackPort = Number(new URL(httpConfig.ssoCallbackUrl).port) || 8765;
+  const callbackPort = gatewaySlug
+    ? Number(new URL(REGISTERED_SSO_REDIRECT_URI).port)
+    : (Number(new URL(httpConfig.ssoCallbackUrl).port) || 8765);
 
   const server: Server = createHttpServer((request, response) => {
     void (async () => {

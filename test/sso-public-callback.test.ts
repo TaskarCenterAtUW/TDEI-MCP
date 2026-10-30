@@ -2,9 +2,10 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { isAuthCallbackPath, publicAuthCallbackUrl } from "../src/sso-public-callback.js";
+import { isAuthCallbackPath, publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "../src/sso-public-callback.js";
 
-test("public callback URL is the single registered redirect", () => {
+test("Keycloak redirect is the loopback callback and the gateway receives the relay", () => {
+  assert.equal(REGISTERED_SSO_REDIRECT_URI, "http://127.0.0.1:8765/callback");
   assert.equal(
     publicAuthCallbackUrl("https://tdei-mcp.example/"),
     "https://tdei-mcp.example/auth/callback",
