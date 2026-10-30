@@ -18,6 +18,8 @@ AGENTS.md
 .opencode/
 tdei.config.json
 mcps.json
+nginx/nginx.conf
+nginx/gateway.html
 
 # Operating system files
 .DS_Store

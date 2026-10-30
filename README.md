@@ -279,6 +279,57 @@ Smoke check from the host (expect `401 TDEI_SSO_REQUIRED` — proof the server i
 
     curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
+### Multiple MCP servers + gateway (mcps.json)
+
+One local `mcps.json` (gitignored — never commit yours) declares N servers;
+each gets its own port and `/<slug>/mcp` base path. Start from the example:
+
+```bash
+cp mcps.example.json mcps.json   # then edit names/apiUrls
+```
+
+Host mode — one child process per server, ports auto-increment from `basePort`:
+
+```bash
+npm run build
+npm run start:multi -- --file mcps.json   # dev: npm run dev:multi
+# tdei-core-dev -> http://127.0.0.1:3000/tdei-core-dev/mcp, staging -> :3001, ...
+```
+
+Docker mode — same servers plus an nginx path-based reverse proxy, one command:
+
+```bash
+npm run gateway:up     # generate nginx config, build images, start all
+npm run gateway:down   # stop everything
+docker compose ps
+docker compose logs -f multi     # the 4 MCP children
+docker compose logs -f gateway   # nginx
+```
+
+The gateway serves a landing page at `http://127.0.0.1:8080/` with live
+per-server status cards, an install-command builder (pick the MCP server from
+the dropdown), and per-server details. Routing: `POST :8080/<slug>/mcp`
+(MCP JSON-RPC), `GET :8080/<slug>/health`, installers at
+`:8080/<slug>/mcp/setup/...`.
+
+Regenerate the nginx config only (e.g. standalone nginx in front of
+host-side children — defaults to `host.docker.internal` upstreams):
+
+```bash
+npm run nginx:generate -- --file mcps.json
+```
+
+Verify every configured server over real MCP transport (handshake,
+`tools/list`, signed-out-safe auth calls):
+
+```bash
+node --import tsx scripts/multi-transport-check.ts --file mcps.json
+```
+
+Note: inside Docker the browser SSO auto-callback cannot reach the
+in-container listener; complete login with the `tdei_sso_complete` tool and
+the pasted callback URL instead.
+
 ## 4. Verify and use the connection
 
 Both transports expose the common semantic tools:

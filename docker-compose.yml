@@ -1,0 +1,38 @@
+# Full stack: all mcps.json servers + nginx gateway, one command:
+#   npm run gateway:up     (generate nginx conf, build, start)
+#   npm run gateway:down   (stop)
+#
+# The gateway proxies /<slug>/mcp + /<slug>/health to the `multi` service,
+# so the generator must target --upstream-host multi (not host.docker.internal).
+name: tdei-mcp
+
+services:
+  multi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # --host 0.0.0.0: children must listen beyond container loopback so the
+    # gateway container can reach them. Ports still come from mcps.json.
+    command: ["node", "dist/multi-serve.js", "--file", "mcps.json", "--host", "0.0.0.0"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./mcps.json:/app/mcps.json:ro
+    ports:
+      - "3000-3003:3000-3003"
+    # The image HEALTHCHECK targets single-server mode (/mcp on :3000);
+    # multi-serve uses /<slug>/mcp, so disable it here.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    depends_on:
+      - multi
+    ports:
+      - "8080:80"
+    restart: unless-stopped
