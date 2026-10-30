@@ -29,12 +29,12 @@ documented under Advanced below.
 
 ### Connecting to a hosted (remote) server
 
-If someone runs the HTTP server for you (e.g. `http://192.168.50.11:8080`),
+If someone runs the HTTP server for you (e.g. `http://192.168.50.11:3000`),
 point your client at it instead of launching a local server — no tokens are
 stored in the config; you sign in later via `tdei_sso_login`:
 
 ```bash
-npx -y tdei-mcp init --remote http://192.168.50.11:8080/mcp --client codex
+npx -y tdei-mcp init --remote http://192.168.50.11:3000/mcp --client codex
 ```
 
 `--client` accepts `codex`, `claude` (Claude Desktop), or `vscode`. For OpenCode, Claude Code CLI, or a one-liner
@@ -263,61 +263,64 @@ the server's `/auth/callback`.
 
 ### Docker deployment
 
-Build the image (multi-stage; ships compiled `dist/` plus Node 22 only—no Python, source, or development dependencies):
-
-    docker build -t tdei-mcp:http .
-
-Run it with your SSO configuration. The container defaults to `TDEI_TRANSPORT=http`, host `0.0.0.0`, port `3000`:
-
-    docker run --rm -p 3000:3000 --env-file .env tdei-mcp:http
-
-Override individual values with `-e` (explicit env beats the image defaults; CLI flags win over everything):
-
-    docker run --rm -p 8080:8080 -e TDEI_HTTP_PORT=8080 -e TDEI_SSO_CALLBACK_URL=https://mcp.example.com/callback --env-file .env tdei-mcp:http
+Build the image (multi-stage; ships compiled `dist/` plus Node 22 and nginx):
+```bash
+docker build -t tdei-mcp:http .
+```
+Run it with your SSO configuration. The container runs the gateway (nginx +
+all `mcps.json` children) on port `3000`:
+```bash
+docker run --rm -p 3000:3000 --env-file .env tdei-mcp:http
+```
+Override the public port with `-e` (explicit env beats the image default;
+keep it clear of the `mcps.json` child ports, default `3001+`):
+```bash
+docker run --rm -p 4000:4000 -e PORT=4000 -e TDEI_SSO_CALLBACK_URL=https://mcp.example.com/callback --env-file .env tdei-mcp:http
+```
 
 Smoke check from the host (expect `401 TDEI_SSO_REQUIRED` — proof the server is up and enforcing Bearer auth):
-
-    curl -i -X POST http://127.0.0.1:3000/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```bash
+curl -i -X POST http://127.0.0.1:3000/tdei-core-dev/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
 
 ### Multiple MCP servers + gateway (mcps.json)
 
-One local `mcps.json` (gitignored — never commit yours) declares N servers;
-each gets its own port and `/<slug>/mcp` base path. Start from the example:
+One `mcps.json` declares N servers; each gets its own port and `/<slug>/mcp`
+base path. The repo ships a dev default — copy the example to customize:
 
 ```bash
 cp mcps.example.json mcps.json   # then edit names/apiUrls
 ```
 
-Host mode — one child process per server, ports auto-increment from `basePort`:
+Node children only (no gateway) — one child process per server, ports
+auto-increment from `basePort`:
 
 ```bash
 npm run build
 npm run start:multi -- --file mcps.json   # dev: npm run dev:multi
-# tdei-core-dev -> http://127.0.0.1:3000/tdei-core-dev/mcp, staging -> :3001, ...
+# tdei-core-dev -> http://127.0.0.1:3001/tdei-core-dev/mcp, staging -> :3002, ...
 ```
 
-Docker mode — same servers plus an nginx path-based reverse proxy, one command:
+Full gateway — node children plus an nginx path-based reverse proxy:
 
 ```bash
-npm run gateway:up     # generate nginx config, build images, start all
-npm run gateway:down   # stop everything
-docker compose ps
-docker compose logs -f multi     # the 4 MCP children
-docker compose logs -f gateway   # nginx
+npm run deploy:node    # host-local: nginx + children, no Docker (needs nginx installed)
+npm run deploy:docker  # single image: build + run container (needs Docker)
+npm run deploy:docker:down  # stop and remove the container
 ```
 
-The gateway serves a landing page at `http://127.0.0.1:8080/` with live
-per-server status cards, an install-command builder (pick the MCP server from
-the dropdown), and per-server details. Routing: `POST :8080/<slug>/mcp`
-(MCP JSON-RPC), `GET :8080/<slug>/health`, installers at
-`:8080/<slug>/mcp/setup/...`.
+Both serve the same thing on `http://127.0.0.1:3000/` (`$PORT` overrides,
+keeping it clear of the `mcps.json` child ports, default `3001+`):
+a landing page with live per-server status cards and an install-command
+builder, `POST :3000/<slug>/mcp` (MCP JSON-RPC), `GET :3000/<slug>/health`,
+and installers at `:3000/<slug>/mcp/setup/...`. The nginx routes are
+regenerated from the effective `mcps.json` on every boot, so editing it and
+restarting is enough.
 
-Regenerate the nginx config only (e.g. standalone nginx in front of
-host-side children — defaults to `host.docker.internal` upstreams):
-
-```bash
-npm run nginx:generate -- --file mcps.json
-```
+The Docker image is self-contained (`Dockerfile`), so the existing
+`Deploy dev` workflow ships the full gateway to Azure Container Apps with no
+workflow change — the Container App's ingress target port just has to match
+`$PORT` (default `3000`).
 
 Verify every configured server over real MCP transport (handshake,
 `tools/list`, signed-out-safe auth calls):

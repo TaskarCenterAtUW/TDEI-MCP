@@ -3,15 +3,19 @@
 // Each server keeps its exact basePath (src/http.ts matches basePath exactly),
 // so nginx forwards the full prefix: /<slug>/mcp -> 127.0.0.1:<port>/<slug>/mcp
 //
-// Usage:
+// Usage (Docker/ACA single image — server{} snippet for conf.d):
 //   npm run build && node scripts/generate-nginx-conf.mjs \
-//     --file mcps.json --out nginx/nginx.conf
-//   node scripts/generate-nginx-conf.mjs --file mcps.json --out nginx/nginx.conf \
-//     --upstream-host host.docker.internal --listen 8080
+//     --file mcps.json --out nginx/nginx.conf --direct
+// Host-local full config (deploy:node) — runnable via nginx -p <prefix>:
+//   node scripts/generate-nginx-conf.mjs --file mcps.json \
+//     --out .gateway/nginx.conf --html-out .gateway/html/gateway.html \
+//     --root .gateway/html --direct --standalone
+// Standalone nginx in front of remote children: omit --direct and use
+// --upstream-host <host> (e.g. host.docker.internal).
 //
-// When nginx runs in Docker fronting host-side `npm run start:multi` children,
-// use --upstream-host host.docker.internal (Linux: run with --add-host).
-// When nginx shares a compose network with the multi service, use --upstream-host <service-name>.
+// Flags: --file --out --html-out --upstream-host --listen (default 3000)
+//   --root (html root, default /usr/share/nginx/html)
+//   --direct (localhost upstreams, no resolver) --standalone (full config)
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -34,8 +38,21 @@ function escapeHtml(value) {
 const file = flagValue("--file") ?? process.env.TDEI_MCPS_FILE?.trim() ?? "mcps.json";
 const out = flagValue("--out") ?? "nginx/nginx.conf";
 const htmlOut = flagValue("--html-out") ?? `${dirname(out)}/gateway.html`;
-const upstreamHost = flagValue("--upstream-host") ?? "host.docker.internal";
-const listen = flagValue("--listen") ?? "8080";
+// --direct: single-container image — nginx and node share localhost, so emit
+// plain `proxy_pass http://127.0.0.1:<port>` with no `resolver` (Docker
+// embedded DNS 127.0.0.11 does not exist in Azure Container Apps).
+// Without --direct (standalone nginx only): proxy targets are variables
+// resolved per request via the Docker embedded DNS.
+// --standalone: wrap the server block in events{}/http{} so the output is a
+// complete config runnable via `nginx -p <prefix> -c nginx.conf` (host-local
+// deploy, no Docker). Log paths are relative so -p governs them.
+// --root <dir>: html root for the gateway page (default /usr/share/nginx/html).
+// --listen <port>: public listen port, baked into the config (default 3000).
+const direct = process.argv.includes("--direct");
+const upstreamHost = flagValue("--upstream-host") ?? (direct ? "127.0.0.1" : "host.docker.internal");
+const listen = flagValue("--listen") ?? "3000";
+const standalone = process.argv.includes("--standalone");
+const rootDir = flagValue("--root") ?? "/usr/share/nginx/html";
 
 let multiConfig;
 try {
@@ -51,12 +68,30 @@ const servers = multiConfig.resolveMultiMcp(parsed);
 
 const varName = (slug) => slug.replace(/[^a-zA-Z0-9_]/g, "_");
 
-// NOTE: proxy_pass targets use a variable ($tdei_upstream_*) on purpose.
-// A literal hostname is resolved once at nginx startup (fails the boot if
-// Docker DNS isn't ready yet — "host not found in upstream"). With a
-// variable, nginx resolves via `resolver` per request instead.
+// NOTE: variable proxy_pass targets resolve via `resolver` per request,
+// so a literal hostname never blocks nginx startup on DNS. In --direct
+// (single-container) mode there is no Docker DNS, so targets are plain
+// 127.0.0.1:port literals with no resolver needed.
 const locations = servers
   .map((s) => {
+    if (direct) {
+      const target = `${upstreamHost}:${s.port}`;
+      return `    # ${s.name} -> ${s.apiUrl}
+    location = ${s.basePath} {
+        proxy_pass http://${target};
+    }
+    # installer scripts: ${s.basePath}/setup[/<action>]/<client>[.ps1] -> child
+    location = ${s.basePath}/setup {
+        proxy_pass http://${target};
+    }
+    location ^~ ${s.basePath}/setup/ {
+        proxy_pass http://${target};
+    }
+    # per-server health: /<slug>/health -> child /health
+    location = /${s.slug}/health {
+        proxy_pass http://${target}/health;
+    }`;
+    }
     const v = `tdei_upstream_${varName(s.slug)}`;
     const target = `${upstreamHost}:${s.port}`;
     return `    # ${s.name} -> ${s.apiUrl}
@@ -81,34 +116,39 @@ const locations = servers
   })
   .join("\n\n");
 
+const resolverBlock = direct
+  ? ""
+  : `    # Docker embedded DNS — required because proxy_pass targets are
+    # variables (resolved per request, not once at startup).
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
+`;
+
+const regenFlags = `--file ${file} --out ${out}${direct ? " --direct" : ""}${standalone ? " --standalone" : ""}${rootDir !== "/usr/share/nginx/html" ? ` --root ${rootDir}` : ""}${listen !== "3000" ? ` --listen ${listen}` : ""}`;
 const conf = `# Auto-generated from ${file} — do not edit by hand.
-# Regenerate: npm run build && node scripts/generate-nginx-conf.mjs --file ${file} --out ${out}
+# Regenerate: npm run build && node scripts/generate-nginx-conf.mjs ${regenFlags}
 #
 # Path-based reverse proxy: each /<slug>/mcp prefix routes to exactly one
 # multi-serve child. The URI is forwarded unchanged because src/http.ts
 # matches basePath exactly (no trailing-slash normalization).
 #
-# Docker usage (nginx fronts host-side children):
-#   docker build -f Dockerfile.nginx -t tdei-mcp-gateway .
-#   docker run --rm -p ${listen}:80 --add-host=host.docker.internal:host-gateway tdei-mcp-gateway
+# Single-image usage (nginx + node in one container, upstreams on localhost):
+#   docker build -t tdei-mcp .
+#   docker run --rm -p ${listen}:${listen} tdei-mcp
 # Then open http://127.0.0.1:${listen}/ for the gateway page, or POST MCP
 # JSON-RPC to http://127.0.0.1:${listen}${servers[0]?.basePath ?? "/<slug>/mcp"} etc.
 server {
-    listen 80;
+    listen ${listen};
     server_name _;
 
-    root /usr/share/nginx/html;
+    root ${rootDir};
 
-    # Docker embedded DNS — required because proxy_pass targets are
-    # variables (resolved per request, not once at startup).
-    resolver 127.0.0.11 valid=10s ipv6=off;
-
-    client_max_body_size 25m;
+${resolverBlock}    client_max_body_size 25m;
 
     # MCP Streamable HTTP needs streaming + long-lived GET (SSE).
     proxy_http_version 1.1;
     proxy_set_header Connection "";
-    # $http_host keeps the gateway port (e.g. :8080) so installer scripts
+    # $http_host keeps the gateway port (e.g. :3000) so installer scripts
     # and status pages served through the proxy advertise the public URL.
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -127,6 +167,22 @@ ${locations}
     }
 }
 `;
+
+const serverBody = conf.slice(conf.indexOf("server {"));
+const output = standalone
+  ? `# Auto-generated standalone nginx config — run with: nginx -p <prefix> -c ${out}
+# Regenerate: npm run build && node scripts/generate-nginx-conf.mjs ${regenFlags}
+# Log/pid paths are relative so the -p prefix governs them.
+worker_processes 1;
+error_log logs/error.log;
+pid logs/nginx.pid;
+events { worker_connections 1024; }
+http {
+    access_log logs/access.log;
+    default_type text/html;
+${serverBody}}
+`
+  : conf;
 
 const serversJson = JSON.stringify(
   servers.map((s) => ({
@@ -340,7 +396,7 @@ setInterval(loadAll, 15000);
 `;
 
 mkdirSync(dirname(resolve(process.cwd(), out)), { recursive: true });
-writeFileSync(resolve(process.cwd(), out), conf);
+writeFileSync(resolve(process.cwd(), out), output);
 mkdirSync(dirname(resolve(process.cwd(), htmlOut)), { recursive: true });
 writeFileSync(resolve(process.cwd(), htmlOut), html);
 console.log(`[nginx] wrote ${out} and ${htmlOut} with ${servers.length} servers from ${file}`);

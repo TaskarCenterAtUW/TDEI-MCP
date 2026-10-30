@@ -19,6 +19,7 @@ AGENTS.md
 tdei.config.json
 nginx/nginx.conf
 nginx/gateway.html
+.gateway/
 
 # Operating system files
 .DS_Store

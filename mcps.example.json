@@ -1,7 +1,7 @@
 {
   "$schema": "./mcps.schema.json",
   "host": "127.0.0.1",
-  "basePort": 3000,
+  "basePort": 3001,
   "servers": [
     {
       "name": "tdei-core",
