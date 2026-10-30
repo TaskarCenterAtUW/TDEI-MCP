@@ -492,6 +492,30 @@ export class AuthManager {
     return this.refreshPromise;
   }
 
+  /** Exchange a Keycloak code without storing it on this process. */
+  async exchangeSsoCode(code: string, state: string): Promise<TokenResponse> {
+    if (!isValidCallbackParam(code) || !isValidCallbackParam(state)) {
+      throw new Error("TDEI SSO callback contains invalid code or state parameter");
+    }
+    return this.requestTokens(
+      "/api/v1/sso-login",
+      { code, state, clientId: TDEI_SSO_CLIENT_ID },
+      "TDEI SSO login",
+    );
+  }
+
+  /** Refresh a TDEI token the client presented, without using this process's session. */
+  async refreshExternalToken(refreshToken: string): Promise<TokenResponse> {
+    if (!refreshToken || refreshToken.length > 8192 || /[\u0000-\u0020\u007f]/.test(refreshToken)) {
+      throw new Error("TDEI refresh token is invalid");
+    }
+    return this.requestTokens(
+      "/api/v1/refresh-token",
+      { refreshToken, clientId: TDEI_SSO_CLIENT_ID },
+      "TDEI token refresh",
+    );
+  }
+
   private async requestTokens(path: string, body: unknown, action: string): Promise<TokenResponse> {
     const response = await fetch(new URL(path, `${getConfig().apiUrl}/`), {
       method: "POST",

@@ -226,7 +226,10 @@ Example (Bearer mode):
 #### Client setup scripts (remote HTTP)
 
 A running HTTP server advertises one-line installers for client machines so
-no token is ever written to disk. `GET /mcp/setup` prints the catalogue:
+no token is ever written to disk. Each server is registered under its
+`name` from `mcps.json` (for example `tdei-core-dev`), so one client can
+keep dev, staging, production, and workspace side by side. A single-server
+install with no name still uses `tdei`. `GET /mcp/setup` prints the catalogue:
 
 macOS / Ubuntu (needs `sh` + `node`):
 
@@ -242,12 +245,12 @@ Windows (PowerShell 5.1+ with `node` on PATH — same targets, `.ps1` suffix):
     Set-ExecutionPolicy Bypass -Scope Process -Force; irm http://127.0.0.1:3000/mcp/setup/codex.ps1 | iex
 
 Update / reinstall (MCP broken, e.g. after the server moved — safe to
-re-run, replaces only the `tdei` entry, then restart the app and start a new
-chat):
+re-run, replaces only that server's entry, named from `mcps.json` such as
+`tdei-core-dev`, then restart the app and start a new chat):
 
     curl -fsSL http://127.0.0.1:3000/mcp/setup/update/codex | sh   # swap in your client; .ps1 on Windows
 
-Uninstall (removes only the `tdei` entry, keeps every other entry):
+Uninstall (removes only that server's entry, such as `tdei-core-dev`, and keeps every other entry):
 
     curl -fsSL http://127.0.0.1:3000/mcp/setup/uninstall/codex | sh
 
@@ -323,12 +326,14 @@ workflow change — the Container App's ingress target port just has to match
 `$PORT` (default `3000`). Keep the app at one replica: the SSO session lives
 in the child process that receives the browser callback.
 
-The `tdei-mcp` OAuth client accepts `http://127.0.0.1:8765/callback`.
-Keycloak rejects the gateway's public https address. Every child sends
-the browser to that loopback URL. The client installer starts a relay on
-the user's machine that forwards the browser to `https://<host>/auth/callback`.
-Nginx asks each child in turn; the child that started login exchanges the
-code, and the others answer 404 without using it.
+Gateway sign-in uses MCP OAuth. Cursor (and any other client that follows
+the remote MCP login challenge) stores the TDEI access token and sends it
+on every tool call, so a different gateway process can still serve the call.
+Keycloak only accepts `http://127.0.0.1:8765/callback`, so the client
+installer starts a relay that forwards the browser to
+`https://<host>/auth/callback`. Reconnect the MCP server after deploy and
+approve the browser login. The in-memory `tdei_sso_login` session is still
+only on the process that received it.
 
 Verify every configured server over real MCP transport (handshake,
 `tools/list`, signed-out-safe auth calls):
@@ -338,9 +343,9 @@ node --import tsx scripts/multi-transport-check.ts --file mcps.json
 ```
 
 Browser SSO finishes when Keycloak returns to `http://127.0.0.1:8765/callback`
-and the local relay delivers that to `GET /auth/callback`. Open the `loginUrl`
-from `tdei_sso_login`; the page says login complete when the session is stored.
-Re-run the client installer after deploy so the relay is listening.
+and the local relay delivers that to the gateway. The MCP client then receives
+the access token and attaches it to later tool calls. Re-run the client
+installer after deploy so the relay is listening, then reconnect the server.
 
 ## 4. Verify and use the connection
 

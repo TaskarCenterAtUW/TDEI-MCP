@@ -25,8 +25,24 @@ export function normalizeSetupClientTarget(value: string): SetupClientTarget | u
   return isSetupClientTarget(slug) ? slug : undefined;
 }
 
-/** Installer action: fresh `install`, `update` (remove + reinstall from the current server URL), or `uninstall` (remove only the tdei entry). */
+/** Installer action: fresh `install`, `update` (remove + reinstall from the current server URL), or `uninstall` (remove only this server's entry). */
 export type SetupScriptAction = "install" | "update" | "uninstall";
+
+const MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+/**
+ * Config key clients use to tell MCP servers apart.
+ * Prefers the `name` from mcps.json (`tdei-core-dev`) when it is a safe identifier.
+ */
+export function clientMcpName(name?: string): string {
+  const trimmed = name?.trim() ?? "";
+  if (MCP_NAME_RE.test(trimmed)) return trimmed;
+  const slug = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return MCP_NAME_RE.test(slug) ? slug : "tdei";
+}
 
 export function isSetupScriptAction(value: string): value is SetupScriptAction {
   return value === "install" || value === "update" || value === "uninstall";
@@ -60,8 +76,9 @@ function psQuote(value: string): string {
 /**
  * Shared client-configuration program (CommonJS, `require` only — no deps).
  * Runs identically on macOS, Ubuntu, and Windows under any Node 22+.
- * argv: [node, script, client, mcpUrl, remoteCallbackUrl, callbackPort, action].
+ * argv: [node, script, client, mcpUrl, remoteCallbackUrl, callbackPort, action, serverName].
  * action is one of install (default), update, or uninstall.
+ * serverName is the mcps.json name (for example tdei-core-dev); omitted means tdei.
  * Embedded by both the POSIX sh wrapper and the PowerShell wrapper.
  */
 const CLIENT_SETUP_JS = `const fs = require("node:fs");
@@ -69,8 +86,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw] = process.argv;
+const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw, serverNameRaw] = process.argv;
 const action = actionRaw || "install";
+const serverName = /^[A-Za-z_][A-Za-z0-9_-]*$/.test(serverNameRaw || "") ? serverNameRaw : "tdei";
+
+function codexEntryPattern() {
+  const escaped = String(serverName).replace(/[.*+?^\${}()|[\\]\\\\]/g, "\\\\$&");
+  return new RegExp("\\\\n?\\\\[mcp_servers\\\\." + escaped + "\\\\][\\\\s\\\\S]*?(?=\\\\n\\\\[|$)", "g");
+}
 if (action !== "install" && action !== "update" && action !== "uninstall") {
   console.error("Unsupported action:", actionRaw, '(expected "install", "update", or "uninstall")');
   process.exit(1);
@@ -109,10 +132,10 @@ function configureCodex() {
     existing = "";
   }
   const cleaned = existing
-    .replace(/\\n?\\[mcp_servers\\.tdei\\][\\s\\S]*?(?=\\n\\[|$)/g, "")
+    .replace(codexEntryPattern(), "")
     .trimEnd();
   const block = [
-    "[mcp_servers.tdei]",
+    "[mcp_servers." + serverName + "]",
     \`url = \${JSON.stringify(mcpUrl)}\`,
     "startup_timeout_sec = 120",
     "tool_timeout_sec = 120",
@@ -128,7 +151,7 @@ function configureOpenCode() {
   const root = readJsonOrEmpty(filePath);
   if (!root.$schema) root.$schema = "https://opencode.ai/config.json";
   root.mcp = typeof root.mcp === "object" && root.mcp !== null ? root.mcp : {};
-  root.mcp.tdei = {
+  root.mcp[serverName] = {
     type: "remote",
     url: mcpUrl,
     enabled: true,
@@ -146,7 +169,7 @@ function configureClaudeCli() {
     typeof root.mcpServers === "object" && root.mcpServers !== null
       ? root.mcpServers
       : {};
-  root.mcpServers.tdei = {
+  root.mcpServers[serverName] = {
     type: "http",
     url: mcpUrl,
   };
@@ -167,7 +190,7 @@ function configureClaudeDesktop() {
     typeof root.mcpServers === "object" && root.mcpServers !== null
       ? root.mcpServers
       : {};
-  root.mcpServers.tdei = claudeDesktopStdioEntry(mcpUrl);
+  root.mcpServers[serverName] = claudeDesktopStdioEntry(mcpUrl);
   fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
   return filePath;
 }
@@ -185,7 +208,7 @@ function configureVsCode() {
     typeof root.servers === "object" && root.servers !== null
       ? root.servers
       : {};
-  root.servers.tdei = {
+  root.servers[serverName] = {
     type: "http",
     url: mcpUrl,
   };
@@ -201,7 +224,7 @@ function configureCursor() {
     typeof root.mcpServers === "object" && root.mcpServers !== null
       ? root.mcpServers
       : {};
-  root.mcpServers.tdei = {
+  root.mcpServers[serverName] = {
     url: mcpUrl,
   };
   fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
@@ -220,9 +243,9 @@ function removeCodex() {
   } catch {
     return { filePath, removed: false };
   }
-  if (!/\\[mcp_servers\\.tdei\\]/.test(existing)) return { filePath, removed: false };
+  if (!codexEntryPattern().test(existing)) return { filePath, removed: false };
   const cleaned = existing
-    .replace(/\\n?\\[mcp_servers\\.tdei\\][\\s\\S]*?(?=\\n\\[|$)/g, "")
+    .replace(codexEntryPattern(), "")
     .trimEnd();
   fs.writeFileSync(filePath, cleaned ? \`\${cleaned}\\n\` : "", "utf-8");
   return { filePath, removed: true };
@@ -239,8 +262,8 @@ function removeJsonEntry(filePath, parentKey) {
     root && typeof root === "object" && typeof root[parentKey] === "object" && root[parentKey] !== null
       ? root[parentKey]
       : undefined;
-  if (!parent || parent.tdei === undefined) return { filePath, removed: false };
-  delete parent.tdei;
+  if (!parent || parent[serverName] === undefined) return { filePath, removed: false };
+  delete parent[serverName];
   fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
   return { filePath, removed: true };
 }
@@ -274,12 +297,12 @@ function removeClientEntry(target) {
 }
 
 const restartByClient = {
-  codex: "Quit and reopen Codex, then start a new chat (run /mcp to verify tdei appears).",
+  codex: "Quit and reopen Codex, then start a new chat (run /mcp to verify " + serverName + " appears).",
   opencode: "Quit and reopen OpenCode, then start a new session so it reloads opencode.json.",
   "claude-cli": "Exit Claude Code and start a new session so it picks up ~/.claude.json.",
   "claude-desktop": "Fully quit Claude Desktop (Cmd+Q on macOS / File > Exit on Windows - closing the window is not enough), reopen it, then start a new chat.",
   vscode: "Reload VS Code (Cmd/Ctrl+Shift+P -> Developer: Reload Window) or quit and reopen it, then start a new chat.",
-  cursor: "Quit and reopen Cursor, then start a new chat (open Cursor Settings > MCP to verify tdei appears).",
+  cursor: "Quit and reopen Cursor, then start a new chat (open Cursor Settings > MCP to verify " + serverName + " appears).",
 };
 
 function printRestart() {
@@ -290,8 +313,8 @@ function printRestart() {
 
 if (action === "uninstall") {
   const { filePath, removed } = removeClientEntry(client);
-  if (removed) console.log(\`[tdei-mcp] Removed tdei entry (\${client}) from \${filePath}\`);
-  else console.log(\`[tdei-mcp] No tdei entry found for \${client} in \${filePath} - nothing to do.\`);
+  if (removed) console.log("[tdei-mcp] Removed " + serverName + " entry (" + client + ") from " + filePath);
+  else console.log("[tdei-mcp] No " + serverName + " entry found for " + client + " in " + filePath + " - nothing to do.");
   printRestart();
   const setupUrl = String(mcpUrl).replace(/\\/mcp$/, "") + "/setup/" + client;
   console.log(\`[tdei-mcp] To add TDEI back, re-run the installer: curl -fsSL \${setupUrl} | sh\`);
@@ -300,7 +323,7 @@ if (action === "uninstall") {
 
 if (action === "update") {
   // Best-effort cleanup so a stale entry shape can never linger; the fresh
-  // configure below then rewrites the tdei entry from the current server URL.
+  // configure below then rewrites this server's entry from the current server URL.
   removeClientEntry(client);
 }
 
@@ -318,8 +341,8 @@ else {
 
 console.log(
   action === "update"
-    ? \`[tdei-mcp] Updated \${client} in \${writtenPath}\`
-    : \`[tdei-mcp] Configured \${client} in \${writtenPath}\`,
+    ? \`[tdei-mcp] Updated \${client} (\${serverName}) in \${writtenPath}\`
+    : \`[tdei-mcp] Configured \${client} (\${serverName}) in \${writtenPath}\`,
 );
 console.log(\`[tdei-mcp] Endpoint: \${mcpUrl} (no hardcoded token; authenticate via tdei_sso_login tool call)\`);
 if (client === "claude-desktop") {
@@ -379,12 +402,14 @@ export function getClientSetupJs(): string {
 
 export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
   const prefix = normalizeBasePath(basePath);
   const setupBase = `${origin}${prefix}/setup`;
   return [
     "# TDEI MCP Streamable HTTP Client Setup",
     "",
     `MCP Endpoint: ${mcpUrl}`,
+    `Client entry name: ${mcpName}`,
     `Keycloak redirect: ${REGISTERED_SSO_REDIRECT_URI}`,
     `Local relay forwards that to: ${remoteCallbackUrl}`,
     "",
@@ -429,13 +454,13 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewayS
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/cursor.ps1 | iex`,
     "",
     "Update / reinstall (MCP broken after a server move? run this, then restart the app):",
-    "Safe to re-run — replaces only the tdei entry, keeps every other entry.",
+    `Safe to re-run — replaces only the ${mcpName} entry, keeps every other entry.`,
     "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor):",
     "",
     `  curl -fsSL ${setupBase}/update/codex | sh`,
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/update/codex.ps1 | iex`,
     "",
-    "Uninstall (removes only the tdei entry, keeps every other entry):",
+    `Uninstall (removes only the ${mcpName} entry, keeps every other entry):`,
     "",
     `  curl -fsSL ${setupBase}/uninstall/codex | sh`,
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/uninstall/codex.ps1 | iex`,
@@ -445,16 +470,16 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewayS
     "in again via tdei_sso_login. Still broken? Uninstall, restart, reinstall.",
     "",
     "=== RESTART REQUIRED (do this right after the installer) ===",
-    "The client only picks up the new tdei entry on a full restart. Closing a",
+    `The client only picks up the new ${mcpName} entry on a full restart. Closing a`,
     "chat window is not enough — restart the app, then start a NEW chat/session:",
     "",
-    "  # Codex:            quit and reopen Codex, then new chat (run /mcp to verify tdei).",
+    `  # Codex:            quit and reopen Codex, then new chat (run /mcp to verify ${mcpName}).`,
     "  # OpenCode:         quit and reopen OpenCode, then start a new session.",
     "  # Claude Code CLI:  exit Claude Code and start a new session (reloads ~/.claude.json).",
     "  # Claude Desktop:   fully quit with Cmd+Q (macOS) or File > Exit (Windows),",
     "  #                   reopen it, then start a new chat.",
     "  # VS Code:          Cmd/Ctrl+Shift+P -> Developer: Reload Window (or quit + reopen).",
-    "  # Cursor:           quit and reopen Cursor, then start a new chat.",
+    `  # Cursor:           quit and reopen Cursor, then start a new chat (verify ${mcpName}).`,
     "",
     "Then ask your agent to log in to TDEI (it calls tdei_sso_login).",
     "",
@@ -470,6 +495,7 @@ export function renderClientSetupScript(
   gatewaySlug?: string,
 ): string {
   const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
 
   return `#!/usr/bin/env sh
 set -eu
@@ -479,13 +505,14 @@ MCP_URL=${JSON.stringify(mcpUrl)}
 REMOTE_CALLBACK_URL=${JSON.stringify(remoteCallbackUrl)}
 CALLBACK_PORT=${JSON.stringify(String(callbackPort))}
 ACTION=${JSON.stringify(action)}
+SERVER_NAME=${JSON.stringify(mcpName)}
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Error: node is required on the client machine to configure $CLIENT." >&2
   exit 1
 fi
 
-node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" <<'EOF'
+node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" "$SERVER_NAME" <<'EOF'
 ${CLIENT_SETUP_JS}EOF
 `;
 }
@@ -499,8 +526,9 @@ export function renderClientSetupPowershell(
   gatewaySlug?: string,
 ): string {
   const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
 
-  return `# TDEI MCP client setup (${client}, action: ${action})
+  return `# TDEI MCP client setup (${client}, action: ${action}, entry: ${mcpName})
 # Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; irm <server>/mcp/setup/${setupActionPath(client, action)}.ps1 | iex
 $ErrorActionPreference = "Stop"
 
@@ -509,6 +537,7 @@ $McpUrl = ${psQuote(mcpUrl)}
 $RemoteCallbackUrl = ${psQuote(remoteCallbackUrl)}
 $CallbackPort = ${Number(callbackPort) || 8765}
 $Action = ${psQuote(action)}
+$ServerName = ${psQuote(mcpName)}
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Error "node is required on this machine to configure $Client. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
@@ -521,7 +550,7 @@ ${CLIENT_SETUP_JS}'@
 $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("tdei-mcp-setup-" + [Guid]::NewGuid().ToString("N") + ".cjs")
 Set-Content -Path $tempFile -Value $setupJs -Encoding utf8NoBOM
 try {
-  & node $tempFile $Client $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action
+  & node $tempFile $Client $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action $ServerName
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
   Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
