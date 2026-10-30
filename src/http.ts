@@ -6,8 +6,9 @@ import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
-import { isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
+import { clientMcpName, isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
 import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { dispatchOAuth, matchesOAuthPath, oauthCallbackResult, oauthChallengeHeader, oauthEndpoints, type OAuthHttpResult } from "./oauth/mcp-oauth.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
@@ -170,12 +171,21 @@ async function sendWebResponse(nodeResponse: ServerResponse, webResponse: Respon
   }
 }
 
+function sendOAuth(response: ServerResponse, result: OAuthHttpResult): void {
+  response.writeHead(result.status, {
+    ...result.headers,
+    "Content-Length": Buffer.byteLength(result.body),
+  });
+  response.end(result.body);
+}
+
 async function handleMcpRequest(
   request: IncomingMessage,
   response: ServerResponse,
   options: ResolvedHttpOptions,
   host: string,
   publicBaseUrl: string,
+  mcpPath: string,
 ): Promise<void> {
   if (!checkCors(request, response)) {
     sendJson(response, 403, { code: "TDEI_ORIGIN_FORBIDDEN", message: "Origin not allowed." });
@@ -228,6 +238,16 @@ async function handleMcpRequest(
       ssoCallbackListener: options.ssoCallbackListener,
       ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
     });
+  } else if (options.gatewaySlug && !options.sessionAuth.getStatus().authenticated) {
+    const endpoints = oauthEndpoints(publicBaseUrl, options.gatewaySlug, mcpPath);
+    sendJson(response, 401, {
+      code: "TDEI_SSO_REQUIRED",
+      message: "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
+    }, {
+      "WWW-Authenticate": oauthChallengeHeader(endpoints),
+      "Cache-Control": "no-store",
+    });
+    return;
   } else if (options.requireBearerAuth) {
     unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
     return;
@@ -283,6 +303,7 @@ export async function serveHttp(
     process.exit(1);
   }
   const gatewaySlug = options.gatewaySlug?.trim() || process.env.TDEI_GATEWAY_SLUG?.trim() || undefined;
+  const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
   const sessionOpenApiClient = new OpenApiMcpClient({
     apiUrl: httpConfig.apiUrl,
@@ -323,7 +344,7 @@ export async function serveHttp(
         const url = new URL(request.url ?? "/", publicBaseUrl);
 
         if (request.method === "GET" && url.pathname === "/") {
-          const html = renderStatusPage(publicBaseUrl, basePath, resolved.gatewaySlug);
+          const html = renderStatusPage(publicBaseUrl, basePath, mcpName);
           response.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-store",
@@ -353,7 +374,7 @@ export async function serveHttp(
           request.method === "GET" &&
           (url.pathname === `${basePath}/setup` || url.pathname === "/setup")
         ) {
-          const text = renderSetupOverview(publicBaseUrl, basePath, resolved.gatewaySlug);
+          const text = renderSetupOverview(publicBaseUrl, basePath, mcpName);
           response.writeHead(200, {
             "Content-Type": "text/plain; charset=utf-8",
             "Cache-Control": "no-store",
@@ -385,13 +406,13 @@ export async function serveHttp(
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall or uninstall/ to remove the tdei entry, e.g. update/codex.`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall or uninstall/ to remove the ${mcpName} entry, e.g. update/codex.`,
             });
             return;
           }
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, resolved.gatewaySlug)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, resolved.gatewaySlug);
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, mcpName)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, mcpName);
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",
@@ -400,7 +421,41 @@ export async function serveHttp(
           return;
         }
 
+        if (gatewaySlug && matchesOAuthPath(url.pathname, oauthEndpoints(publicBaseUrl, gatewaySlug, basePath))) {
+          const body = request.method === "POST" ? await readBody(request) : "";
+          const result = await dispatchOAuth({
+            method: request.method ?? "GET",
+            url,
+            origin: publicBaseUrl,
+            slug: gatewaySlug,
+            mcpPath: basePath,
+            apiUrl: httpConfig.apiUrl,
+            cookieHeader: request.headers.cookie,
+            body,
+            exchangeCode: (code, state) => sessionAuth.exchangeSsoCode(code, state),
+            refreshToken: (refreshToken) => sessionAuth.refreshExternalToken(refreshToken),
+          });
+          if (result) {
+            sendOAuth(response, result);
+            return;
+          }
+        }
+
         if (request.method === "GET" && isAuthCallbackPath(url.pathname, resolved.gatewaySlug)) {
+          if (gatewaySlug) {
+            const oauthResult = await oauthCallbackResult({
+              url,
+              origin: publicBaseUrl,
+              slug: gatewaySlug,
+              apiUrl: httpConfig.apiUrl,
+              cookieHeader: request.headers.cookie,
+              exchangeCode: (code, state) => sessionAuth.exchangeSsoCode(code, state),
+            });
+            if (oauthResult) {
+              sendOAuth(response, oauthResult);
+              return;
+            }
+          }
           const secFetchSite = request.headers["sec-fetch-site"];
           const secFetchMode = request.headers["sec-fetch-mode"];
           if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
@@ -477,7 +532,7 @@ export async function serveHttp(
           sendJson(response, 405, { code: "TDEI_METHOD_NOT_ALLOWED", message: "Use POST for JSON-RPC, GET for SSE, or DELETE." });
           return;
         }
-        await handleMcpRequest(request, response, resolved, host, publicBaseUrl);
+        await handleMcpRequest(request, response, resolved, host, publicBaseUrl, basePath);
       } catch (error) {
         console.error("[http] request failed:", error instanceof Error ? error.message : String(error));
         if (!response.headersSent) {

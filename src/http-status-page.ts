@@ -1,3 +1,4 @@
+import { clientMcpName } from "./http-setup-script.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
 export interface StatusPageUrls {
@@ -35,6 +36,7 @@ function escapeHtml(value: string): string {
  */
 export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
   const urls = statusPageUrls(publicBaseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
   const e = escapeHtml;
   const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `<!doctype html>
@@ -119,17 +121,17 @@ button { cursor: pointer; }
 </label>
 </div>
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command">curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div>
-<p class="muted" id="tdei-hint">Writes the tdei entry for your client. Needs sh + node 22+ on the client machine.</p>
+<p class="muted" id="tdei-hint">Writes the ${e(mcpName)} entry for your client. Needs sh + node 22+ on the client machine.</p>
 <h3>Restart required — do this right after the installer</h3>
-<p>The client only picks up the new <code>tdei</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
+<p>The client only picks up the new <code>${e(mcpName)}</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
 <table>
 <tbody>
-<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code>tdei</code>).</td></tr>
+<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code>${e(mcpName)}</code>).</td></tr>
 <tr><th>OpenCode</th><td>Quit and reopen OpenCode, then start a new session.</td></tr>
 <tr><th>Claude Code</th><td>Exit Claude Code and start a new session (reloads <code>~/.claude.json</code>).</td></tr>
 <tr><th>Claude Desktop</th><td>Fully quit with <code>Cmd+Q</code> (macOS) or <code>File &gt; Exit</code> (Windows), reopen it, then start a new chat.</td></tr>
 <tr><th>VS Code</th><td><code>Cmd/Ctrl+Shift+P</code> &rarr; <code>Developer: Reload Window</code> (or quit + reopen).</td></tr>
-<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code>tdei</code>).</td></tr>
+<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code>${e(mcpName)}</code>).</td></tr>
 </tbody>
 </table>
 <h3>Details</h3>
@@ -198,10 +200,11 @@ document.querySelectorAll('[data-copy]').forEach((btn) => {
   btn.addEventListener('click', () => copyTextFromButton(btn));
 });
 const TDEI_SETUP_BASE = ${JSON.stringify(urls.setupBase).replace(/</g, "\\u003c")};
+const TDEI_MCP_NAME = ${JSON.stringify(mcpName).replace(/</g, "\\u003c")};
 const TDEI_ACTION_HINTS = {
-  install: 'Writes the tdei entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
-  update: 'Safe to re-run — replaces only the tdei entry, keeps every other entry. Run it, restart the app, start a new chat.',
-  uninstall: 'Removes only the tdei entry — every other MCP server entry is kept. Restart the app afterwards.'
+  install: 'Writes the ' + TDEI_MCP_NAME + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
+  update: 'Safe to re-run — replaces only the ' + TDEI_MCP_NAME + ' entry, keeps every other entry. Run it, restart the app, start a new chat.',
+  uninstall: 'Removes only the ' + TDEI_MCP_NAME + ' entry — every other MCP server entry is kept. Restart the app afterwards.'
 };
 function tdeiBuildCommand() {
   const client = document.getElementById('tdei-harness').value;

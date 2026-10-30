@@ -90,6 +90,16 @@ const locations = servers
     # per-server health: /<slug>/health -> child /health
     location = /${s.slug}/health {
         proxy_pass http://${target}/health;
+    }
+    # MCP OAuth. The client sends the access token on later tool calls.
+    location = /.well-known/oauth-protected-resource${s.basePath} {
+        proxy_pass http://${target};
+    }
+    location = /.well-known/oauth-authorization-server/${s.slug} {
+        proxy_pass http://${target};
+    }
+    location ^~ /${s.slug}/oauth/ {
+        proxy_pass http://${target};
     }`;
     }
     const v = `tdei_upstream_${varName(s.slug)}`;
@@ -112,6 +122,19 @@ const locations = servers
     location = /${s.slug}/health {
         set $${v} ${target};
         proxy_pass http://$${v}/health;
+    }
+    # MCP OAuth. The client sends the access token on later tool calls.
+    location = /.well-known/oauth-protected-resource${s.basePath} {
+        set $${v} ${target};
+        proxy_pass http://$${v};
+    }
+    location = /.well-known/oauth-authorization-server/${s.slug} {
+        set $${v} ${target};
+        proxy_pass http://$${v};
+    }
+    location ^~ /${s.slug}/oauth/ {
+        set $${v} ${target};
+        proxy_pass http://$${v};
     }`;
   })
   .join("\n\n");
@@ -318,15 +341,15 @@ ${serverOptions}
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command"></pre></div>
 <p class="muted" id="tdei-hint"></p>
 <h3>Restart required — do this right after the installer</h3>
-<p>The client only picks up the new <code>tdei</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
+<p>The client only picks up the new <code id="tdei-entry-name">server</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
 <table>
 <tbody>
-<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code>tdei</code>).</td></tr>
+<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code data-entry-name>server</code>).</td></tr>
 <tr><th>OpenCode</th><td>Quit and reopen OpenCode, then start a new session.</td></tr>
 <tr><th>Claude Code</th><td>Exit Claude Code and start a new session (reloads <code>~/.claude.json</code>).</td></tr>
 <tr><th>Claude Desktop</th><td>Fully quit with <code>Cmd+Q</code> (macOS) or <code>File &gt; Exit</code> (Windows), reopen it, then start a new chat.</td></tr>
 <tr><th>VS Code</th><td><code>Cmd/Ctrl+Shift+P</code> &rarr; <code>Developer: Reload Window</code> (or quit + reopen).</td></tr>
-<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code>tdei</code>).</td></tr>
+<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code data-entry-name>server</code>).</td></tr>
 </tbody>
 </table>
 <h3>Details</h3>
@@ -337,11 +360,11 @@ ${serverOptions}
 </main>
 <script>
 const TDEI_SERVERS = ${serversJson};
-const TDEI_ACTION_HINTS = {
-  install: 'Writes the tdei entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
-  update: 'Safe to re-run — replaces only the tdei entry, keeps every other entry. Run it, restart the app, start a new chat.',
-  uninstall: 'Removes only the tdei entry — every other MCP server entry is kept. Restart the app afterwards.'
-};
+function tdeiHint(action, name) {
+  if (action === 'update') return 'Safe to re-run — replaces only the ' + name + ' entry, keeps every other entry. Run it, restart the app, start a new chat.';
+  if (action === 'uninstall') return 'Removes only the ' + name + ' entry — every other MCP server entry is kept. Restart the app afterwards.';
+  return 'Writes the ' + name + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
+}
 function tdeiServer() {
   const slug = document.getElementById('tdei-server').value;
   return TDEI_SERVERS.find((s) => s.slug === slug) || TDEI_SERVERS[0];
@@ -357,7 +380,9 @@ function tdeiBuildCommand() {
     ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + setupBase + '/' + scriptPath + '.ps1 | iex'
     : 'curl -fsSL ' + setupBase + '/' + scriptPath + ' | sh';
   document.getElementById('tdei-command').textContent = cmd;
-  document.getElementById('tdei-hint').textContent = TDEI_ACTION_HINTS[action] || '';
+  document.getElementById('tdei-hint').textContent = tdeiHint(action, server.name);
+  document.getElementById('tdei-entry-name').textContent = server.name;
+  document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = server.name; });
   document.getElementById('tdei-details').innerHTML =
     '<tr><th>MCP endpoint</th><td class="detail-cell"><code>' + location.origin + server.mcp + '</code></td></tr>' +
     '<tr><th>Upstream API</th><td class="detail-cell"><code>' + server.apiUrl.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code></td></tr>' +

@@ -161,7 +161,8 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
     const codexScriptRes = await fetch(`${handle.url}/mcp/setup/codex`);
     assert.equal(codexScriptRes.status, 200);
     const codexScript = await codexScriptRes.text();
-    assert.match(codexScript, /\[mcp_servers\.tdei\]/);
+    assert.match(codexScript, /SERVER_NAME="tdei"/);
+    assert.match(codexScript, /"\[mcp_servers\." \+ serverName \+ "\]"/);
     assert.doesNotMatch(codexScript, /bearer_token_env_var/);
 
     const listRes = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
@@ -193,13 +194,20 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
   }
 });
 
-test("gateway SSO login redirects the browser to the registered loopback callback", async () => {
+test("gateway OAuth gives the client a bearer for later tool calls", async () => {
+  const { createHash, randomBytes } = await import("node:crypto");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url.includes("/api/v1/sso-login")) {
       return new Response(
-        JSON.stringify({ access_token: "gateway-token", expires_in: 1800 }),
+        JSON.stringify({ access_token: "gateway-token", expires_in: 1800, refresh_token: "gateway-refresh" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.includes("/api/v1/project-groups")) {
+      return new Response(
+        JSON.stringify([{ tdei_project_group_id: "pg1", project_group_name: "Downtown" }]),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -211,27 +219,64 @@ test("gateway SSO login redirects the browser to the registered loopback callbac
     const notThisChild = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(notThisChild.status, 404);
 
-    const loginCall = await postMcp(
-      `${handle.url}/mcp`,
-      mcpBody(1, "tools/call", { name: "tdei_sso_login", arguments: {} }),
-    );
-    assert.equal(loginCall.status, 200);
-    const loginText = await loginCall.text();
-    const redirect = "http://127.0.0.1:8765/callback";
-    assert.match(loginText, /login_pending/);
-    assert.match(loginText, new RegExp(encodeURIComponent(redirect).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.doesNotMatch(loginText, /tdei-core-dev%2Fauth%2Fcallback/);
-    assert.doesNotMatch(loginText, /tdei_sso_complete/);
+    const anonymous = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    assert.equal(anonymous.status, 401);
+    const challenge = anonymous.headers.get("www-authenticate") ?? "";
+    assert.match(challenge, /resource_metadata=/);
+    const metadataUrl = /resource_metadata="([^"]+)"/.exec(challenge)?.[1];
+    assert.ok(metadataUrl);
+    const metadata = await (await fetch(metadataUrl)).json() as { resource: string; authorization_servers: string[] };
+    assert.equal(metadata.resource, `${handle.url}/mcp`);
+    const issuer = metadata.authorization_servers[0];
+    assert.ok(issuer);
 
-    const callbackRes = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
-    assert.equal(callbackRes.status, 200);
-    assert.match(await callbackRes.text(), /Login complete/);
-
-    const statusCall = await postMcp(
-      `${handle.url}/mcp`,
-      mcpBody(2, "tools/call", { name: "tdei_auth_status", arguments: {} }),
+    const verifier = randomBytes(32).toString("base64url");
+    const challengeCode = createHash("sha256").update(verifier).digest("base64url");
+    const clientRedirect = "http://127.0.0.1:9/callback";
+    const authorize = await fetch(
+      `${issuer}/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent(clientRedirect)}&state=client-state&code_challenge=${challengeCode}&code_challenge_method=S256`,
+      { redirect: "manual" },
     );
-    assert.match(await statusCall.text(), /authenticated\\": true/);
+    assert.equal(authorize.status, 302);
+    const location = authorize.headers.get("location") ?? "";
+    assert.match(location, /127\.0\.0\.1%3A8765%2Fcallback/);
+    const cookie = (authorize.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    assert.match(cookie, /^tdei_oauth=/);
+
+    const callbackRes = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`, {
+      headers: { cookie },
+      redirect: "manual",
+    });
+    assert.equal(callbackRes.status, 302);
+    const back = new URL(callbackRes.headers.get("location") ?? "");
+    assert.equal(back.origin + back.pathname, clientRedirect);
+    assert.equal(back.searchParams.get("state"), "client-state");
+    const code = back.searchParams.get("code") ?? "";
+    assert.ok(code.length > 20);
+
+    const tokenRes = await fetch(`${issuer}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        redirect_uri: clientRedirect,
+        client_id: "tdei-mcp",
+      }),
+    });
+    assert.equal(tokenRes.status, 200);
+    const token = await tokenRes.json() as { access_token: string; token_type: string };
+    assert.equal(token.access_token, "gateway-token");
+    assert.equal(token.token_type, "Bearer");
+
+    const groups = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(2, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+      token.access_token,
+    );
+    assert.equal(groups.status, 200);
+    assert.match(await groups.text(), /Downtown/);
   } finally {
     await handle.close();
     globalThis.fetch = originalFetch;

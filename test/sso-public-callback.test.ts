@@ -25,4 +25,6 @@ test("nginx walks children for the shared /auth/callback", () => {
   assert.match(source, /location = \/auth\/callback/);
   assert.match(source, /proxy_next_upstream error timeout http_404/);
   assert.match(source, /proxy_pass http:\/\/tdei_sso_callback\/auth\/callback/);
+  assert.match(source, /oauth-protected-resource/);
+  assert.match(source, /location \^~ \/\$\{s\.slug\}\/oauth\//);
 });

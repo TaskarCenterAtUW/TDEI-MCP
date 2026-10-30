@@ -227,6 +227,20 @@ test("status page builder generates install/update/uninstall commands with no ma
   assert.match(html, /\.ps1 \| iex/);
 });
 
+test("setup script for a named gateway registers that mcps.json name", async () => {
+  const handle = await serveTestHttp({ gatewaySlug: "tdei-core-dev" });
+  try {
+    const sh = await (await fetch(`${handle.url}/mcp/setup/cursor`)).text();
+    assert.match(sh, /SERVER_NAME="tdei-core-dev"/);
+    const overview = await (await fetch(`${handle.url}/mcp/setup`)).text();
+    assert.match(overview, /Client entry name: tdei-core-dev/);
+    const html = await (await fetch(`${handle.url}/`)).text();
+    assert.match(html, /tdei-core-dev/);
+  } finally {
+    await handle.close();
+  }
+});
+
 test("setup endpoints serve sh + ps1 installers and reject unknown clients", async () => {
   const handle = await serveTestHttp({});
   const escapedOrigin = handle.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -306,14 +320,108 @@ test("sh and ps1 wrappers pass the action through to the node program", () => {
   for (const client of CLIENTS) {
     const uninstallSh = renderClientSetupScript(client, "http://h:1", 8765, "uninstall");
     assert.match(uninstallSh, /ACTION="uninstall"/);
-    assert.match(uninstallSh, /"\$ACTION" <<'EOF'/);
+    assert.match(uninstallSh, /SERVER_NAME="tdei"/);
+    assert.match(uninstallSh, /"\$ACTION" "\$SERVER_NAME" <<'EOF'/);
 
     const updatePs = renderClientSetupPowershell(client, "http://h:1", 8765, "update");
     assert.match(updatePs, /\$Action = 'update'/);
-    assert.match(updatePs, /"\$CallbackPort" \$Action/);
+    assert.match(updatePs, /\$ServerName = 'tdei'/);
+    assert.match(updatePs, /"\$CallbackPort" \$Action \$ServerName/);
     // The embedded program is identical across actions — only the wrapper arg differs.
     const js = `${updatePs.split("$setupJs = @'\n")[1]!.split("\n'@")[0]!}\n`;
     assert.equal(js, getClientSetupJs());
+  }
+});
+
+const NAMED_MCPS = [
+  ["tdei-core-dev", "http://dev:3001/tdei-core-dev/mcp"],
+  ["tdei-core-staging", "http://stage:3002/tdei-core-staging/mcp"],
+  ["tdei-core-production", "http://prod:3003/tdei-core-production/mcp"],
+  ["tdei-workspace", "http://ws:3004/tdei-workspace/mcp"],
+] as const;
+
+function clientConfigFile(client: SetupClientTarget, home: string): string {
+  if (client === "codex") return join(home, ".codex", "config.toml");
+  if (client === "opencode") return join(home, ".config", "opencode", "opencode.json");
+  if (client === "claude-cli") return join(home, ".claude.json");
+  if (client === "claude-desktop") {
+    return process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+      : process.platform === "win32"
+        ? join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+        : join(home, ".config", "Claude", "claude_desktop_config.json");
+  }
+  if (client === "vscode") {
+    return process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "Code", "User", "mcp.json")
+      : process.platform === "win32"
+        ? join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
+        : join(home, ".config", "Code", "User", "mcp.json");
+  }
+  return join(home, ".cursor", "mcp.json");
+}
+
+function installedMcpUrl(client: SetupClientTarget, home: string, name: string): string | undefined {
+  const file = clientConfigFile(client, home);
+  if (client === "codex") {
+    const toml = readFileSync(file, "utf-8");
+    const block = new RegExp(`\\[mcp_servers\\.${name}\\][\\s\\S]*?(?=\\n\\[|$)`).exec(toml)?.[0] ?? "";
+    return /url = "([^"]+)"/.exec(block)?.[1];
+  }
+  const doc = JSON.parse(readFileSync(file, "utf-8")) as {
+    mcp?: Record<string, { url?: string; args?: string[] }>;
+    mcpServers?: Record<string, { url?: string; args?: string[] }>;
+    servers?: Record<string, { url?: string; args?: string[] }>;
+  };
+  const parent = client === "opencode" ? doc.mcp : client === "vscode" ? doc.servers : doc.mcpServers;
+  const entry = parent?.[name];
+  if (!entry) return undefined;
+  if (client === "claude-desktop") return entry.args?.find((arg) => arg.startsWith("http"));
+  return entry.url;
+}
+
+test("one harness keeps dev, staging, production, and workspace side by side", () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-named-"));
+  try {
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, getClientSetupJs());
+    const run = (args: string[]) =>
+      execFileSync(process.execPath, [tmp, ...args], { env: { ...process.env, HOME: home } }).toString();
+
+    for (const client of CLIENTS) {
+      for (const [name, url] of NAMED_MCPS) {
+        run([client, url, "http://127.0.0.1:8765/callback", "8765", "install", name]);
+      }
+      for (const [name, url] of NAMED_MCPS) {
+        assert.equal(installedMcpUrl(client, home, name), url, `${client} missing ${name}`);
+      }
+      assert.equal(installedMcpUrl(client, home, "tdei"), undefined, `${client} collapsed servers into tdei`);
+
+      const updatedDev = "http://dev:3099/tdei-core-dev/mcp";
+      const updated = run([client, updatedDev, "http://127.0.0.1:8765/callback", "8765", "update", "tdei-core-dev"]);
+      assert.match(updated, new RegExp(`Updated ${client} \\(tdei-core-dev\\)`));
+      assert.equal(installedMcpUrl(client, home, "tdei-core-dev"), updatedDev);
+      assert.equal(installedMcpUrl(client, home, "tdei-core-staging"), "http://stage:3002/tdei-core-staging/mcp");
+      assert.equal(installedMcpUrl(client, home, "tdei-core-production"), "http://prod:3003/tdei-core-production/mcp");
+      assert.equal(installedMcpUrl(client, home, "tdei-workspace"), "http://ws:3004/tdei-workspace/mcp");
+
+      const removed = run([client, "http://ws:3004/tdei-workspace/mcp", "http://127.0.0.1:8765/callback", "8765", "uninstall", "tdei-workspace"]);
+      assert.match(removed, new RegExp(`Removed tdei-workspace entry \\(${client}\\)`));
+      assert.equal(installedMcpUrl(client, home, "tdei-workspace"), undefined);
+      assert.equal(installedMcpUrl(client, home, "tdei-core-dev"), updatedDev);
+      assert.equal(installedMcpUrl(client, home, "tdei-core-staging"), "http://stage:3002/tdei-core-staging/mcp");
+      assert.equal(installedMcpUrl(client, home, "tdei-core-production"), "http://prod:3003/tdei-core-production/mcp");
+    }
+
+    const sh = renderClientSetupScript("cursor", "http://192.168.50.11:3001", 8765, "install", "/tdei-core-dev/mcp", "tdei-core-dev");
+    assert.match(sh, /SERVER_NAME="tdei-core-dev"/);
+    const ps = renderClientSetupPowershell("vscode", "http://192.168.50.11:3002", 8765, "install", "/tdei-core-staging/mcp", "tdei-core-staging");
+    assert.match(ps, /\$ServerName = 'tdei-core-staging'/);
+    const overview = renderSetupOverview("http://192.168.50.11:3001", "/tdei-core-dev/mcp", "tdei-core-dev");
+    assert.match(overview, /Client entry name: tdei-core-dev/);
+    assert.match(overview, /replaces only the tdei-core-dev entry/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
