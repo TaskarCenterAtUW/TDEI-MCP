@@ -35,11 +35,12 @@ export function setupActionPath(client: SetupClientTarget, action: SetupScriptAc
   return action === "install" ? client : `${action}/${client}`;
 }
 
-function setupUrls(baseUrl: string): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
+function setupUrls(baseUrl: string, basePath = "/mcp"): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
   const origin = baseUrl.replace(/\/$/, "");
+  const prefix = normalizeBasePath(basePath);
   return {
     origin,
-    mcpUrl: `${origin}/mcp`,
+    mcpUrl: `${origin}${prefix || "/mcp"}`,
     remoteCallbackUrl: `${origin}/auth/callback`,
   };
 }
@@ -375,7 +376,7 @@ export function getClientSetupJs(): string {
 }
 
 export function renderSetupOverview(baseUrl: string, basePath = "/mcp"): string {
-  const { origin, mcpUrl } = setupUrls(baseUrl);
+  const { origin, mcpUrl } = setupUrls(baseUrl, basePath);
   const prefix = normalizeBasePath(basePath);
   const setupBase = `${origin}${prefix}/setup`;
   return [
@@ -462,8 +463,9 @@ export function renderClientSetupScript(
   baseUrl: string,
   callbackPort = 8765,
   action: SetupScriptAction = "install",
+  basePath = "/mcp",
 ): string {
-  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl);
+  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath);
 
   return `#!/usr/bin/env sh
 set -eu
@@ -489,8 +491,9 @@ export function renderClientSetupPowershell(
   baseUrl: string,
   callbackPort = 8765,
   action: SetupScriptAction = "install",
+  basePath = "/mcp",
 ): string {
-  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl);
+  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath);
 
   return `# TDEI MCP client setup (${client}, action: ${action})
 # Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; irm <server>/mcp/setup/${setupActionPath(client, action)}.ps1 | iex

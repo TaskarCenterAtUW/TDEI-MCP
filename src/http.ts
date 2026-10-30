@@ -377,8 +377,8 @@ export async function serveHttp(
             return;
           }
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action);
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath);
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",

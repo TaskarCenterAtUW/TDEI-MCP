@@ -1,0 +1,27 @@
+{
+  "$schema": "./mcps.schema.json",
+  "host": "127.0.0.1",
+  "basePort": 3001,
+  "servers": [
+    {
+      "name": "tdei-core-dev",
+      "apiUrl": "https://api-dev.tdei.us",
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json"
+    },
+    {
+      "name": "tdei-core-staging",
+      "apiUrl": "https://api-stage.tdei.us",
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway-stage.json"
+    },
+    {
+      "name": "tdei-core-production",
+      "apiUrl": "https://api.tdei.us",
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway-prod.json"
+    },
+    {
+      "name": "tdei-workspace",
+      "apiUrl": "https://ws-backend-dev.azurewebsites.net/",
+      "specUrl": "https://ws-backend-dev.azurewebsites.net/openapi.json"
+    }
+  ]
+}
