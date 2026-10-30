@@ -153,7 +153,13 @@ ${resolverBlock}    client_max_body_size 25m;
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    # Preserve the outer scheme: a TLS-terminating proxy (e.g. Azure
+    # Container Apps) sets X-Forwarded-Proto: https, and src/http.ts
+    # auto-identifies the public URL from it. $scheme here is always
+    # http (nginx->node inside the container) so it must not overwrite
+    # the incoming header; when absent (direct local access) node falls
+    # back to http.
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
     proxy_buffering off;
     proxy_cache off;
     proxy_read_timeout 3600s;
