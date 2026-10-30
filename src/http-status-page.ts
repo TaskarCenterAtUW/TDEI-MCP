@@ -1,4 +1,4 @@
-import { publicAuthCallbackUrl } from "./sso-public-callback.js";
+import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
 export interface StatusPageUrls {
   origin: string;
@@ -16,7 +16,7 @@ export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", gateway
     mcpUrl: `${origin}${prefix || "/mcp"}`,
     setupBase: `${origin}${prefix || "/mcp"}/setup`,
     healthUrl: `${origin}/health`,
-    callbackUrl: publicAuthCallbackUrl(publicBaseUrl),
+    callbackUrl: REGISTERED_SSO_REDIRECT_URI,
   };
 }
 
@@ -136,7 +136,8 @@ button { cursor: pointer; }
 <table>
 <tbody>
 <tr><th>MCP endpoint</th><td class="detail-cell" data-copy-wrap><code>${e(urls.mcpUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy MCP endpoint">${copyIcons}</button></td></tr>
-<tr><th>SSO callback (this server)</th><td class="detail-cell" data-copy-wrap><code>${e(urls.callbackUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy SSO callback URL">${copyIcons}</button></td></tr>
+<tr><th>Keycloak redirect</th><td class="detail-cell" data-copy-wrap><code>${e(urls.callbackUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy Keycloak redirect URL">${copyIcons}</button></td></tr>
+<tr><th>Gateway receives relay at</th><td class="detail-cell"><code>${e(publicAuthCallbackUrl(publicBaseUrl))}</code></td></tr>
 <tr><th>Health JSON</th><td class="detail-cell" data-copy-wrap><code>${e(urls.healthUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy health URL">${copyIcons}</button></td></tr>
 <tr><th>Setup catalogue</th><td class="detail-cell" data-copy-wrap><code>${e(urls.setupBase)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy setup catalogue URL">${copyIcons}</button></td></tr>
 </tbody>

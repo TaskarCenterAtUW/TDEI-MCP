@@ -1,4 +1,4 @@
-import { publicAuthCallbackUrl } from "./sso-public-callback.js";
+import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
 export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
 
@@ -67,7 +67,9 @@ function psQuote(value: string): string {
 const CLIENT_SETUP_JS = `const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const [, , client, mcpUrl, , , actionRaw] = process.argv;
+const { spawn } = require("node:child_process");
+
+const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw] = process.argv;
 const action = actionRaw || "install";
 if (action !== "install" && action !== "update" && action !== "uninstall") {
   console.error("Unsupported action:", actionRaw, '(expected "install", "update", or "uninstall")');
@@ -326,6 +328,48 @@ if (client === "claude-desktop") {
 printRestart();
 console.log("[tdei-mcp] Then ask your agent to log in to TDEI (it calls tdei_sso_login).");
 
+const parsedMcp = new URL(mcpUrl);
+const isLoopbackServer =
+  parsedMcp.hostname === "127.0.0.1" ||
+  parsedMcp.hostname === "localhost" ||
+  parsedMcp.hostname === "::1";
+
+if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
+  const relayDir = path.join(home, ".tdei-mcp");
+  fs.mkdirSync(relayDir, { recursive: true });
+  const relayScript = path.join(relayDir, "sso-callback-relay.cjs");
+  const relayCode = \`const http = require("node:http");
+const targetBase = \${JSON.stringify(remoteCallbackUrl)};
+const port = Number(\${JSON.stringify(callbackPortRaw)}) || 8765;
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
+  if (url.pathname === "/callback" || url.pathname === "/auth/callback") {
+    const dest = new URL(targetBase);
+    dest.search = url.search;
+    res.writeHead(302, { Location: dest.toString(), "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+  if (url.pathname === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, targetBase }));
+    return;
+  }
+  res.writeHead(404);
+  res.end("Not found");
+});
+server.on("error", () => process.exit(0));
+server.listen(port, "127.0.0.1");
+\`;
+  fs.writeFileSync(relayScript, relayCode, "utf-8");
+  const child = spawn(process.execPath, [relayScript], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback -> \${remoteCallbackUrl}\`);
+}
 `;
 
 /** Exposed for tests: the exact JS embedded in both sh and PowerShell installers. */
@@ -341,7 +385,8 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewayS
     "# TDEI MCP Streamable HTTP Client Setup",
     "",
     `MCP Endpoint: ${mcpUrl}`,
-    `SSO Callback: ${remoteCallbackUrl}`,
+    `Keycloak redirect: ${REGISTERED_SSO_REDIRECT_URI}`,
+    `Local relay forwards that to: ${remoteCallbackUrl}`,
     "",
     "macOS / Ubuntu — run one of these on the client machine (needs sh + node, no hardcoded tokens):",
     "",

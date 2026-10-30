@@ -20,9 +20,13 @@ import { renderStatusPage } from "../src/http-status-page.js";
 import { resolvePublicBaseUrl } from "../src/http.js";
 import { serveTestHttp } from "./helpers/test-http-server.js";
 
-test("installer does not start a local SSO callback relay", () => {
-  assert.doesNotMatch(getClientSetupJs(), /sso-callback-relay/);
-  assert.doesNotMatch(getClientSetupJs(), /TDEI_NO_RELAY/);
+process.env.TDEI_NO_RELAY = "1";
+
+test("installer relays the registered loopback callback to the gateway", () => {
+  const js = getClientSetupJs();
+  assert.match(js, /sso-callback-relay/);
+  assert.match(js, /TDEI_NO_RELAY/);
+  assert.match(js, /127\.0\.0\.1/);
 });
 
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];

@@ -121,8 +121,9 @@ ${servers.map((s) => `    server ${upstreamHost}:${s.port} max_fails=0;`).join("
 }
 `;
 
-const callbackLocation = `    # SSO browser return. The tdei-mcp client has one registered redirect:
-    # https://<host>/auth/callback. Children without a pending login return
+const callbackLocation = `    # SSO browser return. Keycloak redirects to the loopback callback;
+    # the local relay forwards that hit here.
+    # Children without a pending login return
     # 404 and nginx tries the next child. The child that started login
     # exchanges the code once.
     location = /auth/callback {

@@ -193,7 +193,7 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
   }
 });
 
-test("gateway SSO login redirects the browser to /<slug>/auth/callback and that path completes login", async () => {
+test("gateway SSO login redirects the browser to the registered loopback callback", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -217,14 +217,13 @@ test("gateway SSO login redirects the browser to /<slug>/auth/callback and that 
     );
     assert.equal(loginCall.status, 200);
     const loginText = await loginCall.text();
-    const redirect = `${handle.url}/auth/callback`;
+    const redirect = "http://127.0.0.1:8765/callback";
     assert.match(loginText, /login_pending/);
-    assert.match(loginText, /\/auth\/callback/);
-    assert.doesNotMatch(loginText, /\/tdei-core-dev\/auth\/callback/);
     assert.match(loginText, new RegExp(encodeURIComponent(redirect).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(loginText, /tdei-core-dev%2Fauth%2Fcallback/);
     assert.doesNotMatch(loginText, /tdei_sso_complete/);
 
-    const callbackRes = await fetch(`${redirect}?code=auth-code-123&state=state-456`);
+    const callbackRes = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(callbackRes.status, 200);
     assert.match(await callbackRes.text(), /Login complete/);
 
