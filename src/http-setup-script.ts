@@ -1,3 +1,5 @@
+import { publicAuthCallbackUrl } from "./sso-public-callback.js";
+
 export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
 
 const SETUP_CLIENTS: readonly SetupClientTarget[] = [
@@ -35,13 +37,13 @@ export function setupActionPath(client: SetupClientTarget, action: SetupScriptAc
   return action === "install" ? client : `${action}/${client}`;
 }
 
-function setupUrls(baseUrl: string, basePath = "/mcp"): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
+function setupUrls(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
   const origin = baseUrl.replace(/\/$/, "");
   const prefix = normalizeBasePath(basePath);
   return {
     origin,
     mcpUrl: `${origin}${prefix || "/mcp"}`,
-    remoteCallbackUrl: `${origin}/auth/callback`,
+    remoteCallbackUrl: publicAuthCallbackUrl(origin, gatewaySlug),
   };
 }
 
@@ -65,9 +67,7 @@ function psQuote(value: string): string {
 const CLIENT_SETUP_JS = `const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
-
-const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw] = process.argv;
+const [, , client, mcpUrl, , , actionRaw] = process.argv;
 const action = actionRaw || "install";
 if (action !== "install" && action !== "update" && action !== "uninstall") {
   console.error("Unsupported action:", actionRaw, '(expected "install", "update", or "uninstall")');
@@ -326,48 +326,6 @@ if (client === "claude-desktop") {
 printRestart();
 console.log("[tdei-mcp] Then ask your agent to log in to TDEI (it calls tdei_sso_login).");
 
-const parsedMcp = new URL(mcpUrl);
-const isLoopbackServer =
-  parsedMcp.hostname === "127.0.0.1" ||
-  parsedMcp.hostname === "localhost" ||
-  parsedMcp.hostname === "::1";
-
-if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
-  const relayDir = path.join(home, ".tdei-mcp");
-  fs.mkdirSync(relayDir, { recursive: true });
-  const relayScript = path.join(relayDir, "sso-callback-relay.cjs");
-  const relayCode = \`const http = require("node:http");
-const targetBase = \${JSON.stringify(remoteCallbackUrl)};
-const port = Number(\${JSON.stringify(callbackPortRaw)}) || 8765;
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
-  if (url.pathname === "/callback" || url.pathname === "/auth/callback") {
-    const dest = new URL(targetBase);
-    dest.search = url.search;
-    res.writeHead(302, { Location: dest.toString(), "Cache-Control": "no-store" });
-    res.end();
-    return;
-  }
-  if (url.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, targetBase }));
-    return;
-  }
-  res.writeHead(404);
-  res.end("Not found");
-});
-server.on("error", () => process.exit(0));
-server.listen(port, "127.0.0.1");
-\`;
-  fs.writeFileSync(relayScript, relayCode, "utf-8");
-  const child = spawn(process.execPath, [relayScript], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback -> \${remoteCallbackUrl}\`);
-}
 `;
 
 /** Exposed for tests: the exact JS embedded in both sh and PowerShell installers. */
@@ -375,15 +333,15 @@ export function getClientSetupJs(): string {
   return CLIENT_SETUP_JS;
 }
 
-export function renderSetupOverview(baseUrl: string, basePath = "/mcp"): string {
-  const { origin, mcpUrl } = setupUrls(baseUrl, basePath);
+export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
+  const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const prefix = normalizeBasePath(basePath);
   const setupBase = `${origin}${prefix}/setup`;
   return [
     "# TDEI MCP Streamable HTTP Client Setup",
     "",
     `MCP Endpoint: ${mcpUrl}`,
-    `SSO Callback: ${origin}/auth/callback`,
+    `SSO Callback: ${remoteCallbackUrl}`,
     "",
     "macOS / Ubuntu — run one of these on the client machine (needs sh + node, no hardcoded tokens):",
     "",
@@ -464,8 +422,9 @@ export function renderClientSetupScript(
   callbackPort = 8765,
   action: SetupScriptAction = "install",
   basePath = "/mcp",
+  gatewaySlug?: string,
 ): string {
-  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath);
+  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
 
   return `#!/usr/bin/env sh
 set -eu
@@ -492,8 +451,9 @@ export function renderClientSetupPowershell(
   callbackPort = 8765,
   action: SetupScriptAction = "install",
   basePath = "/mcp",
+  gatewaySlug?: string,
 ): string {
-  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath);
+  const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
 
   return `# TDEI MCP client setup (${client}, action: ${action})
 # Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; irm <server>/mcp/setup/${setupActionPath(client, action)}.ps1 | iex

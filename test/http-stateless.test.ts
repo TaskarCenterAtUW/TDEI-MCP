@@ -193,6 +193,48 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
   }
 });
 
+test("gateway SSO login redirects the browser to /<slug>/auth/callback and that path completes login", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/api/v1/sso-login")) {
+      return new Response(
+        JSON.stringify({ access_token: "gateway-token", expires_in: 1800 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return originalFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+
+  const handle = await serveTestHttp({ gatewaySlug: "tdei-core-dev" });
+  try {
+    const loginCall = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(1, "tools/call", { name: "tdei_sso_login", arguments: {} }),
+    );
+    assert.equal(loginCall.status, 200);
+    const loginText = await loginCall.text();
+    const redirect = `${handle.url}/tdei-core-dev/auth/callback`;
+    assert.match(loginText, /login_pending/);
+    assert.match(loginText, /\/tdei-core-dev\/auth\/callback/);
+    assert.match(loginText, new RegExp(encodeURIComponent(redirect).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(loginText, /tdei_sso_complete/);
+
+    const callbackRes = await fetch(`${redirect}?code=auth-code-123&state=state-456`);
+    assert.equal(callbackRes.status, 200);
+    assert.match(await callbackRes.text(), /Login complete/);
+
+    const statusCall = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(2, "tools/call", { name: "tdei_auth_status", arguments: {} }),
+    );
+    assert.match(await statusCall.text(), /authenticated\\": true/);
+  } finally {
+    await handle.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("POST /mcp with bad bearer returns 401 before creating an MCP server", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {

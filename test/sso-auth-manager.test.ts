@@ -173,3 +173,34 @@ test("seedInjectedToken decodes JWT exp claim and sanitizeAuthErrorDetail strips
   assert.equal(sanitized.includes("<"), false);
   assert.ok(sanitized.length <= 203);
 });
+
+test("public redirect URI is what the browser follows while completion uses the configured callback", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.pathname === "/api/v1/sso-login") {
+      return new Response(JSON.stringify({
+        access_token: "public-access-token",
+        expires_in: 3600,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+
+  const auth = new AuthManager();
+  const redirectUri = "https://tdei-mcp.example/tdei-core-dev/auth/callback";
+  try {
+    const login = await auth.startSsoLogin({ bindCallbackListener: false, redirectUri });
+    assert.equal(new URL(login.loginUrl).searchParams.get("redirect_uri"), redirectUri);
+    await auth.completeSsoLogin("http://127.0.0.1:18765/callback?code=public-code&state=public-state");
+    assert.equal(auth.getStatus().state, "authenticated");
+
+    const logout = await auth.logout({ bindCallbackListener: false, redirectUri });
+    assert.equal(new URL(logout.logoutUrl).searchParams.get("redirect_uri"), redirectUri);
+    auth.completeSsoLogout("http://127.0.0.1:18765/callback");
+    await logout.completion;
+    assert.equal(auth.getStatus().state, "signed_out");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -74,8 +74,24 @@ interface PendingLogin extends SsoLoginStart {
 
 interface PendingLogout extends SsoLogoutStart {
   server: Server | undefined;
+  resolve: () => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+}
+
+function browserRedirectUri(override: string | undefined, fallback: URL): URL {
+  const trimmed = override?.trim();
+  if (!trimmed) return fallback;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("TDEI SSO redirect URI is invalid");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("TDEI SSO redirect URI must use http or https");
+  }
+  return url;
 }
 
 export class AuthManager {
@@ -188,7 +204,7 @@ export class AuthManager {
     }
 
     const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
-    loginUrl.searchParams.set("redirect_uri", callbackUrl.toString());
+    loginUrl.searchParams.set("redirect_uri", browserRedirectUri(options?.redirectUri, callbackUrl).toString());
     loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
     if (expectedState) {
       loginUrl.searchParams.set("state", expectedState);
@@ -255,6 +271,27 @@ export class AuthManager {
       this.loginExchangePromise = undefined;
     });
     return this.loginExchangePromise;
+  }
+
+  /** Finish a pending logout after the browser returns to the callback. */
+  completeSsoLogout(callback: string): void {
+    const pending = this.pendingLogout;
+    if (!pending) throw new Error("No TDEI SSO logout is pending");
+
+    const expected = new URL(getConfig().ssoCallbackUrl);
+    const received = new URL(callback);
+    if (received.origin !== expected.origin || received.pathname !== expected.pathname) {
+      throw new Error("TDEI SSO callback URL does not match the configured callback");
+    }
+
+    const providerError = received.searchParams.get("error");
+    this.finishPendingLogout();
+    if (providerError) {
+      const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
+      pending.reject(error);
+      throw error;
+    }
+    pending.resolve();
   }
 
   async getAccessToken(): Promise<string> {
@@ -415,7 +452,7 @@ export class AuthManager {
       : undefined;
 
     const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
-    logoutUrl.searchParams.set("redirect_uri", callbackUrl.toString());
+    logoutUrl.searchParams.set("redirect_uri", browserRedirectUri(options?.redirectUri, callbackUrl).toString());
     logoutUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
 
     const timeout = setTimeout(() => {
@@ -431,6 +468,7 @@ export class AuthManager {
       callbackUrl: callbackUrl.toString(),
       completion,
       server,
+      resolve: resolveCompletion,
       reject: rejectCompletion,
       timeout,
     };

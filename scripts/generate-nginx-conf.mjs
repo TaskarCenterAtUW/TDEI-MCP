@@ -90,6 +90,10 @@ const locations = servers
     # per-server health: /<slug>/health -> child /health
     location = /${s.slug}/health {
         proxy_pass http://${target}/health;
+    }
+    # SSO browser return: /<slug>/auth/callback -> child /auth/callback
+    location = /${s.slug}/auth/callback {
+        proxy_pass http://${target}/auth/callback;
     }`;
     }
     const v = `tdei_upstream_${varName(s.slug)}`;
@@ -112,6 +116,11 @@ const locations = servers
     location = /${s.slug}/health {
         set $${v} ${target};
         proxy_pass http://$${v}/health;
+    }
+    # SSO browser return: /<slug>/auth/callback -> child /auth/callback
+    location = /${s.slug}/auth/callback {
+        set $${v} ${target};
+        proxy_pass http://$${v}/auth/callback$is_args$args;
     }`;
   })
   .join("\n\n");

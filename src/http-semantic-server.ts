@@ -11,6 +11,7 @@ import type { PlaceResolver } from "./intents/place-resolver.js";
 import { errorResult } from "./mcp/responses.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
+import { publicAuthCallbackUrl } from "./sso-public-callback.js";
 import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 
 export interface HttpSemanticServerOptions {
@@ -22,6 +23,12 @@ export interface HttpSemanticServerOptions {
   fetchImpl?: typeof fetch;
   places?: PlaceResolver;
   publicBaseUrl?: string;
+  /**
+   * Gateway child slug. When set, SSO redirects the browser to
+   * `<publicBaseUrl>/<slug>/auth/callback` and does not bind a loopback
+   * listener.
+   */
+  gatewaySlug?: string | undefined;
   /**
    * Bind the loopback SSO callback listener on login/logout (default true).
    * The Streamable HTTP server already serves /auth/callback on its own
@@ -41,7 +48,9 @@ function normalizeCallbackUrlForComplete(input: string, configuredCallbackUrl: s
   try {
     const parsed = new URL(trimmed);
     if (
-      (parsed.pathname === "/auth/callback" || parsed.pathname === "/callback") &&
+      (parsed.pathname === "/auth/callback" ||
+        parsed.pathname === "/callback" ||
+        parsed.pathname.endsWith("/auth/callback")) &&
       (parsed.searchParams.has("code") || parsed.searchParams.has("error"))
     ) {
       configured.search = parsed.search;
@@ -92,7 +101,15 @@ export function createHttpSemanticServer(
   );
 
   if (auth) {
-    const bindCallbackListener = options.ssoCallbackListener ?? true;
+    const gatewaySlug = options.gatewaySlug?.trim() || undefined;
+    const bindCallbackListener = gatewaySlug ? false : (options.ssoCallbackListener ?? true);
+    const browserRedirectUri = gatewaySlug && options.publicBaseUrl
+      ? publicAuthCallbackUrl(options.publicBaseUrl, gatewaySlug)
+      : undefined;
+    const ssoBrowserOptions = {
+      bindCallbackListener,
+      ...(browserRedirectUri ? { redirectUri: browserRedirectUri } : {}),
+    };
     const openApiLifecycle = options.openApiMcpClient
       ? new OpenApiToolsLifecycle(
           server,
@@ -123,7 +140,7 @@ export function createHttpSemanticServer(
             };
           }
 
-          const login = await auth.startSsoLogin({ bindCallbackListener });
+          const login = await auth.startSsoLogin(ssoBrowserOptions);
           void login.completion
             .then(async () => {
               if (openApiLifecycle) {
@@ -132,10 +149,6 @@ export function createHttpSemanticServer(
             })
             .catch(() => undefined);
 
-          const serverCallbackHint = options.publicBaseUrl
-            ? `${options.publicBaseUrl.replace(/\/$/, "")}/auth/callback`
-            : undefined;
-
           return {
             content: [
               {
@@ -143,10 +156,8 @@ export function createHttpSemanticServer(
                 text: JSON.stringify({
                   status: "login_pending",
                   loginUrl: login.loginUrl,
-                  callbackUrl: login.callbackUrl,
-                  ...(serverCallbackHint ? { remoteCallbackUrl: serverCallbackHint } : {}),
-                  message:
-                    "Open loginUrl in your browser to sign in to TDEI. If your browser is on a remote machine without the local callback relay, pass the final callback URL from the browser address bar to tdei_sso_complete.",
+                  callbackUrl: browserRedirectUri ?? login.callbackUrl,
+                  message: "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here.",
                 }, null, 2),
               },
             ],
@@ -245,8 +256,8 @@ export function createHttpSemanticServer(
       async () => {
         try {
           const logout = openApiLifecycle
-            ? await openApiLifecycle.logout({ bindCallbackListener })
-            : await auth.logout({ bindCallbackListener });
+            ? await openApiLifecycle.logout(ssoBrowserOptions)
+            : await auth.logout(ssoBrowserOptions);
           void logout.completion.catch(() => undefined);
           return {
             content: [

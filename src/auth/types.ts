@@ -34,6 +34,12 @@ export interface SsoLoginOptions {
    * login never grabs a second port.
    */
   bindCallbackListener?: boolean | undefined;
+  /**
+   * Browser redirect sent to TDEI. Defaults to the configured loopback
+   * callback. Gateway logins pass the public URL nginx routes back to
+   * this process.
+   */
+  redirectUri?: string | undefined;
 }
 
 export interface ValidateTokenOptions {
@@ -54,4 +60,6 @@ export interface SsoLogoutOptions {
    * SsoLoginOptions.bindCallbackListener.
    */
   bindCallbackListener?: boolean | undefined;
+  /** Browser redirect sent to TDEI. See SsoLoginOptions.redirectUri. */
+  redirectUri?: string | undefined;
 }
