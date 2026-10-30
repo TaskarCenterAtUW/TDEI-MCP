@@ -313,7 +313,7 @@ Both serve the same thing on `http://127.0.0.1:3000/` (`$PORT` overrides,
 keeping it clear of the `mcps.json` child ports, default `3001+`):
 a landing page with live per-server status cards and an install-command
 builder, `POST :3000/<slug>/mcp` (MCP JSON-RPC), `GET :3000/<slug>/health`,
-`GET :3000/<slug>/auth/callback` (browser SSO return), and installers at
+`GET :3000/auth/callback` (browser SSO return), and installers at
 `:3000/<slug>/mcp/setup/...`. The nginx routes are regenerated from the
 effective `mcps.json` on every boot, so editing it and restarting is enough.
 
@@ -323,10 +323,10 @@ workflow change — the Container App's ingress target port just has to match
 `$PORT` (default `3000`). Keep the app at one replica: the SSO session lives
 in the child process that receives the browser callback.
 
-Each public callback `https://<host>/<slug>/auth/callback` must be registered
-on the TDEI `tdei-mcp` OAuth client before login will succeed. For this dev
-gateway that includes `https://tdei-mcp-dev.proudbay-977f7717.westus.azurecontainerapps.io/tdei-core-dev/auth/callback`
-and the same path for every other slug in `mcps.json`.
+The `tdei-mcp` OAuth client has one registered redirect,
+`https://<host>/auth/callback`. Every gateway child uses that address.
+Nginx asks each child in turn; the child that started login exchanges the
+code, and the others answer 404 without using it.
 
 Verify every configured server over real MCP transport (handshake,
 `tools/list`, signed-out-safe auth calls):
@@ -335,7 +335,7 @@ Verify every configured server over real MCP transport (handshake,
 node --import tsx scripts/multi-transport-check.ts --file mcps.json
 ```
 
-Browser SSO finishes on `GET /<slug>/auth/callback`. Open the `loginUrl`
+Browser SSO finishes on `GET /auth/callback`. Open the `loginUrl`
 from `tdei_sso_login`; the page says login complete when the session is stored.
 
 ## 4. Verify and use the connection
