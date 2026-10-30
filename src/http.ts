@@ -410,10 +410,32 @@ export async function serveHttp(
             response.end("Forbidden cross-site callback request");
             return;
           }
+          const authState = sessionAuth.getStatus().state;
+          const loginReturn = url.searchParams.has("code") || (url.searchParams.has("error") && authState === "login_pending");
+          // 404 means "not this child". The gateway retries the other
+          // children. A real exchange failure stays 401 so nginx stops.
+          if (loginReturn && authState !== "login_pending") {
+            response.writeHead(404, {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            response.end("No TDEI SSO login is pending on this server");
+            return;
+          }
+          if (!loginReturn && authState !== "logout_pending") {
+            response.writeHead(404, {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            response.end("No TDEI SSO logout is pending on this server");
+            return;
+          }
           try {
             const expectedCallback = new URL(getConfig().ssoCallbackUrl);
             expectedCallback.search = url.search;
-            const loggingOut = sessionAuth.getStatus().state === "logout_pending";
+            const loggingOut = !loginReturn;
             if (loggingOut) {
               sessionAuth.completeSsoLogout(expectedCallback.toString());
             } else {

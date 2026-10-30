@@ -43,7 +43,7 @@ function setupUrls(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): { 
   return {
     origin,
     mcpUrl: `${origin}${prefix || "/mcp"}`,
-    remoteCallbackUrl: publicAuthCallbackUrl(origin, gatewaySlug),
+    remoteCallbackUrl: publicAuthCallbackUrl(origin),
   };
 }
 

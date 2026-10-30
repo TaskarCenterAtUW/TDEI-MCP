@@ -25,8 +25,7 @@ export interface HttpSemanticServerOptions {
   publicBaseUrl?: string;
   /**
    * Gateway child slug. When set, SSO redirects the browser to
-   * `<publicBaseUrl>/<slug>/auth/callback` and does not bind a loopback
-   * listener.
+   * `<publicBaseUrl>/auth/callback` and does not bind a loopback listener.
    */
   gatewaySlug?: string | undefined;
   /**
@@ -104,7 +103,7 @@ export function createHttpSemanticServer(
     const gatewaySlug = options.gatewaySlug?.trim() || undefined;
     const bindCallbackListener = gatewaySlug ? false : (options.ssoCallbackListener ?? true);
     const browserRedirectUri = gatewaySlug && options.publicBaseUrl
-      ? publicAuthCallbackUrl(options.publicBaseUrl, gatewaySlug)
+      ? publicAuthCallbackUrl(options.publicBaseUrl)
       : undefined;
     const ssoBrowserOptions = {
       bindCallbackListener,

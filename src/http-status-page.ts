@@ -16,7 +16,7 @@ export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", gateway
     mcpUrl: `${origin}${prefix || "/mcp"}`,
     setupBase: `${origin}${prefix || "/mcp"}/setup`,
     healthUrl: `${origin}/health`,
-    callbackUrl: publicAuthCallbackUrl(publicBaseUrl, gatewaySlug),
+    callbackUrl: publicAuthCallbackUrl(publicBaseUrl),
   };
 }
 

@@ -90,10 +90,6 @@ const locations = servers
     # per-server health: /<slug>/health -> child /health
     location = /${s.slug}/health {
         proxy_pass http://${target}/health;
-    }
-    # SSO browser return: /<slug>/auth/callback -> child /auth/callback
-    location = /${s.slug}/auth/callback {
-        proxy_pass http://${target}/auth/callback;
     }`;
     }
     const v = `tdei_upstream_${varName(s.slug)}`;
@@ -116,14 +112,25 @@ const locations = servers
     location = /${s.slug}/health {
         set $${v} ${target};
         proxy_pass http://$${v}/health;
-    }
-    # SSO browser return: /<slug>/auth/callback -> child /auth/callback
-    location = /${s.slug}/auth/callback {
-        set $${v} ${target};
-        proxy_pass http://$${v}/auth/callback$is_args$args;
     }`;
   })
   .join("\n\n");
+
+const callbackUpstream = `upstream tdei_sso_callback {
+${servers.map((s) => `    server ${upstreamHost}:${s.port} max_fails=0;`).join("\n")}
+}
+`;
+
+const callbackLocation = `    # SSO browser return. The tdei-mcp client has one registered redirect:
+    # https://<host>/auth/callback. Children without a pending login return
+    # 404 and nginx tries the next child. The child that started login
+    # exchanges the code once.
+    location = /auth/callback {
+        proxy_buffering on;
+        proxy_next_upstream error timeout http_404;
+        proxy_next_upstream_tries ${servers.length};
+        proxy_pass http://tdei_sso_callback/auth/callback;
+    }`;
 
 const resolverBlock = direct
   ? ""
@@ -146,6 +153,7 @@ const conf = `# Auto-generated from ${file} — do not edit by hand.
 #   docker run --rm -p ${listen}:${listen} tdei-mcp
 # Then open http://127.0.0.1:${listen}/ for the gateway page, or POST MCP
 # JSON-RPC to http://127.0.0.1:${listen}${servers[0]?.basePath ?? "/<slug>/mcp"} etc.
+${callbackUpstream}
 server {
     listen ${listen};
     server_name _;
@@ -176,6 +184,8 @@ ${resolverBlock}    client_max_body_size 25m;
 
 ${locations}
 
+${callbackLocation}
+
     # Gateway landing page (generated ${htmlOut}).
     location = / {
         try_files /gateway.html =404;
@@ -183,7 +193,7 @@ ${locations}
 }
 `;
 
-const serverBody = conf.slice(conf.indexOf("server {"));
+const serverBody = conf.slice(conf.indexOf("upstream tdei_sso_callback"));
 const output = standalone
   ? `# Auto-generated standalone nginx config — run with: nginx -p <prefix> -c ${out}
 # Regenerate: npm run build && node scripts/generate-nginx-conf.mjs ${regenFlags}
