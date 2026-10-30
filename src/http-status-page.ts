@@ -1,3 +1,5 @@
+import { publicAuthCallbackUrl } from "./sso-public-callback.js";
+
 export interface StatusPageUrls {
   origin: string;
   mcpUrl: string;
@@ -6,7 +8,7 @@ export interface StatusPageUrls {
   callbackUrl: string;
 }
 
-export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp"): StatusPageUrls {
+export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", gatewaySlug?: string): StatusPageUrls {
   const origin = publicBaseUrl.replace(/\/$/, "");
   const prefix = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
   return {
@@ -14,7 +16,7 @@ export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp"): Status
     mcpUrl: `${origin}${prefix || "/mcp"}`,
     setupBase: `${origin}${prefix || "/mcp"}/setup`,
     healthUrl: `${origin}/health`,
-    callbackUrl: `${origin}/auth/callback`,
+    callbackUrl: publicAuthCallbackUrl(publicBaseUrl, gatewaySlug),
   };
 }
 
@@ -31,8 +33,8 @@ function escapeHtml(value: string): string {
  * Live values are fetched client-side from GET /health so the HTML
  * itself needs no templated secrets and has no new dependencies.
  */
-export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp"): string {
-  const urls = statusPageUrls(publicBaseUrl, basePath);
+export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
+  const urls = statusPageUrls(publicBaseUrl, basePath, gatewaySlug);
   const e = escapeHtml;
   const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `<!doctype html>

@@ -7,6 +7,7 @@ import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
 import { isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
+import { isAuthCallbackPath } from "./sso-public-callback.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
@@ -21,6 +22,11 @@ export interface HttpServeOptions {
    * second fixed port and parallel test processes cannot EADDRINUSE.
    */
   ssoCallbackListener?: boolean | undefined;
+  /**
+   * Gateway child slug. Production children receive this from
+   * `TDEI_GATEWAY_SLUG`. Tests pass it directly.
+   */
+  gatewaySlug?: string | undefined;
 }
 
 export interface HttpServeOverrides {
@@ -34,6 +40,7 @@ interface ResolvedHttpOptions {
   tokenValidationCache: Map<string, number>;
   requireBearerAuth: boolean;
   ssoCallbackListener: boolean;
+  gatewaySlug: string | undefined;
   sessionAuth: AuthManager;
   sessionOpenApiClient: OpenApiMcpClient;
 }
@@ -219,6 +226,7 @@ async function handleMcpRequest(
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       ssoCallbackListener: options.ssoCallbackListener,
+      ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
     });
   } else if (options.requireBearerAuth) {
     unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
@@ -232,6 +240,7 @@ async function handleMcpRequest(
       places: options.places,
       publicBaseUrl,
       ssoCallbackListener: options.ssoCallbackListener,
+      ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
     });
   }
 
@@ -273,6 +282,7 @@ export async function serveHttp(
     }));
     process.exit(1);
   }
+  const gatewaySlug = options.gatewaySlug?.trim() || process.env.TDEI_GATEWAY_SLUG?.trim() || undefined;
   const sessionAuth = new AuthManager();
   const sessionOpenApiClient = new OpenApiMcpClient({
     apiUrl: httpConfig.apiUrl,
@@ -288,7 +298,8 @@ export async function serveHttp(
     places: createConfiguredPlaceResolver(httpConfig, options.fetchImpl),
     tokenValidationCache: new Map<string, number>(),
     requireBearerAuth: options.requireBearerAuth ?? false,
-    ssoCallbackListener: options.ssoCallbackListener ?? true,
+    ssoCallbackListener: gatewaySlug ? false : (options.ssoCallbackListener ?? true),
+    gatewaySlug,
     sessionAuth,
     sessionOpenApiClient,
   };
@@ -310,7 +321,7 @@ export async function serveHttp(
         const url = new URL(request.url ?? "/", publicBaseUrl);
 
         if (request.method === "GET" && url.pathname === "/") {
-          const html = renderStatusPage(publicBaseUrl, basePath);
+          const html = renderStatusPage(publicBaseUrl, basePath, resolved.gatewaySlug);
           response.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-store",
@@ -340,7 +351,7 @@ export async function serveHttp(
           request.method === "GET" &&
           (url.pathname === `${basePath}/setup` || url.pathname === "/setup")
         ) {
-          const text = renderSetupOverview(publicBaseUrl, basePath);
+          const text = renderSetupOverview(publicBaseUrl, basePath, resolved.gatewaySlug);
           response.writeHead(200, {
             "Content-Type": "text/plain; charset=utf-8",
             "Cache-Control": "no-store",
@@ -377,8 +388,8 @@ export async function serveHttp(
             return;
           }
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath);
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, resolved.gatewaySlug)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, resolved.gatewaySlug);
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",
@@ -387,10 +398,7 @@ export async function serveHttp(
           return;
         }
 
-        if (
-          request.method === "GET" &&
-          (url.pathname === "/auth/callback" || url.pathname === "/callback")
-        ) {
+        if (request.method === "GET" && isAuthCallbackPath(url.pathname, resolved.gatewaySlug)) {
           const secFetchSite = request.headers["sec-fetch-site"];
           const secFetchMode = request.headers["sec-fetch-mode"];
           if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
@@ -405,14 +413,21 @@ export async function serveHttp(
           try {
             const expectedCallback = new URL(getConfig().ssoCallbackUrl);
             expectedCallback.search = url.search;
-            await sessionAuth.completeSsoLogin(expectedCallback.toString());
-            void sessionOpenApiClient.listTools().catch(() => undefined);
+            const loggingOut = sessionAuth.getStatus().state === "logout_pending";
+            if (loggingOut) {
+              sessionAuth.completeSsoLogout(expectedCallback.toString());
+            } else {
+              await sessionAuth.completeSsoLogin(expectedCallback.toString());
+              void sessionOpenApiClient.listTools().catch(() => undefined);
+            }
+            const title = loggingOut ? "TDEI logout complete" : "TDEI login complete";
+            const heading = loggingOut ? "Logout complete" : "Login complete";
             response.writeHead(200, {
               "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
+            response.end(`<!doctype html><title>${title}</title><h1>${heading}</h1><p>You may close this window and return to your agent.</p>`);
           } catch (error) {
             const detail = sanitizeAuthErrorDetail(error instanceof Error ? error.message : String(error));
             response.writeHead(401, {

@@ -20,9 +20,10 @@ import { renderStatusPage } from "../src/http-status-page.js";
 import { resolvePublicBaseUrl } from "../src/http.js";
 import { serveTestHttp } from "./helpers/test-http-server.js";
 
-// Installer runs below spawn a detached SSO callback relay for remote servers;
-// suppress it in tests so no relay process outlives the suite and holds port 8765.
-process.env.TDEI_NO_RELAY = "1";
+test("installer does not start a local SSO callback relay", () => {
+  assert.doesNotMatch(getClientSetupJs(), /sso-callback-relay/);
+  assert.doesNotMatch(getClientSetupJs(), /TDEI_NO_RELAY/);
+});
 
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
 

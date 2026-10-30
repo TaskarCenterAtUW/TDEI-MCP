@@ -48,6 +48,7 @@ function startChild(server: ResolvedMultiMcpServer, extraEnv: NodeJS.ProcessEnv)
         TDEI_HTTP_PORT: String(server.port),
         TDEI_HTTP_BASE_PATH: server.basePath,
         TDEI_SSO_CALLBACK_URL: server.ssoCallbackUrl,
+        TDEI_GATEWAY_SLUG: server.slug,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
