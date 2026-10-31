@@ -13,7 +13,6 @@ import { errorResult } from "./mcp/responses.js";
 import { signInText } from "./mcp/errors.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
-import type { DatasetAsset } from "./intents/types.js";
 import { REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 
@@ -84,7 +83,6 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       auth
         ? {
             tokenProvider: () => auth.getAccessToken(),
-            allowedAssetKinds: new Set<DatasetAsset["kind"]>(),
           }
         : undefined,
     ),

@@ -49,13 +49,14 @@ test("downloadDataset asks for the dataset id when missing", async () => {
   assert.ok(result.status === "needs_input" && result.missing.some((m) => m.field === "tdeiDatasetId"));
 });
 
-test("downloadDataset asks for the user-connected folder when outputDir is missing", async () => {
+test("downloadDataset defaults to the client Downloads folder when outputDir is missing", async () => {
   const { module } = createModule();
   const result = await module.downloadDataset({ tdeiDatasetId: "abc-123" });
-  assert.equal(result.status, "needs_input");
-  if (result.status !== "needs_input") throw new Error("expected needs_input");
-  assert.ok(result.missing.some((m) => m.field === "outputDir"));
-  assert.equal((result.accepted as Record<string, unknown>).tdeiDatasetId, "abc-123");
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") throw new Error("expected complete");
+  assert.ok(result.data.filePath.startsWith("$HOME/Downloads/"));
+  assert.ok(result.data.filePath.endsWith(".zip"));
+  assert.match(result.data.instruction, /\$HOME\/Downloads/);
 });
 
 test("downloadDataset returns a client-side curl command without fetching bytes", async () => {
@@ -130,8 +131,9 @@ test("download intent resolves to the registered tdei_download_dataset tool", as
     });
     const first = called.content[0];
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
-    assert.equal(body.status, "needs_input");
-    assert.ok(body.missing.some((m: { field: string }) => m.field === "outputDir"));
+    assert.equal(body.status, "complete");
+    assert.ok(body.data.filePath.startsWith("$HOME/Downloads/"));
+    assert.match(body.data.curlCommand, /curl -L/);
   } finally {
     await client.close();
   }

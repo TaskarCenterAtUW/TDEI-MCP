@@ -117,61 +117,45 @@ test("HTTP adapter parses BOM and fenced JSON list bodies", async () => {
   assert.deepEqual(groups, payload);
 });
 
-test("HTTP adapter submits local_path validation assets as multipart", async () => {
-  const tmp = await import("node:os").then((m) => m.tmpdir());
-  const path = await import("node:path").then((m) => m.join(tmp, `dataset-${Date.now()}.zip`));
-  await import("node:fs/promises").then((m) => m.writeFile(path, "UEsDBA=="));
-  let request: Request | undefined;
+test("HTTP adapter validate returns a client-side curl instruction without fetching", async () => {
+  let calls = 0;
   const adapter = new HttpTdeiOperations(
     "https://api.example.test",
-    async (input, init) => {
-      request = new Request(input, init);
-      return new Response("validation-job", {
-        status: 202,
-        headers: { Location: "/api/v1/jobs/validation-job" },
-      });
+    async () => {
+      calls += 1;
+      return new Response("must not fetch bytes", { status: 500 });
     },
     15_000,
-    { allowedAssetKinds: new Set(["local_path"]) },
   );
-  const job = await adapter.validateDataset(
+  const instruction = await adapter.validateDataset(
     {
       dataType: "osw",
-      asset: { kind: "local_path", path },
+      asset: { kind: "local_path", path: "/Users/tester/data/dataset.zip" },
     },
     { accessToken: "bearer-A" },
   );
 
-  assert.deepEqual(job, {
-    jobId: "validation-job",
-    location: "/api/v1/jobs/validation-job",
-  });
-  assert.equal(request?.url, "https://api.example.test/api/v1/osw/validate");
-  assert.equal(request?.headers.get("Authorization"), "Bearer bearer-A");
-  const form = await request?.formData();
-  const dataset = form?.get("dataset");
-  assert.ok(dataset instanceof File);
-  assert.ok(dataset.name.endsWith(".zip"));
+  assert.equal(instruction.apiOperation, "validateDataset");
+  assert.equal(instruction.method, "POST");
+  assert.equal(instruction.path, "/api/v1/osw/validate");
+  assert.match(
+    instruction.curlCommand,
+    /curl -X POST "https:\/\/api\.example\.test\/api\/v1\/osw\/validate" -H "Authorization: Bearer bearer-A" -F "dataset=@\/Users\/tester\/data\/dataset\.zip"/,
+  );
+  assert.match(instruction.instruction, /already embedded/);
+  assert.equal(calls, 0);
 });
 
-test("HTTP adapter uploads dataset and metadata to the selected target", async () => {
-  let request: Request | undefined;
+test("HTTP adapter upload returns curl with inline metadata and encoded target", async () => {
+  let calls = 0;
   const adapter = new HttpTdeiOperations(
     "https://api.example.test",
-    async (input, init) => {
-      request = new Request(input, init);
-      return new Response("upload-job", { status: 202 });
+    async () => {
+      calls += 1;
+      return new Response("must not fetch bytes", { status: 500 });
     },
     15_000,
-    { allowedAssetKinds: new Set(["local_path"]) },
   );
-  const tmpUpload = await import("node:os").then((m) => m.tmpdir());
-  const uploadPath = await import("node:path").then((m) => m.join(tmpUpload, `upload-${Date.now()}.zip`));
-  await import("node:fs/promises").then((m) => m.writeFile(uploadPath, "UEsDBA=="));
-  const asset = {
-    kind: "local_path" as const,
-    path: uploadPath,
-  };
   const metadata = {
     dataset_detail: {
       name: "Seattle OSW",
@@ -182,103 +166,119 @@ test("HTTP adapter uploads dataset and metadata to the selected target", async (
       schema_version: "0.3",
     },
   };
-  const job = await adapter.uploadDataset(
+  const instruction = await adapter.uploadDataset(
     {
       dataType: "pathways",
-      asset,
+      asset: { kind: "local_path", path: "/Users/tester/data/upload.zip" },
       projectGroupId: "group 1",
       serviceId: "service/1",
       metadata,
       derivedFromDatasetId: "source-1",
+      changeset: { kind: "local_path", path: "/Users/tester/data/change.osc" },
     },
     { accessToken: "bearer-A" },
   );
 
-  assert.equal(job.jobId, "upload-job");
-  assert.equal(
-    request?.url,
-    "https://api.example.test/api/v1/gtfs-pathways/upload/group%201/service%2F1?derived_from_dataset_id=source-1",
-  );
-  const form = await request?.formData();
-  assert.ok(form?.get("dataset") instanceof File);
-  const metadataFile = form?.get("metadata");
-  assert.ok(metadataFile instanceof File);
-  assert.deepEqual(JSON.parse(await metadataFile.text()), metadata);
+  assert.equal(instruction.apiOperation, "uploadDataset");
+  assert.equal(instruction.path, "/api/v1/gtfs-pathways/upload/group%201/service%2F1");
+  assert.ok(instruction.curlCommand.includes("derived_from_dataset_id=source-1"));
+  assert.ok(instruction.curlCommand.includes('-F "dataset=@/Users/tester/data/upload.zip"'));
+  assert.ok(instruction.curlCommand.includes(`-F 'metadata=${JSON.stringify(metadata)};type=application/json'`));
+  assert.ok(instruction.curlCommand.includes('-F "changeset=@/Users/tester/data/change.osc"'));
+  assert.ok(instruction.curlCommand.includes("Bearer bearer-A"));
+  assert.equal(calls, 0);
 });
 
-test("HTTP adapter rejects hosted bytes and guides to curl", async () => {
-  const adapter = new HttpTdeiOperations(
-    "https://api.example.test",
-    async () => new Response("never", { status: 202 }),
-    15_000,
-    { allowedAssetKinds: new Set([]) },
-  );
-  await assert.rejects(
-    () =>
-      adapter.validateDataset(
-        { dataType: "osw", asset: { kind: "local_path", path: "/tmp/dataset.zip" } },
-        { accessToken: "bearer-A" },
-      ),
-    /curl.*validate/i,
-  );
-});
-
-test("HTTP adapter default rejects local_path with the never-accepts-bytes message", async () => {
-  const adapter = new HttpTdeiOperations(
-    "https://api.example.test",
-    async () => new Response("never", { status: 202 }),
-  );
-  await assert.rejects(
-    () =>
-      adapter.validateDataset(
-        { dataType: "osw", asset: { kind: "local_path", path: "/tmp/dataset.zip" } },
-        { accessToken: "bearer-A" },
-      ),
-    /never accepts file bytes/,
-  );
-});
-
-test("HTTP adapter rejects unsupported upload file extensions and retries transient 503 on upload", async () => {
-  let attempts = 0;
-  const adapter = new HttpTdeiOperations(
+test("HTTP adapter upload falls back to the token provider and then $TDEI_TOKEN", async () => {
+  const calls: number[] = [];
+  const withProvider = new HttpTdeiOperations(
     "https://api.example.test",
     async () => {
-      attempts += 1;
-      if (attempts === 1) {
-        return new Response("temporarily unavailable", { status: 503 });
-      }
-      return new Response("retried-job", { status: 202 });
+      calls.push(1);
+      return new Response("must not fetch", { status: 500 });
     },
     15_000,
-    { allowedAssetKinds: new Set(["local_path"]) },
+    { tokenProvider: async () => "provider-token" },
   );
+  const viaProvider = await withProvider.validateDataset(
+    { dataType: "flex", asset: { kind: "local_path", path: "/data/flex.zip" } },
+    {},
+  );
+  assert.ok(viaProvider.curlCommand.includes("Bearer provider-token"));
+  assert.match(viaProvider.instruction, /already embedded/);
 
-  const tmpBad = await import("node:os").then((m) => m.tmpdir());
-  const badPath = await import("node:path").then((m) => m.join(tmpBad, `malware-${Date.now()}.sh`));
-  await import("node:fs/promises").then((m) => m.writeFile(badPath, "echo hello"));
+  const withoutToken = new HttpTdeiOperations("https://api.example.test");
+  const viaPlaceholder = await withoutToken.validateDataset(
+    { dataType: "flex", asset: { kind: "local_path", path: "/data/flex.zip" } },
+    {},
+  );
+  assert.ok(viaPlaceholder.curlCommand.includes("Bearer $TDEI_TOKEN"));
+  assert.match(viaPlaceholder.instruction, /sign in via tdei_sso_login first/);
+});
+
+test("HTTP adapter refuses non-local assets and guides to curl", async () => {
+  const adapter = new HttpTdeiOperations("https://api.example.test");
   await assert.rejects(
     () =>
       adapter.validateDataset(
         {
           dataType: "osw",
-          asset: { kind: "local_path", path: badPath },
+          asset: { kind: "inline_base64", name: "dataset.zip", mediaType: "application/zip", data: "UEsDBA==" },
+        },
+        { accessToken: "bearer-A" },
+      ),
+    /must be a local_path asset/,
+  );
+});
+
+test("HTTP adapter rejects unsupported upload file extensions without fetching", async () => {
+  let attempts = 0;
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async () => {
+      attempts += 1;
+      return new Response("must not fetch", { status: 500 });
+    },
+    15_000,
+  );
+
+  await assert.rejects(
+    () =>
+      adapter.validateDataset(
+        {
+          dataType: "osw",
+          asset: { kind: "local_path", path: "/tmp/malware.sh" },
         },
         { accessToken: "bearer-A" },
       ),
     /Unsupported dataset file extension "\.sh"/,
   );
   assert.equal(attempts, 0);
+});
 
-  const tmpOk = await import("node:os").then((m) => m.tmpdir());
-  const okPath = await import("node:path").then((m) => m.join(tmpOk, `retry-${Date.now()}.zip`));
-  await import("node:fs/promises").then((m) => m.writeFile(okPath, "UEsDBA=="));
-  const job = await adapter.validateDataset(
-    {
-      dataType: "osw",
-      asset: { kind: "local_path", path: okPath },
+test("HTTP adapter rejects relative client paths without fetching", async () => {
+  let attempts = 0;
+  const adapter = new HttpTdeiOperations(
+    "https://api.example.test",
+    async () => {
+      attempts += 1;
+      return new Response("must not fetch", { status: 500 });
     },
-    { accessToken: "bearer-A" },
+    15_000,
   );
-  assert.equal(attempts, 2);
-  assert.equal(job.jobId, "retried-job");
+  await assert.rejects(
+    () =>
+      adapter.uploadDataset(
+        {
+          dataType: "osw",
+          asset: { kind: "local_path", path: "relative/dataset.zip" },
+          projectGroupId: "group-1",
+          serviceId: "service-1",
+          metadata: { dataset_detail: { name: "x" } },
+        },
+        { accessToken: "bearer-A" },
+      ),
+    /must be absolute on the CLIENT machine/,
+  );
+  assert.equal(attempts, 0);
 });

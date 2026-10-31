@@ -26,6 +26,44 @@ export interface DownloadInstruction {
 }
 
 /**
+ * Default client-side downloads folder. Returned as a shell expression that
+ * is expanded on the CLIENT machine — never resolved with node:os on the
+ * MCP server, which must not touch the server filesystem for downloads.
+ * $HOME expands in bash/zsh and PowerShell; Windows cmd.exe callers
+ * substitute the connected folder's absolute path before running.
+ */
+export function defaultClientDownloadsDir(): string {
+  return "$HOME/Downloads";
+}
+
+/**
+ * Join a client-side directory with a filename. Client-side expressions
+ * (containing `$`, e.g. $HOME/Downloads) join with `/`, which works in
+ * bash/zsh and PowerShell; explicit Windows paths (drive letter or
+ * backslashes) join with `\`; everything else joins with `/`.
+ */
+export function joinDownloadPath(dir: string, filename: string): string {
+  const base = dir.replace(/[/\\]+$/, "");
+  const sep = /\\|^[A-Za-z]:/.test(base) ? "\\" : "/";
+  return `${base}${sep}${filename}`;
+}
+
+/**
+ * Shared client-side download command used by every download path. Flags:
+ * -L (follow redirects), -sS (silent but show errors), --create-dirs
+ * (create the target folder), --fail-with-body (non-zero exit on HTTP
+ * errors while still printing the body), and -w prints a trailing
+ * HTTP_STATUS line so clients can verify success regardless of extension.
+ * All interpolations are double-quoted for paths containing spaces.
+ */
+export function buildClientDownloadCurl(url: string, bearer: string, filePath: string): string {
+  return (
+    `curl -L -sS --create-dirs --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n" ` +
+    `-H "Authorization: Bearer ${bearer}" "${url}" -o "${filePath}"`
+  );
+}
+
+/**
  * Client-side counterpart to the former streaming downloader.
  *
  * Generic MCP text results cannot safely carry ZIP payloads, and the MCP
@@ -65,7 +103,7 @@ export class BinaryTdeiDownloads {
     // Falls back to $TDEI_TOKEN only when no session token is available.
     const bearer = await this.resolveCurlToken(context);
     const auth = bearer ?? "$TDEI_TOKEN";
-    const curlCommand = `curl -L -H "Authorization: Bearer ${auth}" "${url}" -o "${filename}"`;
+    const curlCommand = buildClientDownloadCurl(url, auth, filename);
     return {
       tool,
       method: "GET",

@@ -1,9 +1,5 @@
 import SwaggerParser from "@apidevtools/swagger-parser";
-import { openAsBlob } from "node:fs";
-import { stat } from "node:fs/promises";
-import { basename, extname, isAbsolute } from "node:path";
-
-import { ALLOWED_UPLOAD_EXTENSIONS } from "../adapters/direct-multipart-tdei-mutations.js";
+import { basename } from "node:path";
 
 type JsonObject = Record<string, unknown>;
 
@@ -69,8 +65,6 @@ export interface OpenApiMcpClientOptions {
   loadSpec?: () => Promise<JsonObject>;
   operationName?: (operationId: string) => string;
   logger?: (message: string) => void;
-  allowLocalFileUploads?: boolean;
-  allowedUploadExtensions?: ReadonlySet<string>;
 }
 
 export class OpenApiHttpError extends Error {
@@ -190,52 +184,13 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
   url.searchParams.append(name, String(value));
 }
 
-function uploadMimeType(filePath: string): string {
-  switch (extname(filePath).toLowerCase()) {
-    case ".zip":
-      return "application/zip";
-    case ".json":
-      return "application/json";
-    case ".geojson":
-      return "application/geo+json";
-    case ".osm":
-    case ".osc":
-    case ".xml":
-      return "application/xml";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-async function appendFormValue(
-  form: FormData,
-  name: string,
-  value: unknown,
-  binary: boolean,
-  allowedExtensions: ReadonlySet<string> = ALLOWED_UPLOAD_EXTENSIONS,
-): Promise<void> {
-  if (binary && typeof value === "string" && isAbsolute(value)) {
-    const ext = extname(value).toLowerCase();
-    if (!allowedExtensions.has(ext)) {
-      throw new Error(
-        `Unsupported upload file extension "${ext || "(none)"}" for "${basename(value)}". Allowed extensions: ${[...allowedExtensions].join(", ")}.`,
-      );
-    }
-    let fileStat;
-    try {
-      fileStat = await stat(value);
-    } catch {
-      throw new Error(`Upload file "${value}" does not exist or is not readable.`);
-    }
-    if (!fileStat.isFile()) {
-      throw new Error(`Upload path "${value}" must point to a regular file.`);
-    }
-    if (fileStat.size === 0) {
-      throw new Error(`Upload file "${basename(value)}" is empty (0 bytes).`);
-    }
-    const blob = await openAsBlob(value, { type: uploadMimeType(value) });
-    form.append(name, blob, basename(value));
-    return;
+async function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): Promise<void> {
+  if (binary && typeof value === "string") {
+    // File bytes never go through MCP: binary form fields only accept file
+    // paths for client-side curl, so refuse them here with the runbook.
+    throw new Error(
+      `MCP never accepts file bytes — run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
+    );
   }
   if (value instanceof Blob) {
     form.append(name, value);
@@ -256,8 +211,6 @@ export class OpenApiMcpClient {
   private readonly apiUrl: string;
   private readonly operationName: (operationId: string) => string;
   private readonly logger: (message: string) => void;
-  private readonly allowLocalFileUploads: boolean;
-  private readonly allowedUploadExtensions: ReadonlySet<string>;
   private tools: OpenApiToolDefinition[] | undefined;
   private operations = new Map<string, CompiledOperation>();
 
@@ -270,8 +223,6 @@ export class OpenApiMcpClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.operationName = options.operationName ?? defaultOperationName;
     this.logger = options.logger ?? ((message) => console.error(message));
-    this.allowLocalFileUploads = options.allowLocalFileUploads ?? false;
-    this.allowedUploadExtensions = options.allowedUploadExtensions ?? ALLOWED_UPLOAD_EXTENSIONS;
     const specUrl = options.specUrl;
     this.loadSpecImpl = options.loadSpec ?? (() => loadOpenApiDocument(specUrl!));
   }
@@ -321,23 +272,7 @@ export class OpenApiMcpClient {
         buildBody = async () => {
           const form = new FormData();
           for (const [key, value] of Object.entries(values)) {
-            if (
-              operation.binaryBodyProperties.has(key) &&
-              !this.allowLocalFileUploads &&
-              typeof value === "string" &&
-              isAbsolute(value)
-            ) {
-              throw new Error(
-                `MCP never accepts file bytes — run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
-              );
-            }
-            await appendFormValue(
-              form,
-              key,
-              value,
-              operation.binaryBodyProperties.has(key) && this.allowLocalFileUploads,
-              this.allowedUploadExtensions,
-            );
+            await appendFormValue(form, key, value, operation.binaryBodyProperties.has(key));
           }
           return form;
         };

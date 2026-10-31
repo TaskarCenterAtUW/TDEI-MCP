@@ -1,7 +1,12 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import { BinaryTdeiDownloads } from "../src/adapters/binary-tdei-downloads.js";
+import {
+  BinaryTdeiDownloads,
+  buildClientDownloadCurl,
+  defaultClientDownloadsDir,
+  joinDownloadPath,
+} from "../src/adapters/binary-tdei-downloads.js";
 
 // The MCP server never touches file bytes: no fetch, no fs. These tests prove
 // the download adapter is pure — it resolves routes and returns a client-side
@@ -28,7 +33,7 @@ test("getOswFile resolves to a client-side curl instruction without network", as
   assert.equal(result.filename, "getOswFile-yakima-1.zip");
   assert.equal(
     result.curlCommand,
-    'curl -L -H "Authorization: Bearer bearer-A" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
+    'curl -L -sS --create-dirs --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n" -H "Authorization: Bearer bearer-A" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
   );
   assert.match(result.instruction, /CLIENT machine/);
 });
@@ -83,4 +88,23 @@ test("isDownloadTool only matches binary streaming tools", () => {
   assert.equal(BinaryTdeiDownloads.isDownloadTool("job_download"), true);
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listDatasetFiles"), false);
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listServices"), false);
+});
+
+test("shared download curl builder quotes paths and reports HTTP status", () => {
+  const command = buildClientDownloadCurl("https://api.example.test/api/v1/osw/a b", "tok", "$HOME/Downloads/a b.zip");
+
+  assert.equal(
+    command,
+    'curl -L -sS --create-dirs --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n" -H "Authorization: Bearer tok" "https://api.example.test/api/v1/osw/a b" -o "$HOME/Downloads/a b.zip"',
+  );
+});
+
+test("default client downloads dir stays a client-side expression", () => {
+  assert.equal(defaultClientDownloadsDir(), "$HOME/Downloads");
+});
+
+test("joinDownloadPath keeps separators native to the client path", () => {
+  assert.equal(joinDownloadPath("$HOME/Downloads", "a.zip"), "$HOME/Downloads/a.zip");
+  assert.equal(joinDownloadPath("/tmp/out/", "a.zip"), "/tmp/out/a.zip");
+  assert.equal(joinDownloadPath("C:\\Users\\me\\Downloads\\", "a.zip"), "C:\\Users\\me\\Downloads\\a.zip");
 });

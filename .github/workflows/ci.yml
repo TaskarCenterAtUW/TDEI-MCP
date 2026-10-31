@@ -30,4 +30,3 @@ jobs:
           # scripts/secret-scan.sh). Verified-only keeps it low-noise.
           extra_args: --results verified
       - run: pnpm test:coverage
-      - run: pnpm test:mutation

@@ -1,6 +1,6 @@
 import type {
   DataType,
-  AcceptedJob,
+  ClientUploadInstruction,
   DatasetAsset,
   DatasetMetadata,
   Dataset,
@@ -156,7 +156,10 @@ export interface TdeiOperations {
   verifyEmail?(input: { email: string }, context: RequestContext): Promise<unknown>;
   recoverPassword?(input: { email: string }, context: RequestContext): Promise<unknown>;
   regenerateApiKey?(context: RequestContext): Promise<string>;
-  validateDataset?(input: { dataType: DataType; asset: DatasetAsset }, context: RequestContext): Promise<AcceptedJob>;
+  validateDataset?(
+    input: { dataType: DataType; asset: DatasetAsset },
+    context: RequestContext,
+  ): Promise<ClientUploadInstruction>;
   uploadDataset?(
     input: {
       dataType: DataType;
@@ -168,5 +171,5 @@ export interface TdeiOperations {
       changeset?: DatasetAsset;
     },
     context: RequestContext,
-  ): Promise<AcceptedJob>;
+  ): Promise<ClientUploadInstruction>;
 }

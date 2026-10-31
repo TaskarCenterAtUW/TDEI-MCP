@@ -10,5 +10,4 @@ export const openApiMcpClient = new OpenApiMcpClient({
   headersProvider: async () => ({
     Authorization: `Bearer ${await authManager.getAccessToken()}`,
   }),
-  allowLocalFileUploads: false,
 });

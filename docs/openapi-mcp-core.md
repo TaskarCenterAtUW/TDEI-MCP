@@ -56,8 +56,9 @@ incoming Bearer value without sharing it between requests.
 - `includeOperations`, `excludeOperations`, and `hiddenOperations`, applied to
   final MCP tool names after normalization and prefixing.
 - `headersProvider` for API keys, Bearers, or other upstream request headers.
-- `allowLocalFileUploads`, disabled by default, for trusted local stdio servers
-  that intentionally accept absolute paths for binary multipart fields.
+- Binary multipart fields never accept file bytes: absolute-path strings are
+  refused with a client-side curl runbook, since uploads run from the client
+  machine and never through the MCP server.
 - `executeOperation` for binary downloads, unusual serialization, retries, or
   operations that should bypass the generic executor.
 - `configure` to register curated tools, resources, or prompts on the same

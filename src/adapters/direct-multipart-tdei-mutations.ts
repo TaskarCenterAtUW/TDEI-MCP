@@ -1,9 +1,13 @@
-import { openAsBlob } from "node:fs";
-import { stat } from "node:fs/promises";
-import { basename, extname, isAbsolute } from "node:path";
+import { basename, extname } from "node:path";
 
 import type { TdeiOperations } from "../intents/operations.js";
-import type { AcceptedJob, DatasetAsset, RequestContext } from "../intents/types.js";
+import type {
+  ClientUploadInstruction,
+  DataType,
+  DatasetAsset,
+  DatasetMetadata,
+  RequestContext,
+} from "../intents/types.js";
 import { TdeiHttpError } from "./tdei-http-error.js";
 
 type DatasetMutations = Required<Pick<TdeiOperations, "validateDataset" | "uploadDataset">>;
@@ -12,10 +16,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = new Set([".zip", ".json", ".geojson", "
 
 export type MultipartFieldValue = string | DatasetAsset | { json: unknown; filename: string };
 
-async function fieldToFormValue(
-  value: MultipartFieldValue,
-  fileFromAsset: (asset: DatasetAsset) => Promise<{ file: Blob; name: string }>,
-): Promise<{ value: string | Blob; filename?: string }> {
+async function fieldToFormValue(value: MultipartFieldValue): Promise<{ value: string | Blob; filename?: string }> {
   if (typeof value === "string") return { value };
   if ("json" in value) {
     return {
@@ -23,82 +24,98 @@ async function fieldToFormValue(
       filename: value.filename,
     };
   }
-  const file = await fileFromAsset(value);
-  return { value: file.file, filename: file.name };
+  throw new Error(
+    "MCP never accepts file bytes — run the bytes via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Do not retry bytes through MCP.",
+  );
 }
 
 export interface DirectMultipartOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
-  allowedAssetKinds: ReadonlySet<DatasetAsset["kind"]>;
   timeoutMs?: number;
-  maxRetries?: number;
 }
 
-const RETRYABLE_UPLOAD_STATUSES = new Set([408, 429, 502, 503, 504]);
-
+/**
+ * Builds client-side curl upload instructions. File bytes never flow through
+ * the MCP server: the returned curl command reads the dataset straight from
+ * the CLIENT machine and posts it to the TDEI API in a single hop.
+ */
 export class DirectMultipartTdeiMutations implements DatasetMutations {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
-  private readonly maxRetries: number;
+  private readonly tokenProvider?: () => Promise<string>;
 
-  constructor(private readonly options: DirectMultipartOptions) {
+  constructor(options: DirectMultipartOptions) {
     this.baseUrl = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
-    this.maxRetries = Math.max(0, options.maxRetries ?? 1);
+    if (options.tokenProvider !== undefined) this.tokenProvider = options.tokenProvider;
   }
 
   async validateDataset(
     input: Parameters<DatasetMutations["validateDataset"]>[0],
     context: RequestContext,
-  ): Promise<AcceptedJob> {
-    return this.post(
-      `api/v1/${this.dataTypePath(input.dataType)}/validate`,
-      async () => {
-        const form = new FormData();
-        const dataset = await this.fileFromAsset(input.asset);
-        form.set("dataset", dataset.file, dataset.name);
-        return form;
-      },
-      context,
-    );
+  ): Promise<ClientUploadInstruction> {
+    const datasetPath = clientAssetPath(input.asset, "asset");
+    const path = `api/v1/${this.dataTypePath(input.dataType)}/validate`;
+    const url = new URL(path, this.baseUrl).toString();
+    const bearer = await this.resolveCurlToken(context);
+    const auth = bearer ?? "$TDEI_TOKEN";
+    const curlCommand = `curl -X POST "${url}" -H "Authorization: Bearer ${auth}" -F "dataset=@${datasetPath}" -sS --fail-with-body`;
+    return {
+      dataType: input.dataType,
+      datasetPath,
+      apiOperation: "validateDataset",
+      method: "POST",
+      path: `/${path}`,
+      curlCommand,
+      instruction:
+        `MCP server never accepts file bytes and never reads client files: run on the CLIENT machine (any size, single hop): ${curlCommand} ` +
+        (bearer
+          ? `with the current TDEI SSO session token already embedded (from tdei_sso_login; no $TDEI_TOKEN export needed).`
+          : `with $TDEI_TOKEN set to the current TDEI SSO bearer token (sign in via tdei_sso_login first).`) +
+        ` Then poll with tdei_list_jobs.`,
+    };
   }
 
   async uploadDataset(
     input: Parameters<DatasetMutations["uploadDataset"]>[0],
     context: RequestContext,
-  ): Promise<AcceptedJob> {
+  ): Promise<ClientUploadInstruction> {
+    const datasetPath = clientAssetPath(input.asset, "asset");
     const params = new URLSearchParams();
     if (input.derivedFromDatasetId) {
       params.set("derived_from_dataset_id", input.derivedFromDatasetId);
     }
-    return this.post(
-      `api/v1/${this.dataTypePath(input.dataType)}/upload/${encodeURIComponent(input.projectGroupId)}/${encodeURIComponent(input.serviceId)}`,
-      async () => {
-        const form = new FormData();
-        const dataset = await this.fileFromAsset(input.asset);
-        form.set("dataset", dataset.file, dataset.name);
-        form.set(
-          "metadata",
-          new File([JSON.stringify(input.metadata)], "metadata.json", {
-            type: "application/json",
-          }),
-        );
-        if (input.changeset) {
-          const changeset = await this.fileFromAsset(input.changeset);
-          form.set("changeset", changeset.file, changeset.name);
-        }
-        return form;
-      },
-      context,
-      params,
-    );
+    const path = `api/v1/${this.dataTypePath(input.dataType)}/upload/${encodeURIComponent(input.projectGroupId)}/${encodeURIComponent(input.serviceId)}`;
+    const url = new URL(path, this.baseUrl);
+    url.search = params.toString();
+    const metadataArg = `-F 'metadata=${shellQuoteJson(input.metadata)};type=application/json'`;
+    const changesetArg = input.changeset ? ` -F "changeset=@${clientAssetPath(input.changeset, "changeset")}"` : "";
+    const bearer = await this.resolveCurlToken(context);
+    const auth = bearer ?? "$TDEI_TOKEN";
+    const curlCommand =
+      `curl -X POST "${url.toString()}" -H "Authorization: Bearer ${auth}" ` +
+      `-F "dataset=@${datasetPath}" ${metadataArg}${changesetArg} -sS --fail-with-body`;
+    return {
+      dataType: input.dataType,
+      datasetPath,
+      apiOperation: "uploadDataset",
+      method: "POST",
+      path: `/${path}`,
+      curlCommand,
+      instruction:
+        `MCP server never accepts file bytes and never reads client files: run on the CLIENT machine (any size, single hop): ${curlCommand} ` +
+        (bearer
+          ? `with the current TDEI SSO session token already embedded (from tdei_sso_login; no $TDEI_TOKEN export needed).`
+          : `with $TDEI_TOKEN set to the current TDEI SSO bearer token (sign in via tdei_sso_login first).`) +
+        ` Then poll with tdei_list_jobs. The 'metadata=...' value is single-quoted for bash/zsh/PowerShell; on Windows cmd.exe re-quote it with double quotes (escape inner " as \\").`,
+    };
   }
 
-  /** Generic multipart POST for job/file ops beyond validate+upload. Returns parsed JSON or raw text. */
+  /** Generic multipart POST for JSON-only job/file ops (clone, launchJob fields). File assets are refused. */
   async postForm(
     path: string,
     fields: Record<string, MultipartFieldValue>,
@@ -109,7 +126,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     url.search = params.toString();
     const form = new FormData();
     for (const [name, fieldValue] of Object.entries(fields)) {
-      const { value, filename } = await fieldToFormValue(fieldValue, (asset) => this.fileFromAsset(asset));
+      const { value, filename } = await fieldToFormValue(fieldValue);
       if (typeof value === "string") form.set(name, value);
       else form.set(name, value, filename ?? name);
     }
@@ -140,112 +157,63 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     }
   }
 
-  private async fileFromAsset(asset: DatasetAsset): Promise<{ file: Blob; name: string }> {
-    if (!this.options.allowedAssetKinds.has(asset.kind)) {
-      throw new Error(
-        `MCP never accepts file bytes. Run the bytes via curl from the client machine (single hop, any size): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip". Then poll with tdei_list_jobs. Do not retry bytes through MCP.`,
-      );
-    }
-    if (asset.kind === "local_path") {
-      if (!isAbsolute(asset.path)) {
-        throw new Error("Dataset local_path must be an absolute path on the MCP connector host.");
-      }
-      const resolvedName = asset.name ?? basename(asset.path);
-      assertAllowedExtension(asset.path);
-      if (asset.name) assertAllowedExtension(asset.name);
-      let fileStat;
+  private async resolveCurlToken(context: RequestContext): Promise<string | undefined> {
+    if (context.accessToken?.trim()) return context.accessToken.trim();
+    if (this.tokenProvider) {
       try {
-        fileStat = await stat(asset.path);
-        if (!fileStat.isFile()) throw new Error("not a regular file");
+        const token = await this.tokenProvider();
+        if (token?.trim()) return token.trim();
       } catch {
-        throw new Error("Dataset local_path must point to a readable regular file on the MCP connector host.");
+        return undefined;
       }
-      if (fileStat.size === 0) {
-        throw new Error(`Dataset file "${resolvedName}" is empty (0 bytes).`);
-      }
-      return {
-        file: await openAsBlob(asset.path, { type: mimeType(asset.path) }),
-        name: resolvedName,
-      };
     }
-    throw new Error(
-      "Object-reference dataset assets require an object-store adapter. For any file size, run bytes via curl from the client machine, then poll with tdei_list_jobs.",
-    );
+    return undefined;
   }
 
   private async token(context: RequestContext): Promise<string> {
     if (context.accessToken) return context.accessToken;
-    if (this.options.tokenProvider) return this.options.tokenProvider();
+    if (this.tokenProvider) return this.tokenProvider();
     throw new Error("TDEI_SSO_REQUIRED");
   }
 
-  private async post(
-    path: string,
-    buildForm: () => Promise<FormData>,
-    context: RequestContext,
-    params = new URLSearchParams(),
-  ): Promise<AcceptedJob> {
-    const url = new URL(path, this.baseUrl);
-    url.search = params.toString();
-    const totalAttempts = this.maxRetries + 1;
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
-      const form = await buildForm();
-      const bearer = await this.token(context);
-      let response: Response;
-      try {
-        response = await this.fetchImpl(url, {
-          method: "POST",
-          headers: {
-            Accept: "application/json, text/plain, application/text",
-            Authorization: `Bearer ${bearer}`,
-          },
-          body: form,
-          redirect: "error",
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < totalAttempts && isRetryableNetworkError(error)) {
-          continue;
-        }
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`TDEI multipart upload failed after ${attempt} attempt(s) for ${path}: ${reason}`, {
-          cause: error,
-        });
-      }
-
-      const text = await response.text();
-      if (!response.ok) {
-        let body: unknown = text;
-        try {
-          body = JSON.parse(text) as unknown;
-        } catch {}
-        const httpError = new TdeiHttpError(
-          `TDEI request failed with status ${response.status} (attempt ${attempt}/${totalAttempts}).`,
-          response.status,
-          body,
-        );
-        lastError = httpError;
-        if (attempt < totalAttempts && RETRYABLE_UPLOAD_STATUSES.has(response.status)) {
-          continue;
-        }
-        throw httpError;
-      }
-      const jobId = parseJobId(text);
-      const location = response.headers.get("Location");
-      return { jobId, ...(location ? { location } : {}) };
-    }
-
-    throw lastError instanceof Error ? lastError : new Error(`TDEI multipart upload failed for ${path}.`);
-  }
-
-  private dataTypePath(dataType: "osw" | "flex" | "pathways"): string {
+  private dataTypePath(dataType: DataType): string {
     if (dataType === "flex") return "gtfs-flex";
     if (dataType === "pathways") return "gtfs-pathways";
     return "osw";
   }
+}
+
+/**
+ * Resolve a dataset asset to a CLIENT-machine file path. The path is only
+ * ever embedded in the curl command — the server never stats, opens, or
+ * reads it. Only local_path assets are supported: inline_base64, url, and
+ * object_ref kinds would require bytes (or server fetches) through MCP.
+ */
+function clientAssetPath(asset: DatasetAsset, field: string): string {
+  if (asset.kind !== "local_path") {
+    throw new Error(
+      `MCP never accepts file bytes — "${field}" must be a local_path asset with the absolute dataset path on the CLIENT machine. Run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs.`,
+    );
+  }
+  const rawPath = asset.path.trim();
+  if (!rawPath) throw new Error(`"${field}" path must be a non-empty absolute path on the CLIENT machine.`);
+  if (!isClientAbsolutePath(rawPath)) {
+    throw new Error(
+      `"${field}" path must be absolute on the CLIENT machine (e.g. /Users/you/data/file.zip or C:\\data\\file.zip); got "${asset.path}".`,
+    );
+  }
+  assertAllowedExtension(rawPath);
+  if (asset.name) assertAllowedExtension(asset.name);
+  return rawPath;
+}
+
+function isClientAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+/** Single-quote-escape a metadata object for inline `-F 'metadata=...'` use. */
+function shellQuoteJson(metadata: DatasetMetadata): string {
+  return JSON.stringify(metadata).replace(/'/g, `'\\''`);
 }
 
 function assertAllowedExtension(filePathOrName: string): void {
@@ -255,42 +223,4 @@ function assertAllowedExtension(filePathOrName: string): void {
       `Unsupported dataset file extension "${ext || "(none)"}" for "${basename(filePathOrName)}". Allowed extensions: ${[...ALLOWED_UPLOAD_EXTENSIONS].join(", ")}.`,
     );
   }
-}
-
-function isRetryableNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error.name === "AbortError" || error.name === "TimeoutError") return true;
-  return /ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|fetch failed|network|socket|stream/i.test(error.message);
-}
-
-function mimeType(path: string): string {
-  switch (extname(path).toLowerCase()) {
-    case ".zip":
-      return "application/zip";
-    case ".json":
-      return "application/json";
-    case ".geojson":
-      return "application/geo+json";
-    case ".osm":
-    case ".osc":
-    case ".xml":
-      return "application/xml";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function parseJobId(text: string): string {
-  if (!text) return "";
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (typeof parsed === "string") return parsed;
-    if (parsed && typeof parsed === "object") {
-      const record = parsed as Record<string, unknown>;
-      for (const key of ["jobId", "job_id", "id"]) {
-        if (typeof record[key] === "string") return record[key];
-      }
-    }
-  } catch {}
-  return text.trim();
 }
