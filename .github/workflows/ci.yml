@@ -25,6 +25,6 @@ jobs:
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
         with:
-          extra_args: --only-verified
+          extra_args: --include-detectors=all --results verified --fail
       - run: pnpm test:coverage
       - run: pnpm test:mutation
