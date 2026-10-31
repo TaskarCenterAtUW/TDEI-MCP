@@ -23,6 +23,8 @@ jobs:
       - run: pnpm knip
       - run: pnpm audit
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
       - run: pnpm test:coverage
       - run: pnpm test:mutation
