@@ -15,7 +15,7 @@ import { loadConfigFile } from "./config-file.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
-import { TDEI_LLM_CACHE_INSTRUCTIONS } from "./intents/descriptions.js";
+import { TDEI_SERVER_INSTRUCTIONS } from "./intents/descriptions.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
 
@@ -134,7 +134,7 @@ export async function createServer(
       version: BUILD.serverVersion,
     },
     {
-      instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
+      instructions: TDEI_SERVER_INSTRUCTIONS,
     },
   );
   const openApiToolsLifecycle = new OpenApiToolsLifecycle(

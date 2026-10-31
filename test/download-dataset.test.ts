@@ -51,7 +51,7 @@ test("downloadDataset asks for the dataset id when missing", async () => {
 
 test("downloadDataset defaults to the client Downloads folder when outputDir is missing", async () => {
   const { module } = createModule();
-  const result = await module.downloadDataset({ tdeiDatasetId: "abc-123" });
+  const result = await module.downloadDataset({ tdeiDatasetId: "80296cbe-53ac-463b-b5f6-dad8b8e5e788" });
   assert.equal(result.status, "complete");
   if (result.status !== "complete") throw new Error("expected complete");
   assert.ok(result.data.filePath.startsWith("$HOME/Downloads/"));
@@ -86,6 +86,7 @@ test("downloadDataset auto-detects flex type and dataset name for the filename",
   const result = await module.downloadDataset({
     tdeiDatasetId: "flex-1",
     outputDir: "/tmp/dl/",
+    confirm: true,
   });
   assert.equal(result.status, "complete");
   if (result.status !== "complete") throw new Error("expected complete");
@@ -110,6 +111,90 @@ test("downloadDataset honours an explicit filename and strips path separators", 
   assert.equal(result.data.filePath, "/tmp/dl/.._evil.zip");
 });
 
+test("downloadDataset asks for confirmation with a match table for a NAME", async () => {
+  const { module } = createModule([
+    {
+      tdei_dataset_id: "7d6ae05c-8928-4727-bb0d-4717e46242f1",
+      data_type: "osw",
+      name: "Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox",
+    },
+  ]);
+  const result = await module.downloadDataset({
+    tdeiDatasetId: "Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox",
+    outputDir: "/tmp/dl",
+  });
+  assert.equal(result.status, "needs_input");
+  if (result.status !== "needs_input") throw new Error("expected needs_input");
+  assert.ok(result.missing.some((m) => m.field === "confirm"));
+  const question = result.missing.map((m) => m.question).join("\n");
+  assert.ok(question.includes("7d6ae05c-8928-4727-bb0d-4717e46242f1"));
+  assert.ok(question.includes("| # | name | tdei_dataset_id | data_type | status |"));
+});
+
+test("downloadDataset downloads a NAME after confirm:true using the resolved UUID", async () => {
+  const { module } = createModule([
+    {
+      tdei_dataset_id: "7d6ae05c-8928-4727-bb0d-4717e46242f1",
+      data_type: "osw",
+      name: "Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox",
+    },
+  ]);
+  const result = await module.downloadDataset({
+    tdeiDatasetId: "Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox",
+    outputDir: "/tmp/dl",
+    confirm: true,
+  });
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") throw new Error("expected complete");
+  // The resolved UUID — not the raw name — must appear in the download path.
+  assert.equal(result.data.tdeiDatasetId, "7d6ae05c-8928-4727-bb0d-4717e46242f1");
+  assert.equal(result.data.path, "/api/v1/osw/7d6ae05c-8928-4727-bb0d-4717e46242f1");
+  assert.ok(!result.data.path.includes("Seattle_WSP"));
+  assert.equal(result.data.datasetName, "Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox");
+});
+
+test("downloadDataset lists multiple matches and downloads the selected row", async () => {
+  const datasets = [
+    { tdei_dataset_id: "11111111-1111-4111-8111-111111111111", data_type: "osw", name: "Seattle Downtown" },
+    { tdei_dataset_id: "22222222-2222-4222-8222-222222222222", data_type: "osw", name: "Seattle Downtown 2" },
+  ];
+  const { module } = createModule(datasets);
+  const asked = await module.downloadDataset({ tdeiDatasetId: "Seattle Downtown" });
+  assert.equal(asked.status, "needs_input");
+  if (asked.status !== "needs_input") throw new Error("expected needs_input");
+  assert.ok(asked.missing.some((m) => m.field === "tdeiDatasetId"));
+  const question = asked.missing.map((m) => m.question).join("\n");
+  assert.ok(question.includes("2 datasets"));
+  assert.ok(question.includes("22222222-2222-4222-8222-222222222222"));
+
+  const picked = await module.downloadDataset({ tdeiDatasetId: "Seattle Downtown", selection: 2 });
+  assert.equal(picked.status, "complete");
+  if (picked.status !== "complete") throw new Error("expected complete");
+  assert.equal(picked.data.tdeiDatasetId, "22222222-2222-4222-8222-222222222222");
+  assert.equal(picked.data.path, "/api/v1/osw/22222222-2222-4222-8222-222222222222");
+});
+
+test("downloadDataset accepts a pasted table row by extracting its UUID", async () => {
+  const { module } = createModule();
+  const result = await module.downloadDataset({
+    tdeiDatasetId:
+      "| 1 | Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox | 7d6ae05c-8928-4727-bb0d-4717e46242f1 | osw | Pre-Release |",
+    dataType: "osw",
+    outputDir: "/tmp/dl",
+  });
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") throw new Error("expected complete");
+  assert.equal(result.data.tdeiDatasetId, "7d6ae05c-8928-4727-bb0d-4717e46242f1");
+  assert.equal(result.data.path, "/api/v1/osw/7d6ae05c-8928-4727-bb0d-4717e46242f1");
+});
+
+test("downloadDataset asks for a UUID when a NAME matches nothing", async () => {
+  const { module } = createModule([]);
+  const result = await module.downloadDataset({ tdeiDatasetId: "No_Such_Dataset_Name_xyz" });
+  assert.equal(result.status, "needs_input");
+  assert.ok(result.status === "needs_input" && result.missing.some((m) => m.field === "tdeiDatasetId"));
+});
+
 test("download intent resolves to the registered tdei_download_dataset tool", async () => {
   const resolved = resolveUserIntent("download this Seattle dataset");
   assert.equal(resolved.status, "complete");
@@ -127,7 +212,7 @@ test("download intent resolves to the registered tdei_download_dataset tool", as
     assert.ok(listed.tools.some((tool) => tool.name === "tdei_download_dataset"));
     const called = await client.callTool({
       name: "tdei_download_dataset",
-      arguments: { tdeiDatasetId: "abc-123" },
+      arguments: { tdeiDatasetId: "80296cbe-53ac-463b-b5f6-dad8b8e5e788" },
     });
     const first = called.content[0];
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
