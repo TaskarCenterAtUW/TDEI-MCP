@@ -106,8 +106,8 @@ export async function runWorkflow(
     try {
       const raw = await deps.callTool(step.tool, resolved);
       // Lifecycle-wrapped download steps return MCP text content carrying a
-      // JSON file descriptor ({tool, path, bytes}); unwrap it so template
-      // refs like {{steps.fetch_osw.output.path}} resolve to the file path.
+      // client-side curl instruction ({tool, path, curlCommand}); unwrap it so
+      // template refs like {{steps.fetch_osw.output.curlCommand}} resolve.
       const output = unwrapMcpTextJson(raw);
       transcript.push({ id: step.id, tool: step.tool, input: resolved, output });
       outputs[step.id] = output;

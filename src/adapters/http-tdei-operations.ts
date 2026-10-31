@@ -429,27 +429,6 @@ export class HttpTdeiOperations implements TdeiOperations {
     return typeof result === "string" ? result : JSON.stringify(result);
   }
 
-  async downloadFileBytes(
-    input: { dataType: DataType; tdeiDatasetId: string },
-    context: RequestContext,
-  ): Promise<Uint8Array> {
-    const accessToken = await this.resolveAccessToken(context);
-    const url = new URL(
-      `api/v1/${dataTypePath(input.dataType)}/${encodeURIComponent(input.tdeiDatasetId)}`,
-      this.baseUrl,
-    );
-    const response = await this.fetchImpl(url, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new TdeiHttpError(`TDEI download failed with status ${response.status}.`, response.status, text);
-    }
-    return new Uint8Array(await response.arrayBuffer());
-  }
-
   private async requestText(
     method: string,
     path: string,

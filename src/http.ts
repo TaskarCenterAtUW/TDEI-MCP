@@ -345,7 +345,7 @@ export async function serveHttp(
     headersProvider: async () => ({
       Authorization: `Bearer ${await sessionAuth.getAccessToken()}`,
     }),
-    allowLocalFileUploads: true,
+    allowLocalFileUploads: false,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
   const resolved: ResolvedHttpOptions = {

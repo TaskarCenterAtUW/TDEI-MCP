@@ -93,6 +93,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
         return [];
       },
     },
+    apiUrl: options.apiUrl,
     ...(auth ? { identityProvider: () => auth.getIdentity() } : {}),
   });
   const accessToken = options.accessToken;

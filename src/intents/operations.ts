@@ -156,11 +156,6 @@ export interface TdeiOperations {
   verifyEmail?(input: { email: string }, context: RequestContext): Promise<unknown>;
   recoverPassword?(input: { email: string }, context: RequestContext): Promise<unknown>;
   regenerateApiKey?(context: RequestContext): Promise<string>;
-  /** Raw bytes of a dataset ZIP (for server-side inspection, e.g. incline scan). */
-  downloadFileBytes?(
-    input: { dataType: DataType; tdeiDatasetId: string },
-    context: RequestContext,
-  ): Promise<Uint8Array>;
   validateDataset?(input: { dataType: DataType; asset: DatasetAsset }, context: RequestContext): Promise<AcceptedJob>;
   uploadDataset?(
     input: {

@@ -143,7 +143,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
   private async fileFromAsset(asset: DatasetAsset): Promise<{ file: Blob; name: string }> {
     if (!this.options.allowedAssetKinds.has(asset.kind)) {
       throw new Error(
-        `Hosted MCP never accepts file bytes. Run the bytes via curl from the client machine (single hop, any size): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip". Then poll with tdei_list_jobs. Do not ask for local stdio and do not retry bytes through MCP.`,
+        `MCP never accepts file bytes. Run the bytes via curl from the client machine (single hop, any size): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip". Then poll with tdei_list_jobs. Do not retry bytes through MCP.`,
       );
     }
     if (asset.kind === "local_path") {

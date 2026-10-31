@@ -50,6 +50,7 @@ test("common semantic tools are discoverable and callable", async () => {
       "tdei_convert_pathways",
       "tdei_cut_dataset_bbox",
       "tdei_delete_dataset",
+      "tdei_download_dataset",
       "tdei_download_feedbacks",
       "tdei_edit_metadata",
       "tdei_find_datasets",

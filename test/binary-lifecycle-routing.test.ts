@@ -50,7 +50,15 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
   const downloads = {
     async download(tool: string, input: Record<string, unknown>) {
       downloaded.push({ tool, input });
-      return { tool, path: "/tmp/fake.zip", bytes: 123 };
+      return {
+        tool,
+        method: "GET" as const,
+        path: "/api/v1/osw/yakima-1",
+        filename: "getOswFile-yakima-1.zip",
+        curlCommand:
+          'curl -L -H "Authorization: Bearer $TDEI_TOKEN" "https://api.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
+        instruction: "Run on the CLIENT machine.",
+      };
     },
   };
 
@@ -58,7 +66,15 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
   await lifecycle.load();
   const result = await lifecycle.callTool("getOswFile", { tdei_dataset_id: "yakima-1" });
 
-  assert.deepEqual(result, { tool: "getOswFile", path: "/tmp/fake.zip", bytes: 123 });
+  assert.deepEqual(result, {
+    tool: "getOswFile",
+    method: "GET",
+    path: "/api/v1/osw/yakima-1",
+    filename: "getOswFile-yakima-1.zip",
+    curlCommand:
+      'curl -L -H "Authorization: Bearer $TDEI_TOKEN" "https://api.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
+    instruction: "Run on the CLIENT machine.",
+  });
   assert.deepEqual(downloaded, [{ tool: "getOswFile", input: { tdei_dataset_id: "yakima-1" } }]);
   assert.equal(childCalls, 0);
 });

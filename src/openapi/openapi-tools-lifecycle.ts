@@ -142,8 +142,9 @@ export class OpenApiToolsLifecycle {
   callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
       await this.ensureLoadedLocked();
-      // Binary downloads return local paths, which are not representable by
-      // the generic text-oriented OpenAPI executor. Route those locally.
+      // Binary downloads never touch server bytes or disk. They resolve to a
+      // client-side curl instruction which the LLM runs on the CLIENT machine,
+      // keeping them out of the generic text-oriented OpenAPI executor.
       if (BinaryTdeiDownloads.isDownloadTool(tool)) {
         const downloads =
           this.downloads ??
@@ -227,7 +228,7 @@ export class OpenApiToolsLifecycle {
     // fires post-load (when MCP clients invoke workflow tools and the
     // serialize() queue is idle), so it cannot self-deadlock.
     // Download results are wrapped as MCP text content so template refs
-    // (e.g. {{steps.fetch_osw.output.path}}) resolve against the file path.
+    // (e.g. {{steps.fetch_osw.output.curlCommand}}) resolve against the client-side instruction.
     const callTool = async (tool: string, input: Record<string, unknown>) =>
       toMcpResult(await this.callTool(tool, input));
 

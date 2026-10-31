@@ -40,6 +40,13 @@ const getDatasetDetailsSchema = z.object({
   dataType: z.enum(["osw", "flex", "pathways"]).optional(),
 });
 
+const downloadDatasetSchema = z.object({
+  tdeiDatasetId: z.string().trim().min(1).optional(),
+  dataType: z.enum(["osw", "flex", "pathways"]).optional(),
+  outputDir: z.string().trim().min(1).optional(),
+  filename: z.string().trim().min(1).optional(),
+});
+
 const resolveIntentSchema = z.object({
   request: z.string().trim().min(1),
 });
@@ -422,6 +429,21 @@ export function registerSemanticTools(
     async (args) => {
       try {
         return jsonIntentResult(await module.getDatasetDetails(args as { tdeiDatasetId: string }, contextProvider()));
+      } catch (error) {
+        return formatError(error);
+      }
+    },
+  );
+
+  register(
+    "tdei_download_dataset",
+    {
+      description: SEMANTIC_TOOL_DESCRIPTIONS.downloadDataset,
+      inputSchema: downloadDatasetSchema.shape,
+    },
+    async (args) => {
+      try {
+        return jsonIntentResult(await module.downloadDataset(args as never, contextProvider()));
       } catch (error) {
         return formatError(error);
       }
