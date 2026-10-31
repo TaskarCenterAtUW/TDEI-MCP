@@ -5,7 +5,7 @@ import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { BUILD } from "./build-info.js";
 import type { AuthManager } from "./auth/auth-manager.js";
 import { getConfig } from "./config.js";
-import { TDEI_LLM_CACHE_INSTRUCTIONS } from "./intents/descriptions.js";
+import { TDEI_SERVER_INSTRUCTIONS } from "./intents/descriptions.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
@@ -71,7 +71,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       version: BUILD.serverVersion,
     },
     {
-      instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
+      instructions: TDEI_SERVER_INSTRUCTIONS,
     },
   );
   const auth = options.authManager;

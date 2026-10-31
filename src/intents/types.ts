@@ -51,7 +51,7 @@ export interface FindDatasetsInput {
   limit?: number;
 }
 
-interface DatasetMatch {
+export interface DatasetMatch {
   dataset: Dataset;
   matchedBy: "name" | "city" | "bbox" | "project_group" | "dataset_id";
   evidence: string;
@@ -64,6 +64,8 @@ export interface FindDatasetsData {
     field: "uploaded_timestamp";
     order: "desc";
   };
+  /** Markdown table of the matches (#, name, uuid, type, status) for the user to pick from. */
+  table: string;
 }
 
 export interface ListServicesInput {
@@ -276,6 +278,14 @@ export interface DownloadDatasetInput {
   outputDir?: string;
   /** Optional ZIP filename override (defaults to <dataset-name-or-id>.zip). */
   filename?: string;
+  /**
+   * Consent flag for name-based downloads. A UUID in tdeiDatasetId downloads
+   * immediately; a dataset NAME first returns the match table and requires
+   * a follow-up call with confirm:true (single match) or a UUID/selection.
+   */
+  confirm?: boolean;
+  /** 1-based row number into the match table of a previous name search. */
+  selection?: number;
 }
 
 export interface DownloadDatasetData {

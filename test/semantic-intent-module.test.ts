@@ -75,6 +75,8 @@ test("latest dataset name match completes without geographic fallback", async ()
       matches: [{ dataset: seattle, matchedBy: "name", evidence: "name contains Seattle" }],
       selected: seattle,
       effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+      table:
+        "| # | name | tdei_dataset_id | data_type | status |\n|---|------|-----------------|-----------|--------|\n| 1 | Seattle Accessible Sidewalks | dataset-1 |  |  |",
     },
   });
   assert.deepEqual(harness.searches, [

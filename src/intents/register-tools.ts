@@ -45,6 +45,8 @@ const downloadDatasetSchema = z.object({
   dataType: z.enum(["osw", "flex", "pathways"]).optional(),
   outputDir: z.string().trim().min(1).optional(),
   filename: z.string().trim().min(1).optional(),
+  confirm: z.boolean().optional(),
+  selection: z.number().int().min(1).optional(),
 });
 
 const resolveIntentSchema = z.object({
