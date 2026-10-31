@@ -70,6 +70,12 @@ export interface SemanticIntentDependencies {
    * (e.g. https://api-dev.tdei.us). Falls back to TDEI_API_URL env.
    */
   apiUrl?: string;
+  /**
+   * Supplies the same SSO token from the sso logon tool so client-side
+   * curl commands are already authenticated. Falls back to $TDEI_TOKEN
+   * placeholder when unavailable.
+   */
+  tokenProvider?: () => Promise<string>;
 }
 
 function uploadedTimestampMs(dataset: Record<string, unknown>): number | undefined {
@@ -99,6 +105,19 @@ function resolveCutoffMs(after?: string, withinDays?: number): number | undefine
 
 export class SemanticIntentModule {
   constructor(private readonly dependencies: SemanticIntentDependencies) {}
+
+  private async resolveCurlToken(context: RequestContext = {}): Promise<string | undefined> {
+    if (context.accessToken?.trim()) return context.accessToken.trim();
+    if (this.dependencies.tokenProvider) {
+      try {
+        const token = await this.dependencies.tokenProvider();
+        if (token?.trim()) return token.trim();
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
 
   async findDatasets(input: FindDatasetsInput, context: RequestContext = {}): Promise<IntentResult<FindDatasetsData>> {
     const pageSize = Math.min(Math.max(input.limit ?? 10, 1), 50);
@@ -301,7 +320,7 @@ export class SemanticIntentModule {
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be validated? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip", then poll with tdei_list_jobs.',
+                'Which dataset ZIP should be validated? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip", then poll with tdei_list_jobs.',
             },
           ]
         : []),
@@ -356,7 +375,7 @@ export class SemanticIntentModule {
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be uploaded? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -F "metadata=@metadata.json", then poll with tdei_list_jobs.',
+                'Which dataset ZIP should be uploaded? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -F "metadata=@metadata.json", then poll with tdei_list_jobs.',
             },
           ]
         : []),
@@ -599,7 +618,8 @@ export class SemanticIntentModule {
     const base = outputDir.replace(/[/\\]+$/, "");
     const filePath = `${base}/${filename}`;
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
-    const curlCommand = `curl -L -H "Authorization: Bearer $TDEI_TOKEN" "${apiUrl}${apiPath}" -o "${filePath}"`;
+    const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
+    const curlCommand = `curl -L -H "Authorization: Bearer ${bearer}" "${apiUrl}${apiPath}" -o "${filePath}"`;
     return {
       status: "complete",
       data: {
@@ -611,7 +631,10 @@ export class SemanticIntentModule {
         method: "GET",
         path: apiPath,
         curlCommand,
-        instruction: `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. $TDEI_TOKEN must hold the caller's SSO bearer token.`,
+        instruction:
+          bearer === "$TDEI_TOKEN"
+            ? `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. Sign in via tdei_sso_login first so $TDEI_TOKEN holds the caller's SSO bearer token.`
+            : `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. The SSO bearer from tdei_sso_login is already embedded — no $TDEI_TOKEN export needed.`,
       },
     };
   }
@@ -1151,7 +1174,8 @@ export class SemanticIntentModule {
     }
     const apiPath = `/api/v1/osw/${id}`;
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
-    const curlCommand = `curl -L -H "Authorization: Bearer $TDEI_TOKEN" "${apiUrl}${apiPath}" -o "${id}.zip"`;
+    const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
+    const curlCommand = `curl -L -H "Authorization: Bearer ${bearer}" "${apiUrl}${apiPath}" -o "${id}.zip"`;
     return {
       status: "complete",
       data: {
@@ -1162,7 +1186,9 @@ export class SemanticIntentModule {
         path: apiPath,
         curlCommand,
         instruction:
-          `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with $TDEI_TOKEN set to the SSO bearer; ` +
+          (bearer === "$TDEI_TOKEN"
+            ? `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with $TDEI_TOKEN set to the SSO bearer (sign in via tdei_sso_login first); `
+            : `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with the SSO bearer from tdei_sso_login already embedded; `) +
           `2) unzip and inspect edges files (edges.geojson) for an incline tag/column; ` +
           `3) if inclines are missing, tag them with tdei_tag_incline.`,
       },

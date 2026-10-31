@@ -328,7 +328,7 @@ export class OpenApiMcpClient {
               isAbsolute(value)
             ) {
               throw new Error(
-                `MCP never accepts file bytes — run the upload via curl from the client machine (single hop, any size) with $TDEI_TOKEN as the bearer, then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
+                `MCP never accepts file bytes — run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
               );
             }
             await appendFormValue(

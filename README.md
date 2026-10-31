@@ -356,7 +356,7 @@ Both transports expose the common semantic tools:
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
 | `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook. |
-| `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with `$TDEI_TOKEN`. |
+| `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded. |
 | `tdei_get_my_identity` | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint). |
 | `tdei_list_jobs` | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering. |
 | `tdei_list_services` | List services by text, project group, or service type. |
@@ -395,7 +395,7 @@ Both transports expose the common semantic tools:
 | `tdei_recover_password` | Send a password-recovery link. |
 | `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
 
-File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` for the LLM to run with `$TDEI_TOKEN`), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
+File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 

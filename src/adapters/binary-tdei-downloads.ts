@@ -3,9 +3,11 @@ import type { RequestContext } from "../intents/types.js";
 export interface BinaryDownloadOptions {
   baseUrl: string;
   /**
-   * Kept for backward compatibility with existing wiring/tests; ignored.
-   * The MCP server never fetches bytes or writes files — downloads run on
-   * the client machine via the returned curl command.
+   * Kept for backward compatibility with existing wiring/tests; ignored for
+   * fetching. The MCP server never fetches bytes or writes files — downloads
+   * run on the client machine via the returned curl command.
+   * tokenProvider supplies the same SSO token from the sso logon tool so
+   * curl is already authenticated.
    */
   fetchImpl?: typeof fetch;
   tokenProvider?: () => Promise<string>;
@@ -30,13 +32,16 @@ export interface DownloadInstruction {
  * server must never touch file bytes (no fetching, no disk writes). Binary
  * download tools therefore resolve to a ready-to-run curl command which the
  * LLM executes on the CLIENT machine into the user-connected folder with
- * $TDEI_TOKEN as the SSO bearer. This builder is pure: no fetch, no fs.
+ * the same SSO bearer from the sso logon tool already embedded.
+ * This builder is pure: no fetch, no fs.
  */
 export class BinaryTdeiDownloads {
   private readonly baseUrl: string;
+  private readonly tokenProvider: (() => Promise<string>) | undefined;
 
   constructor(options: BinaryDownloadOptions) {
     this.baseUrl = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
+    this.tokenProvider = options.tokenProvider;
   }
 
   static readonly DOWNLOAD_TOOLS = new Set([
@@ -51,11 +56,16 @@ export class BinaryTdeiDownloads {
     return BinaryTdeiDownloads.DOWNLOAD_TOOLS.has(tool);
   }
 
-  async download(tool: string, input: Record<string, unknown>, _context: RequestContext): Promise<DownloadInstruction> {
+  async download(tool: string, input: Record<string, unknown>, context: RequestContext): Promise<DownloadInstruction> {
     const path = this.routeFor(tool, input);
     const filename = filenameFor(tool, input);
     const url = new URL(path, this.baseUrl).toString();
-    const curlCommand = `curl -L -H "Authorization: Bearer $TDEI_TOKEN" "${url}" -o "${filename}"`;
+    // Use the same SSO token from the sso logon tool (via context or
+    // tokenProvider) so client-side curl is already authenticated.
+    // Falls back to $TDEI_TOKEN only when no session token is available.
+    const bearer = await this.resolveCurlToken(context);
+    const auth = bearer ?? "$TDEI_TOKEN";
+    const curlCommand = `curl -L -H "Authorization: Bearer ${auth}" "${url}" -o "${filename}"`;
     return {
       tool,
       method: "GET",
@@ -64,8 +74,23 @@ export class BinaryTdeiDownloads {
       curlCommand,
       instruction:
         `MCP server never downloads files. Run on the CLIENT machine into the user-connected folder: ${curlCommand} ` +
-        `with $TDEI_TOKEN set to the current TDEI SSO bearer token.`,
+        (bearer
+          ? `with the current TDEI SSO session token already embedded (from tdei_sso_login; no $TDEI_TOKEN export needed).`
+          : `with $TDEI_TOKEN set to the current TDEI SSO bearer token (sign in via tdei_sso_login first).`),
     };
+  }
+
+  private async resolveCurlToken(context: RequestContext): Promise<string | undefined> {
+    if (context.accessToken?.trim()) return context.accessToken.trim();
+    if (this.tokenProvider) {
+      try {
+        const token = await this.tokenProvider();
+        if (token?.trim()) return token.trim();
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
   }
 
   private routeFor(tool: string, input: Record<string, unknown>): string {

@@ -145,6 +145,7 @@ export async function createServer(
     dependencies.binaryDownloads ??
       new BinaryTdeiDownloads({
         baseUrl: getConfig().apiUrl,
+        tokenProvider: () => auth.getAccessToken(),
       }),
   );
   // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
@@ -160,6 +161,7 @@ export async function createServer(
     }),
     places: createConfiguredPlaceResolver(getConfig()),
     apiUrl: getConfig().apiUrl,
+    tokenProvider: () => auth.getAccessToken(),
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
   registerSemanticTools(server, semanticModule);

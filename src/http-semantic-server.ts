@@ -94,6 +94,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       },
     },
     apiUrl: options.apiUrl,
+    ...(auth ? { tokenProvider: () => auth.getAccessToken() } : {}),
     ...(auth ? { identityProvider: () => auth.getIdentity() } : {}),
   });
   const accessToken = options.accessToken;
