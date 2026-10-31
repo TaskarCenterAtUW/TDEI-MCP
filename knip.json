@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "scripts/*.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.test.ts",
+    "test/helpers/**/*.ts"
+  ],
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "exports": "warn",
+    "types": "warn"
+  },
+  "ignoreDependencies": [
+    "@stryker-mutator/command-runner"
+  ]
+}

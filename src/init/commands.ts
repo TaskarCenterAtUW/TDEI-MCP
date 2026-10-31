@@ -7,16 +7,27 @@ import { checkPreflight, type ExecFn } from "./preflight.js";
 import { assertPort, defaultTryPort, portInUseHint } from "./ports.js";
 import { verifyServer } from "./verify.js";
 import {
-  CLIENTS, buildServerEntry, claudeConfigPath, codexConfigPath, formatManual,
-  readClaudeEntry, readCodexEntry, readVscodeEntry, vscodeConfigPath,
-  writeClaudeEntry, writeClaudeRemoteEntry, writeCodexEntry, writeCodexRemoteEntry,
-  writeVscodeEntry, writeVscodeRemoteEntry, switchCodexEnv,
-  type ClientName, type ServerEntry,
+  CLIENTS,
+  buildServerEntry,
+  claudeConfigPath,
+  codexConfigPath,
+  formatManual,
+  readClaudeEntry,
+  readCodexEntry,
+  readVscodeEntry,
+  vscodeConfigPath,
+  writeClaudeEntry,
+  writeClaudeRemoteEntry,
+  writeCodexEntry,
+  writeCodexRemoteEntry,
+  writeVscodeEntry,
+  writeVscodeRemoteEntry,
+  switchCodexEnv,
+  type ClientName,
+  type ServerEntry,
 } from "./clients.js";
 
-export const TDEI_ENV_KEYS = ["TDEI_API_URL"];
-
-export interface Prompter {
+interface Prompter {
   chooseEnv(): Promise<{ env?: string | undefined; url?: string | undefined }>;
   chooseClient(): Promise<ClientName>;
   confirm?(question: string): Promise<boolean>;
@@ -46,16 +57,10 @@ function assertClient(value: string): ClientName {
 }
 
 function configPath(local: LocalCheckout | undefined, home: string): string {
-  return local
-    ? join(local.root, "tdei.config.json")
-    : join(home, ".tdei-mcp", "tdei.config.json");
+  return local ? join(local.root, "tdei.config.json") : join(home, ".tdei-mcp", "tdei.config.json");
 }
 
-async function scaffoldConfig(
-  deps: Deps,
-  path: string,
-  local: LocalCheckout | undefined,
-): Promise<void> {
+async function scaffoldConfig(deps: Deps, path: string, local: LocalCheckout | undefined): Promise<void> {
   try {
     if ((await deps.readFile(path)).trim()) return;
   } catch (error) {
@@ -64,7 +69,10 @@ async function scaffoldConfig(
   await deps.mkdir(dirname(path));
   const contents = local
     ? DEFAULT_CONFIG_JSON
-    : DEFAULT_CONFIG_JSON.replace("./tdei.config.schema.json", "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-MCP/main/tdei.config.schema.json");
+    : DEFAULT_CONFIG_JSON.replace(
+        "./tdei.config.schema.json",
+        "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-MCP/main/tdei.config.schema.json",
+      );
   await deps.writeFile(path, contents);
   deps.log(`wrote default ${path} (all endpoints enabled, no workflows)`);
 }
@@ -80,17 +88,19 @@ async function loadEnvironmentFile(
   try {
     source = await deps.readFile(path);
   } catch (error) {
-    throw new Error(`cannot read --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`cannot read --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
   let values: Record<string, string>;
   try {
     values = Object.fromEntries(
-      Object.entries(parseEnv(source)).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
+      Object.entries(parseEnv(source)).filter((entry): entry is [string, string] => entry[1] !== undefined),
     );
   } catch (error) {
-    throw new Error(`invalid --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`invalid --env-file ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
   if (!values["TDEI_API_URL"]?.trim()) {
     throw new Error(`--env-file ${path} must define TDEI_API_URL`);
@@ -114,7 +124,10 @@ function clientDisplayName(client: ClientName): string {
 }
 
 function indentBlock(text: string, prefix: string): string {
-  return text.split("\n").map((line) => (line ? prefix + line : prefix.trimEnd())).join("\n");
+  return text
+    .split("\n")
+    .map((line) => (line ? prefix + line : prefix.trimEnd()))
+    .join("\n");
 }
 
 export function clientConfigDropHint(client: ClientName): string {
@@ -145,25 +158,21 @@ export function clientConfigDropHint(client: ClientName): string {
   ].join("\n");
 }
 
-export function formatSetupReport(opts: {
-  status: string;
-  client: ClientName;
-  apiUrl: string;
-  configPath?: string;
-}): string {
+function formatSetupReport(opts: { status: string; client: ClientName; apiUrl: string; configPath?: string }): string {
   const name = clientDisplayName(opts.client);
-  const next = opts.client === "vscode"
-    ? [
-        "    1. Reload the VS Code window",
-        "    2. Call tdei_sso_login and open the loginUrl",
-        "    3. After browser login: tdei_auth_status, then listServices",
-      ]
-    : [
-        `    1. Fully quit and reopen ${name}`,
-        "    2. Start a new chat",
-        "    3. Call tdei_sso_login and open the loginUrl",
-        "    4. After browser login: tdei_auth_status, then listServices",
-      ];
+  const next =
+    opts.client === "vscode"
+      ? [
+          "    1. Reload the VS Code window",
+          "    2. Call tdei_sso_login and open the loginUrl",
+          "    3. After browser login: tdei_auth_status, then listServices",
+        ]
+      : [
+          `    1. Fully quit and reopen ${name}`,
+          "    2. Start a new chat",
+          "    3. Call tdei_sso_login and open the loginUrl",
+          "    4. After browser login: tdei_auth_status, then listServices",
+        ];
   return [
     "",
     `  TDEI-MCP  ·  ${name}  ·  ${opts.status}`,
@@ -197,13 +206,22 @@ async function readExisting(deps: Deps, path: string): Promise<string> {
   }
 }
 
-function writeEntry(client: ClientName, current: string, entry: ServerEntry, env: Record<string, string>, path: string): string {
+function writeEntry(
+  client: ClientName,
+  current: string,
+  entry: ServerEntry,
+  env: Record<string, string>,
+  path: string,
+): string {
   if (client === "codex") return writeCodexEntry(current, entry, env);
   if (client === "claude") return writeClaudeEntry(current, entry, env, path);
   return writeVscodeEntry(current, entry, env, path);
 }
 
-function readEntry(client: ClientName, current: string): {
+function readEntry(
+  client: ClientName,
+  current: string,
+): {
   found: boolean;
   env: Record<string, string>;
   command?: string;
@@ -270,12 +288,14 @@ export async function runInit(
     if ((await deps.readFile(path)) !== updated) {
       throw new Error(`configuration readback failed: ${path}`);
     }
-    deps.log(formatSetupReport({
-      status: "ready (remote HTTP)",
-      client,
-      apiUrl: remoteUrl,
-      configPath: path,
-    }));
+    deps.log(
+      formatSetupReport({
+        status: "ready (remote HTTP)",
+        client,
+        apiUrl: remoteUrl,
+        configPath: path,
+      }),
+    );
     return { client, apiUrl: remoteUrl, callbackUrl };
   }
   if (opts.envFile && (opts.env || opts.url || opts.port !== undefined)) {
@@ -285,12 +305,10 @@ export async function runInit(
   await checkPreflight(deps.exec, {
     nodePath: nodeExecPath,
   });
-  const fileEnvironment = opts.envFile
-    ? await loadEnvironmentFile(deps, opts.envFile)
-    : undefined;
+  const fileEnvironment = opts.envFile ? await loadEnvironmentFile(deps, opts.envFile) : undefined;
   const choice = fileEnvironment
     ? undefined
-    : opts.env ?? opts.url
+    : (opts.env ?? opts.url)
       ? { env: opts.env, url: opts.url }
       : await deps.prompter.chooseEnv();
   const apiUrl = fileEnvironment?.apiUrl ?? resolveApiUrl(choice ?? {});
@@ -336,21 +354,29 @@ export async function runInit(
   await deps.mkdir(dirname(path));
   if (current) await deps.writeFile(`${path}.tdei.bak`, current);
   await deps.writeFile(path, updated);
-  if (await deps.readFile(path) !== updated) {
+  if ((await deps.readFile(path)) !== updated) {
     throw new Error(`configuration readback failed: ${path}`);
   }
-  deps.log(formatSetupReport({
-    status: "ready",
-    client,
-    apiUrl,
-    configPath: path,
-  }));
+  deps.log(
+    formatSetupReport({
+      status: "ready",
+      client,
+      apiUrl,
+      configPath: path,
+    }),
+  );
   return { client, apiUrl, callbackUrl };
 }
 
 export async function runSwitch(
   deps: Deps,
-  opts: { env?: string | undefined; url?: string | undefined; client?: ClientName | undefined; home?: string; cwd?: string },
+  opts: {
+    env?: string | undefined;
+    url?: string | undefined;
+    client?: ClientName | undefined;
+    home?: string;
+    cwd?: string;
+  },
 ): Promise<{ client: ClientName; apiUrl: string }> {
   if (opts.client !== undefined) assertClient(opts.client);
   const client = opts.client ?? (await deps.prompter.chooseClient());
@@ -365,18 +391,21 @@ export async function runSwitch(
   if (!existing.found) {
     throw new Error(`no tdei entry found in ${path} — run "tdei-mcp init" first`);
   }
-  const choice = opts.env ?? opts.url ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
+  const choice = (opts.env ?? opts.url) ? { env: opts.env, url: opts.url } : await deps.prompter.chooseEnv();
   const apiUrl = resolveApiUrl(choice);
   if (!existing.command || !existing.args?.length) {
     throw new Error("existing launch configuration is incomplete; run init again");
   }
   if (existing.args.some((argument) => argument.startsWith("--env-file="))) {
-    throw new Error('this MCP entry uses --env-file; select another file by re-running "tdei-mcp init --client <client> --env-file <path>"');
+    throw new Error(
+      'this MCP entry uses --env-file; select another file by re-running "tdei-mcp init --client <client> --env-file <path>"',
+    );
   }
   const derivedSpec = specUrlForApiUrl(existing.env["TDEI_API_URL"] ?? apiUrl);
-  const customSpec = existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== derivedSpec
-    ? existing.env["TDEI_SPEC_URL"]
-    : undefined;
+  const customSpec =
+    existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== derivedSpec
+      ? existing.env["TDEI_SPEC_URL"]
+      : undefined;
   const env: Record<string, string> = {
     ...existing.env,
     TDEI_API_URL: apiUrl,
@@ -395,19 +424,19 @@ export async function runSwitch(
     env,
   };
   await (deps.verify ?? verifyServer)(entry);
-  const updated = client === "codex"
-    ? switchCodexEnv(current, env)
-    : writeEntry(client, current, entry, env, path);
+  const updated = client === "codex" ? switchCodexEnv(current, env) : writeEntry(client, current, entry, env, path);
   await deps.writeFile(`${path}.tdei.bak`, current);
   await deps.writeFile(path, updated);
-  if (await deps.readFile(path) !== updated) {
+  if ((await deps.readFile(path)) !== updated) {
     throw new Error(`configuration readback failed: ${path}`);
   }
-  deps.log(formatSetupReport({
-    status: "environment updated",
-    client,
-    apiUrl,
-    configPath: path,
-  }));
+  deps.log(
+    formatSetupReport({
+      status: "environment updated",
+      client,
+      apiUrl,
+      configPath: path,
+    }),
+  );
   return { client, apiUrl };
 }

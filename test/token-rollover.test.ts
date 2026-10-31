@@ -19,7 +19,9 @@ function makeAuth() {
   let tokenVersion = 1;
   return {
     getTokenVersion: () => tokenVersion,
-    bumpVersion: () => { tokenVersion += 1; },
+    bumpVersion: () => {
+      tokenVersion += 1;
+    },
     async logout() {
       return {
         logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
@@ -33,13 +35,19 @@ function makeAuth() {
 function makeOpenApi() {
   let closes = 0;
   return {
-    get closes() { return closes; },
-    async listTools() { return { tools: [listServicesTool()] }; },
+    get closes() {
+      return closes;
+    },
+    async listTools() {
+      return { tools: [listServicesTool()] };
+    },
     async callTool(name: string, _args: Record<string, unknown>) {
       assert.equal(name, "listServices");
       return { content: [{ type: "text" as const, text: "services" }] };
     },
-    async close() { closes += 1; },
+    async close() {
+      closes += 1;
+    },
   };
 }
 
@@ -48,9 +56,18 @@ test("token rollover does not reset the in-process OpenAPI provider", async () =
   const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
-      getStatus: () => ({ configured: true, authenticated: true, state: "authenticated" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
@@ -73,9 +90,18 @@ test("concurrent calls during token refresh keep the provider loaded", async () 
   const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
-      getStatus: () => ({ configured: true, authenticated: true, state: "authenticated" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
@@ -98,9 +124,18 @@ test("logout resets the provider so next load starts fresh", async () => {
   const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
-      getStatus: () => ({ configured: true, authenticated: true, state: "authenticated" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },
@@ -120,9 +155,18 @@ test("registered tool handlers keep using the loaded provider after token rollov
   const openapi = makeOpenApi();
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
-      getStatus: () => ({ configured: true, authenticated: true, state: "authenticated" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
       logout: auth.logout,
       getTokenVersion: auth.getTokenVersion,
     },

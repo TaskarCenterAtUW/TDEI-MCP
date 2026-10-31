@@ -4,31 +4,19 @@ import test from "node:test";
 import { validateSsoCallbackUrl } from "../src/config.js";
 
 test("callback validator rejects https in stdio mode", () => {
-  assert.throws(
-    () => validateSsoCallbackUrl("https://mcp.example.com/callback", "stdio"),
-    /127\.0\.0\.1/,
-  );
+  assert.throws(() => validateSsoCallbackUrl("https://mcp.example.com/callback", "stdio"), /127\.0\.0\.1/);
 });
 
 test("callback validator accepts https in http mode", () => {
-  assert.equal(
-    validateSsoCallbackUrl("https://mcp.example.com/callback", "http"),
-    "https://mcp.example.com/callback",
-  );
+  assert.equal(validateSsoCallbackUrl("https://mcp.example.com/callback", "http"), "https://mcp.example.com/callback");
 });
 
 test("callback validator accepts loopback in http mode for local dev", () => {
-  assert.equal(
-    validateSsoCallbackUrl("http://127.0.0.1:3000/callback", "http"),
-    "http://127.0.0.1:3000/callback",
-  );
+  assert.equal(validateSsoCallbackUrl("http://127.0.0.1:3000/callback", "http"), "http://127.0.0.1:3000/callback");
 });
 
 test("callback validator rejects plain http hostnames in http mode", () => {
-  assert.throws(
-    () => validateSsoCallbackUrl("http://mcp.example.com/callback", "http"),
-    /https/,
-  );
+  assert.throws(() => validateSsoCallbackUrl("http://mcp.example.com/callback", "http"), /https/);
 });
 
 import { AuthManager, authManager, injectAccessToken } from "../src/auth/auth-manager.js";
@@ -106,7 +94,7 @@ test("http.ts import has no side effects on singletons", async () => {
   assert.equal(openapi.openApiMcpClient.isConnected(), false);
 });
 
-test("POST /mcp without token when requireBearerAuth=true returns 401 naming tdei_sso_login", async () => {
+test("POST /mcp without token when requireBearerAuth=true returns 401 with bearer wording", async () => {
   const handle = await serveTestHttp({ requireBearerAuth: true });
   try {
     const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
@@ -116,7 +104,8 @@ test("POST /mcp without token when requireBearerAuth=true returns 401 naming tde
     assert.match(wwwAuth, /error="invalid_request"/);
     const body = (await response.json()) as Record<string, unknown>;
     assert.equal(body.code, "TDEI_SSO_REQUIRED");
-    assert.match(String(body.message), /tdei_sso_login/);
+    assert.match(String(body.message), /Authorization: Bearer header/);
+    assert.doesNotMatch(String(body.message), /tdei_sso_login/);
     assert.ok(String(body.loginUrl).includes("/api/v1/sso-redirect"));
   } finally {
     await handle.close();
@@ -206,10 +195,10 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
       );
     }
     if (url.includes("/api/v1/project-groups")) {
-      return new Response(
-        JSON.stringify([{ tdei_project_group_id: "pg1", project_group_name: "Downtown" }]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify([{ tdei_project_group_id: "pg1", project_group_name: "Downtown" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     return originalFetch(input as RequestInfo, init);
   }) as typeof fetch;
@@ -225,7 +214,7 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
     assert.match(challenge, /resource_metadata=/);
     const metadataUrl = /resource_metadata="([^"]+)"/.exec(challenge)?.[1];
     assert.ok(metadataUrl);
-    const metadata = await (await fetch(metadataUrl)).json() as { resource: string; authorization_servers: string[] };
+    const metadata = (await (await fetch(metadataUrl)).json()) as { resource: string; authorization_servers: string[] };
     assert.equal(metadata.resource, `${handle.url}/mcp`);
     const issuer = metadata.authorization_servers[0];
     assert.ok(issuer);
@@ -266,7 +255,7 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
       }),
     });
     assert.equal(tokenRes.status, 200);
-    const token = await tokenRes.json() as { access_token: string; token_type: string };
+    const token = (await tokenRes.json()) as { access_token: string; token_type: string };
     assert.equal(token.access_token, "gateway-token");
     assert.equal(token.token_type, "Bearer");
 

@@ -42,9 +42,7 @@ export class BinaryTdeiDownloads {
   private readonly maxRetries: number;
 
   constructor(private readonly options: BinaryDownloadOptions) {
-    this.baseUrl = options.baseUrl.endsWith("/")
-      ? options.baseUrl
-      : `${options.baseUrl}/`;
+    this.baseUrl = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 300_000;
     this.outputDir = resolve(options.outputDir ?? process.cwd());
@@ -63,11 +61,7 @@ export class BinaryTdeiDownloads {
     return BinaryTdeiDownloads.DOWNLOAD_TOOLS.has(tool);
   }
 
-  async download(
-    tool: string,
-    input: Record<string, unknown>,
-    context: RequestContext,
-  ): Promise<DownloadedFile> {
+  async download(tool: string, input: Record<string, unknown>, context: RequestContext): Promise<DownloadedFile> {
     const path = this.routeFor(tool, input);
     const filename = filenameFor(tool, input);
     const filePath = join(this.outputDir, filename);
@@ -117,6 +111,7 @@ export class BinaryTdeiDownloads {
           const reason = error instanceof Error ? error.message : String(error);
           throw new Error(
             `TDEI download failed for ${tool} after ${attempt} attempt(s) (${bytesWritten} bytes received): ${reason}`,
+            { cause: error },
           );
         }
 
@@ -214,13 +209,12 @@ export class BinaryTdeiDownloads {
           const reason = streamError instanceof Error ? streamError.message : String(streamError);
           throw new Error(
             `TDEI download stream failed for ${tool} after ${attempt} attempt(s) (${bytesWritten} bytes received): ${reason}`,
+            { cause: streamError },
           );
         }
       }
 
-      throw lastError instanceof Error
-        ? lastError
-        : new Error(`TDEI download failed for ${tool}.`);
+      throw lastError instanceof Error ? lastError : new Error(`TDEI download failed for ${tool}.`);
     } catch (error) {
       await rm(partPath, { force: true }).catch(() => undefined);
       throw error;

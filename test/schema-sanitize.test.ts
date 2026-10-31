@@ -8,10 +8,11 @@ test("draft-04 boolean exclusiveMinimum rewrites to numeric and converts", () =>
   // Exact shape from live tdei-api-gateway.json (proximity field)
   const schema = { type: "object", properties: { proximity: { type: "number", minimum: 0, exclusiveMinimum: true } } };
   const cleaned = sanitizeJsonSchema(structuredClone(schema)) as Record<string, unknown>;
-  assert.deepEqual(
-    (cleaned.properties as Record<string, unknown>).proximity,
-    { type: "number", minimum: 0, exclusiveMinimum: 0 },
-  );
+  assert.deepEqual((cleaned.properties as Record<string, unknown>).proximity, {
+    type: "number",
+    minimum: 0,
+    exclusiveMinimum: 0,
+  });
   fromJsonSchema(cleaned);
 });
 

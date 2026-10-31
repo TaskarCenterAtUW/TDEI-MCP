@@ -1,7 +1,4 @@
-import type {
-  PlaceCandidate,
-  PlaceResolver,
-} from "../intents/place-resolver.js";
+import type { PlaceCandidate, PlaceResolver } from "../intents/place-resolver.js";
 
 interface NominatimResult {
   place_id?: number | string;
@@ -41,34 +38,26 @@ export class NominatimPlaceResolver implements PlaceResolver {
     if (!response.ok) {
       throw new Error(`Forward geocoder failed with status ${response.status}.`);
     }
-    const body = await response.json() as unknown;
+    const body = (await response.json()) as unknown;
     if (!Array.isArray(body)) {
       throw new Error("Forward geocoder returned an invalid response.");
     }
     return body.flatMap((raw): PlaceCandidate[] => {
       const result = raw as NominatimResult;
       const box = result.boundingbox?.map(Number);
-      if (
-        !result.display_name || !box || box.length !== 4 ||
-        box.some((coordinate) => !Number.isFinite(coordinate))
-      ) {
+      if (!result.display_name || !box || box.length !== 4 || box.some((coordinate) => !Number.isFinite(coordinate))) {
         return [];
       }
       const [south, north, west, east] = box;
-      if (
-        south === undefined || north === undefined ||
-        west === undefined || east === undefined
-      ) return [];
-      return [{
-        label: result.display_name,
-        bbox: [west, south, east, north],
-        ...(result.importance !== undefined
-          ? { confidence: result.importance }
-          : {}),
-        ...(result.place_id !== undefined
-          ? { providerId: String(result.place_id) }
-          : {}),
-      }];
+      if (south === undefined || north === undefined || west === undefined || east === undefined) return [];
+      return [
+        {
+          label: result.display_name,
+          bbox: [west, south, east, north],
+          ...(result.importance !== undefined ? { confidence: result.importance } : {}),
+          ...(result.place_id !== undefined ? { providerId: String(result.place_id) } : {}),
+        },
+      ];
     });
   }
 }

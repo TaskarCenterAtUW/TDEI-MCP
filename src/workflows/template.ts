@@ -4,7 +4,7 @@ const REF_PATTERN = /{{\s*(.*?)\s*}}/g;
 const EXACT_REF_PATTERN = /^\s*{{\s*(.*?)\s*}}\s*$/;
 const MAX_REF_DEPTH = 5;
 
-export function getPath(obj: unknown, parts: string[]): unknown {
+function getPath(obj: unknown, parts: string[]): unknown {
   let current: unknown = obj;
   for (const part of parts) {
     if (current === null || current === undefined) return undefined;
@@ -30,15 +30,11 @@ function resolveRef(ref: string, ctx: TemplateContext): unknown {
   const trimmed = ref.trim();
   const parts = trimmed.split(".").map((p) => p.trim());
   if (parts.length > MAX_REF_DEPTH) {
-    throw new Error(
-      `template ref "{{${trimmed}}}" exceeds max depth of ${MAX_REF_DEPTH}`,
-    );
+    throw new Error(`template ref "{{${trimmed}}}" exceeds max depth of ${MAX_REF_DEPTH}`);
   }
   if (parts[0] === "user") {
     if (parts.length < 2 || !parts[1]) {
-      throw new Error(
-        `invalid template ref "{{${trimmed}}}": expected {{user.<key>}}`,
-      );
+      throw new Error(`invalid template ref "{{${trimmed}}}": expected {{user.<key>}}`);
     }
     const value = getPath(ctx.user, parts.slice(1));
     if (value === undefined) {
@@ -48,13 +44,9 @@ function resolveRef(ref: string, ctx: TemplateContext): unknown {
   }
   if (parts[0] === "steps") {
     if (parts.length < 3 || !parts[1] || parts[2] !== "output") {
-      throw new Error(
-        `invalid template ref "{{${trimmed}}}": expected {{steps.<id>.output[.<path>]}}`,
-      );
+      throw new Error(`invalid template ref "{{${trimmed}}}": expected {{steps.<id>.output[.<path>]}}`);
     }
-    const entry = Object.prototype.hasOwnProperty.call(ctx.steps, parts[1])
-      ? ctx.steps[parts[1]]
-      : undefined;
+    const entry = Object.prototype.hasOwnProperty.call(ctx.steps, parts[1]) ? ctx.steps[parts[1]] : undefined;
     if (entry === undefined) {
       throw new Error(`unknown template ref "{{${trimmed}}}"`);
     }
@@ -65,12 +57,10 @@ function resolveRef(ref: string, ctx: TemplateContext): unknown {
     }
     return value;
   }
-  throw new Error(
-    `invalid template ref "{{${trimmed}}}": must be {{user.*}} or {{steps.<id>.output...}}`,
-  );
+  throw new Error(`invalid template ref "{{${trimmed}}}": must be {{user.*}} or {{steps.<id>.output...}}`);
 }
 
-export function collectRefs(value: unknown): string[] {
+function collectRefs(value: unknown): string[] {
   const refs: string[] = [];
   const visit = (node: unknown): void => {
     if (typeof node === "string") {
@@ -101,9 +91,7 @@ export function validateRefs(
         : new Set(Object.keys(knownStepIds));
   for (const ref of collectRefs(value)) {
     if (!ref) {
-      throw new Error(
-        `invalid template ref in step "${stepId}": empty {{}} expression`,
-      );
+      throw new Error(`invalid template ref in step "${stepId}": empty {{}} expression`);
     }
     const parts = ref.split(".").map((p) => p.trim());
     if (parts[0] !== "user" && parts[0] !== "steps") {
@@ -112,22 +100,16 @@ export function validateRefs(
       );
     }
     if (parts.length > MAX_REF_DEPTH) {
-      throw new Error(
-        `template ref "{{${ref}}}" in step "${stepId}" exceeds max depth of ${MAX_REF_DEPTH}`,
-      );
+      throw new Error(`template ref "{{${ref}}}" in step "${stepId}" exceeds max depth of ${MAX_REF_DEPTH}`);
     }
     if (parts[0] === "user") {
       if (parts.length < 2 || !parts[1]) {
-        throw new Error(
-          `invalid template ref "{{${ref}}}" in step "${stepId}": expected {{user.<key>}}`,
-        );
+        throw new Error(`invalid template ref "{{${ref}}}" in step "${stepId}": expected {{user.<key>}}`);
       }
       continue;
     }
     if (parts.length < 3 || !parts[1] || parts[2] !== "output") {
-      throw new Error(
-        `invalid template ref "{{${ref}}}" in step "${stepId}": expected {{steps.<id>.output[.<path>]}}`,
-      );
+      throw new Error(`invalid template ref "{{${ref}}}" in step "${stepId}": expected {{steps.<id>.output[.<path>]}}`);
     }
     if (!known.has(parts[1])) {
       throw new Error(

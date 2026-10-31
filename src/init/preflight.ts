@@ -12,10 +12,7 @@ async function probe(exec: ExecFn, cmd: string): Promise<string | undefined> {
   }
 }
 
-export async function checkPreflight(
-  exec: ExecFn,
-  options: PreflightOptions = {},
-): Promise<{ nodeVersion: string }> {
+export async function checkPreflight(exec: ExecFn, options: PreflightOptions = {}): Promise<{ nodeVersion: string }> {
   const nodeOut = await probe(exec, options.nodePath ?? "node");
   if (nodeOut === undefined) {
     throw new Error("node not found on PATH. Install Node.js >=22 from https://nodejs.org/ and re-run init.");

@@ -88,10 +88,10 @@ function extractEmbeddedJson(text: string): unknown | undefined {
         escape = true;
         continue;
       }
-      if (character === "\"") inString = false;
+      if (character === '"') inString = false;
       continue;
     }
-    if (character === "\"") {
+    if (character === '"') {
       inString = true;
       continue;
     }

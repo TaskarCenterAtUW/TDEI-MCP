@@ -54,15 +54,19 @@ test("discovers OpenAPI operations as MCP tool definitions", async () => {
   });
 
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((tool) => tool.name), ["get_dataset", "createDataset"]);
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    ["get_dataset", "createDataset"],
+  );
   const getDataset = tools[0]!;
   assert.match(getDataset.description ?? "", /^\[OSW, Common APIs\] Get one dataset\. \| Returns: 200$/);
   assert.deepEqual(getDataset.tags, ["OSW", "Common APIs"]);
   assert.deepEqual(getDataset.inputSchema.required, ["dataset_id"]);
-  assert.deepEqual(
-    Object.keys(getDataset.inputSchema.properties as Record<string, unknown>),
-    ["dataset_id", "bbox", "include_metadata"],
-  );
+  assert.deepEqual(Object.keys(getDataset.inputSchema.properties as Record<string, unknown>), [
+    "dataset_id",
+    "bbox",
+    "include_metadata",
+  ]);
   const create = tools[1]!;
   assert.equal(create.tags, undefined);
   assert.deepEqual(create.inputSchema.required, ["name"]);
@@ -79,10 +83,7 @@ test("rejects operation IDs that normalize to the same MCP tool name", async () 
       },
     }),
   });
-  await assert.rejects(
-    () => client.listTools(),
-    /operation name collision.*get_pet/i,
-  );
+  await assert.rejects(() => client.listTools(), /operation name collision.*get_pet/i);
 });
 
 test("executes path and repeated query parameters with the current bearer", async () => {
@@ -104,7 +105,10 @@ test("executes path and repeated query parameters with the current bearer", asyn
     include_metadata: true,
   });
 
-  assert.equal(request?.url, "https://api.example.test/api/v1/datasets/dataset%2F1?bbox=-122.4&bbox=47.5&bbox=-122.2&bbox=47.7&include_metadata=true");
+  assert.equal(
+    request?.url,
+    "https://api.example.test/api/v1/datasets/dataset%2F1?bbox=-122.4&bbox=47.5&bbox=-122.2&bbox=47.7&include_metadata=true",
+  );
   assert.equal(request?.headers.get("Authorization"), "Bearer token-1");
   assert.deepEqual(JSON.parse(result.content[0]!.text), { id: "dataset/1" });
 });

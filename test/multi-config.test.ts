@@ -32,7 +32,12 @@ describe("multi-config", () => {
 
   it("rejects duplicate slugs and port collisions", () => {
     assert.throws(() =>
-      resolveMultiMcp({ servers: [{ name: "a", apiUrl: "https://api-dev.tdei.us" }, { name: "A", apiUrl: "https://api-dev.tdei.us" }] }),
+      resolveMultiMcp({
+        servers: [
+          { name: "a", apiUrl: "https://api-dev.tdei.us" },
+          { name: "A", apiUrl: "https://api-dev.tdei.us" },
+        ],
+      }),
     );
     assert.throws(() =>
       resolveMultiMcp({

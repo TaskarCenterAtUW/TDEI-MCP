@@ -86,7 +86,9 @@ export function loadMultiMcpFile(path: string): MultiMcpFile {
   try {
     parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
-    throw new Error(`Invalid JSON in ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Invalid JSON in ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Invalid multi-MCP file ${path}: expected {"servers":[{name,apiUrl,...}]}`);
@@ -157,7 +159,9 @@ export function resolveMultiMcp(
         ? normalizeBasePath(entry.basePath, `servers[${index}].basePath`)
         : sharedBasePath
           ? normalizeBasePath(
-              sharedBasePath.includes("{name}") ? sharedBasePath.replaceAll("{name}", slug) : `${sharedBasePath}/${slug}`,
+              sharedBasePath.includes("{name}")
+                ? sharedBasePath.replaceAll("{name}", slug)
+                : `${sharedBasePath}/${slug}`,
               `basePath for "${name}"`,
             )
           : `/${slug}/mcp`;

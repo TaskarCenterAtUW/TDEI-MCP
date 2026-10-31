@@ -17,8 +17,7 @@ const RECORD_KEYS = [
 function objectRecords(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter(
-    (item): item is Record<string, unknown> =>
-      typeof item === "object" && item !== null && !Array.isArray(item),
+    (item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item),
   );
 }
 
@@ -55,5 +54,27 @@ export function recordsFrom(value: unknown): Array<Record<string, unknown>> {
     return objectRecords(arrayEntries[0]![1]);
   }
 
+  // Pretty human-readable single-object envelope (record-replay fixtures and
+  // hand-written API samples): surface the payload with a _kind marker so
+  // replay tests can assert the envelope parsed instead of vanishing to [].
+  const payload = prettyEnvelopePayload(record);
+  if (payload) {
+    return [{ _kind: "object-envelope", ...payload }];
+  }
+
   return [];
+}
+
+const ENVELOPE_KEYS = new Set(["datasetId", "dataType", "source", "note", "generatedAt", "rowCount"]);
+
+/**
+ * Payload of a pretty human-readable single-object envelope (record-replay
+ * fixtures and hand-written API samples): no arrays, but carries descriptive
+ * envelope keys. Returns undefined when the record is not such an envelope.
+ */
+export function prettyEnvelopePayload(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (Object.values(record).some((value) => Array.isArray(value))) return undefined;
+  const payloadEntries = Object.entries(record).filter(([key]) => !ENVELOPE_KEYS.has(key));
+  if (payloadEntries.length === 0 || payloadEntries.length === Object.keys(record).length) return undefined;
+  return Object.fromEntries(payloadEntries);
 }

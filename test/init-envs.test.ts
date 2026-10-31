@@ -7,9 +7,18 @@ test("resolveApiUrl maps env names, requires explicit choice, normalizes pasted 
   assert.equal(resolveApiUrl({ env: "dev" }), "https://api-dev.tdei.us");
   assert.equal(resolveApiUrl({ env: "stage" }), "https://api-stage.tdei.us");
   assert.equal(resolveApiUrl({ env: "prod" }), "https://api.tdei.us");
-  assert.equal(specUrlForApiUrl("https://api-dev.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json");
-  assert.equal(specUrlForApiUrl("https://api-stage.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway.json");
-  assert.equal(specUrlForApiUrl("https://api.tdei.us"), "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway.json");
+  assert.equal(
+    specUrlForApiUrl("https://api-dev.tdei.us"),
+    "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
+  );
+  assert.equal(
+    specUrlForApiUrl("https://api-stage.tdei.us"),
+    "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway.json",
+  );
+  assert.equal(
+    specUrlForApiUrl("https://api.tdei.us"),
+    "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway.json",
+  );
   assert.equal(resolveApiUrl({ url: "https://example.com/api/" }), "https://example.com");
   assert.equal(resolveApiUrl({ url: "https://api-dev.tdei.us/api/v1/authenticate" }), "https://api-dev.tdei.us");
   assert.throws(() => resolveApiUrl({}), /no environment given/);
@@ -21,7 +30,10 @@ test("resolveApiUrl maps env names, requires explicit choice, normalizes pasted 
 test("callback validation mirrors src/config.ts", () => {
   assert.equal(buildCallbackUrl(8765), "http://127.0.0.1:8765/callback");
   assert.equal(assertCallbackUrl("http://127.0.0.1:9999/callback"), "http://127.0.0.1:9999/callback");
-  assert.throws(() => assertCallbackUrl("http://localhost:8765/callback"), /TDEI_SSO_CALLBACK_URL must use http:\/\/127\.0\.0\.1:<port>\/callback/);
+  assert.throws(
+    () => assertCallbackUrl("http://localhost:8765/callback"),
+    /TDEI_SSO_CALLBACK_URL must use http:\/\/127\.0\.0\.1:<port>\/callback/,
+  );
 });
 
 test("checkPreflight requires only a supported Node runtime", async () => {

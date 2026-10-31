@@ -20,9 +20,8 @@ export function interactiveStdioRefusal(stdinIsTTY: boolean): string | undefined
 }
 
 function failFastConfig(error: unknown): never {
-  const errors = error instanceof TdeiConfigError
-    ? error.errors
-    : [{ var: "unknown", rule: String(error), example: "" }];
+  const errors =
+    error instanceof TdeiConfigError ? error.errors : [{ var: "unknown", rule: String(error), example: "" }];
   console.error(JSON.stringify({ code: "TDEI_CONFIG_INVALID", errors }));
   process.exit(1);
 }
@@ -37,21 +36,22 @@ function isEntryPoint(): boolean {
   }
 }
 
+// Flags accept "--name=value" or "--name value" form; flag wins over env.
+function flagValue(name: string): string | undefined {
+  const inline = process.argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+  if (inline !== undefined) return inline.trim();
+  const index = process.argv.indexOf(name);
+  if (index !== -1 && index + 1 < process.argv.length) return process.argv[index + 1].trim();
+  return undefined;
+}
+
 if (isEntryPoint()) {
   const command = process.argv[2];
-  const isSetupCommand = ["init", "switch", "--help", "-h"].includes(command ?? "")
-    || (command !== undefined && !command.startsWith("--"));
+  const isSetupCommand =
+    ["init", "switch", "--help", "-h"].includes(command ?? "") || (command !== undefined && !command.startsWith("--"));
   if (isSetupCommand) {
     await import("./init.js");
   } else {
-    // Flags accept "--name=value" or "--name value" form; flag wins over env.
-    const flagValue = (name: string): string | undefined => {
-      const inline = process.argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-      if (inline !== undefined) return inline.trim();
-      const index = process.argv.indexOf(name);
-      if (index !== -1 && index + 1 < process.argv.length) return process.argv[index + 1].trim();
-      return undefined;
-    };
     const transportFlag = flagValue("--transport")?.toLowerCase();
     const portFlag = flagValue("--port");
     const hostFlag = flagValue("--host");

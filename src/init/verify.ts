@@ -26,15 +26,13 @@ export async function verifyServer(entry: ServerEntry): Promise<void> {
         assertRequiredTools(result.tools.map((tool) => tool.name));
       })(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("MCP verification timed out after 120 seconds")),
-          120_000,
-        );
+        timer = setTimeout(() => reject(new Error("MCP verification timed out after 120 seconds")), 120_000);
       }),
     ]);
   } catch (error) {
     throw new Error(
       `MCP setup verification failed (${entry.command} ${JSON.stringify(entry.args)}): ${error instanceof Error ? error.message : String(error)}. Configuration was not changed.`,
+      { cause: error },
     );
   } finally {
     clearTimeout(timer);

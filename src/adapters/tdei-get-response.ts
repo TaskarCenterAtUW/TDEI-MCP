@@ -1,7 +1,7 @@
 import { tryParseTdeiJson } from "./parse-tdei-json.js";
-import { recordsFrom } from "./tdei-records.js";
+import { prettyEnvelopePayload, recordsFrom } from "./tdei-records.js";
 
-export type TdeiGetResponseKind = "records" | "object" | "empty" | "text";
+type TdeiGetResponseKind = "records" | "object" | "empty" | "text";
 
 /**
  * Normalized GET body for MCP consumers.
@@ -71,6 +71,14 @@ export function parseTdeiGetResponse(input: unknown): ParsedTdeiGetResponse {
         body,
         records: recordsFrom(body),
         envelopeKey,
+      };
+    }
+    if (prettyEnvelopePayload(record)) {
+      return {
+        kind: "records",
+        body,
+        records: recordsFrom(body),
+        envelopeKey: "object-envelope",
       };
     }
     return {

@@ -52,7 +52,9 @@ test("truncateText slices multi-byte UTF-8 safely on codepoint boundaries", () =
 test("tdei-client.ts is gone", async () => {
   const { execSync } = await import("node:child_process");
   // Scoped to src: no production code may reference the deleted dead client.
-  const hits = execSync("grep -rn 'tdei-client\\|tdeiRequest\\|TdeiApiError' src --include='*.ts' || true", { encoding: "utf-8" }).trim();
+  const hits = execSync("grep -rn 'tdei-client\\|tdeiRequest\\|TdeiApiError' src --include='*.ts' || true", {
+    encoding: "utf-8",
+  }).trim();
   assert.equal(hits, "");
 });
 
@@ -65,7 +67,9 @@ test("logger hashes tokens in json mode", async () => {
   process.env.LOG_LEVEL = "json";
   const lines: string[] = [];
   const originalError = console.error;
-  console.error = ((...args: unknown[]) => { lines.push(args.map(String).join(" ")); }) as typeof console.error;
+  console.error = ((...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  }) as typeof console.error;
   try {
     const { log } = await import("../src/mcp/log.js");
     log("error", "probe failed", { tool: "tdei_health", sessionHash: hashToken("secret-token-abc") });
@@ -85,7 +89,14 @@ test("tdei_health works signed-out with stubbed probes", async () => {
   const { checkHealth } = await import("../src/server.js");
   const report = await checkHealth(
     {
-      auth: { getStatus: () => ({ configured: true, authenticated: false, state: "signed_out" as const, loginMethod: "sso" as const }) },
+      auth: {
+        getStatus: () => ({
+          configured: true,
+          authenticated: false,
+          state: "signed_out" as const,
+          loginMethod: "sso" as const,
+        }),
+      },
       openapi: { isConnected: () => false },
     },
     {
@@ -104,19 +115,34 @@ test("tdei_health works signed-out with stubbed probes", async () => {
 
 test("tdei_health tool is listed and callable", async () => {
   const openApiStub = {
-    async listTools() { return { tools: [] }; },
-    async callTool() { throw new Error("TDEI_SSO_REQUIRED"); },
+    async listTools() {
+      return { tools: [] };
+    },
+    async callTool() {
+      throw new Error("TDEI_SSO_REQUIRED");
+    },
     async close() {},
     isConnected: () => false,
   };
   const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { throw new Error("TDEI_SSO_REQUIRED"); },
-      getStatus: () => ({ configured: true, authenticated: false, state: "signed_out" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        throw new Error("TDEI_SSO_REQUIRED");
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: false,
+        state: "signed_out" as const,
+        loginMethod: "sso" as const,
+      }),
       getTokenVersion: () => 1,
-      async logout() { throw new Error("not used"); },
+      async logout() {
+        throw new Error("not used");
+      },
     },
     openApiMcpClient: openApiStub,
     registerTdeiOpenApiTools,

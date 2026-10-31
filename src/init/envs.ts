@@ -1,14 +1,12 @@
 const SPEC_REPO = "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs";
 const SPEC_FILE = "tdei-api-gateway.json";
 
-export const ENVS = {
+const ENVS = {
   dev: { apiUrl: "https://api-dev.tdei.us", specBranch: "dev", label: "Development (api-dev.tdei.us)" },
   stage: { apiUrl: "https://api-stage.tdei.us", specBranch: "stage", label: "Stage (api-stage.tdei.us)" },
   prod: { apiUrl: "https://api.tdei.us", specBranch: "main", label: "Production (api.tdei.us)" },
 } as const;
-export type EnvName = keyof typeof ENVS;
-
-export function specUrlForBranch(branch: string): string {
+function specUrlForBranch(branch: string): string {
   return `${SPEC_REPO}/${branch}/${SPEC_FILE}`;
 }
 
@@ -24,8 +22,6 @@ export function specUrlForApiUrl(apiUrl: string): string {
   }
   return specUrlForBranch("dev");
 }
-
-export const DEFAULT_SPEC_URL = specUrlForBranch("dev");
 
 export function assertHttpsUrl(value: string, name: string): string {
   let url: URL;
@@ -71,7 +67,7 @@ export function resolveApiUrl(opts: { env?: string | undefined; url?: string | u
 // (e.g. https://api-dev.tdei.us/api/v1/authenticate). The server derives all
 // paths from the base URL (auth-manager.ts builds {API_URL}/api/v1/...), so
 // reduce any input to its https origin and warn when something was stripped.
-export function normalizeToOrigin(value: string, name: string): string {
+function normalizeToOrigin(value: string, name: string): string {
   const cleaned = assertHttpsUrl(value, name);
   const origin = new URL(cleaned).origin;
   if (origin !== cleaned) {

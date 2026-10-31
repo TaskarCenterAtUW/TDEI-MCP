@@ -1,7 +1,7 @@
 import { parseTdeiJson } from "./parse-tdei-json.js";
 import { parseTdeiGetResponse, type ParsedTdeiGetResponse } from "./tdei-get-response.js";
 
-export function unwrapMcpPayload(payload: unknown): unknown {
+function unwrapMcpPayload(payload: unknown): unknown {
   if (typeof payload === "string") {
     return parseTdeiJson(payload);
   }
@@ -34,9 +34,7 @@ export function unwrapMcpPayload(payload: unknown): unknown {
 
     if (textBlocks.some((text) => text.trim())) {
       const snippet = textBlocks.map((text) => text.trim()).find(Boolean) ?? "";
-      throw new Error(
-        `TDEI upstream returned non-JSON response: ${snippet.replace(/\s+/g, " ").slice(0, 200)}`,
-      );
+      throw new Error(`TDEI upstream returned non-JSON response: ${snippet.replace(/\s+/g, " ").slice(0, 200)}`);
     }
 
     if (textBlocks.length > 0) return [];

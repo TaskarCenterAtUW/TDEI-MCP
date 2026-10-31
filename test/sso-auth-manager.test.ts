@@ -14,11 +14,14 @@ test("browser callback exchanges code and state for tokens", async () => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (url.pathname === "/api/v1/sso-login") {
       exchangeBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({
-        access_token: "sso-access-token",
-        refresh_token: "sso-refresh-token",
-        expires_in: 3600,
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          access_token: "sso-access-token",
+          refresh_token: "sso-refresh-token",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     return originalFetch(input, init);
   }) as typeof fetch;
@@ -32,9 +35,7 @@ test("browser callback exchanges code and state for tokens", async () => {
     assert.equal(loginUrl.searchParams.get("redirect_uri"), "http://127.0.0.1:18765/callback");
     assert.equal(auth.getStatus().state, "login_pending");
 
-    const callbackResponse = await originalFetch(
-      "http://127.0.0.1:18765/callback?code=test-code&state=test-state",
-    );
+    const callbackResponse = await originalFetch("http://127.0.0.1:18765/callback?code=test-code&state=test-state");
     assert.equal(callbackResponse.status, 200);
     await login.completion;
 
@@ -70,11 +71,14 @@ test("MCP callback completion exchanges code when the browser cannot reach loopb
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (url.pathname === "/api/v1/sso-login") {
       exchangeBody = JSON.parse(String(init?.body));
-      return new Response(JSON.stringify({
-        access_token: "relayed-access-token",
-        refresh_token: "relayed-refresh-token",
-        expires_in: 3600,
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          access_token: "relayed-access-token",
+          refresh_token: "relayed-refresh-token",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     return originalFetch(input, init);
   }) as typeof fetch;
@@ -82,9 +86,7 @@ test("MCP callback completion exchanges code when the browser cannot reach loopb
   const auth = new AuthManager();
   try {
     const login = await auth.startSsoLogin();
-    await auth.completeSsoLogin(
-      "http://127.0.0.1:18765/callback?code=relayed-code&state=relayed-state",
-    );
+    await auth.completeSsoLogin("http://127.0.0.1:18765/callback?code=relayed-code&state=relayed-state");
     await login.completion;
 
     assert.deepEqual(exchangeBody, {
@@ -104,10 +106,13 @@ test("startSsoLogin enforces expected state when provided and rejects cross-site
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (url.pathname === "/api/v1/sso-login") {
-      return new Response(JSON.stringify({
-        access_token: "csrf-verified-token",
-        expires_in: 3600,
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          access_token: "csrf-verified-token",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     return originalFetch(input, init);
   }) as typeof fetch;
@@ -119,15 +124,12 @@ test("startSsoLogin enforces expected state when provided and rejects cross-site
     assert.equal(loginUrl.searchParams.get("state"), "csrf-nonce-123");
 
     // Cross-site subresource fetch (e.g. <img>/<script> CSRF probe) is rejected with 403
-    const crossSiteRes = await originalFetch(
-      "http://127.0.0.1:18765/callback?code=abc&state=csrf-nonce-123",
-      {
-        headers: {
-          "Sec-Fetch-Site": "cross-site",
-          "Sec-Fetch-Mode": "no-cors",
-        },
+    const crossSiteRes = await originalFetch("http://127.0.0.1:18765/callback?code=abc&state=csrf-nonce-123", {
+      headers: {
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-Mode": "no-cors",
       },
-    );
+    });
     assert.equal(crossSiteRes.status, 403);
     assert.equal(crossSiteRes.headers.get("x-content-type-options"), "nosniff");
 
@@ -147,9 +149,8 @@ test("startSsoLogin enforces expected state when provided and rejects cross-site
 });
 
 test("seedInjectedToken decodes JWT exp claim and sanitizeAuthErrorDetail strips HTML and caps length", async () => {
-  const { injectAccessToken, extractJwtExpirationMs, sanitizeAuthErrorDetail } = await import(
-    "../src/auth/auth-manager.js"
-  );
+  const { injectAccessToken, extractJwtExpirationMs, sanitizeAuthErrorDetail } =
+    await import("../src/auth/auth-manager.js");
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const pastExpSeconds = Math.floor(Date.now() / 1000) - 60;
   const expiredPayload = Buffer.from(JSON.stringify({ sub: "u1", exp: pastExpSeconds })).toString("base64url");
@@ -179,10 +180,13 @@ test("public redirect URI is what the browser follows while completion uses the 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (url.pathname === "/api/v1/sso-login") {
-      return new Response(JSON.stringify({
-        access_token: "public-access-token",
-        expires_in: 3600,
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          access_token: "public-access-token",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     }
     return originalFetch(input, init);
   }) as typeof fetch;
