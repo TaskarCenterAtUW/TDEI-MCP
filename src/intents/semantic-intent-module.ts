@@ -59,6 +59,7 @@ import type {
   JobRecord,
   DataType,
   DatasetAsset,
+  DatasetMatch,
 } from "./types.js";
 
 export type { TdeiOperations } from "./operations.js";
@@ -106,6 +107,59 @@ function resolveCutoffMs(after?: string, withinDays?: number): number | undefine
     return Date.now() - withinDays * 86_400_000;
   }
   return undefined;
+}
+
+/** UUID test for download IDs — dataset names are never valid in the download path. */
+function isUuidLikeDatasetId(value: string): boolean {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
+}
+
+function readDatasetDataType(dataset: Record<string, unknown>): DataType | undefined {
+  const raw = String(dataset.data_type ?? dataset.dataType ?? "").toLowerCase();
+  if (raw.includes("flex")) return "flex";
+  if (raw.includes("pathway")) return "pathways";
+  if (raw === "osw" || raw === "") return raw === "" ? undefined : "osw";
+  return "osw";
+}
+
+function readDatasetName(dataset: Record<string, unknown>): string | undefined {
+  const name = dataset.name ?? dataset.dataset_name;
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+function readDatasetId(dataset: Record<string, unknown>): string | undefined {
+  const found = dataset.tdei_dataset_id ?? dataset.tdeiDatasetId ?? dataset.id;
+  return typeof found === "string" && found.trim() ? found.trim() : undefined;
+}
+
+/** First UUID found anywhere in a string (handles pasted table rows). */
+function extractUuidFromText(value: string): string | undefined {
+  const match = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/.exec(value);
+  return match?.[0];
+}
+
+function tableCell(value: unknown): string {
+  return String(value ?? "").replace(/\|/g, "\\|");
+}
+
+/**
+ * Markdown table of dataset matches for the user to pick from: numbered rows
+ * with the name, UUID, data type and status. The user replies with a UUID
+ * (or a pasted row containing one) or a 1-based row number.
+ */
+export function renderDatasetTable(matches: DatasetMatch[]): string {
+  if (matches.length === 0) return "No datasets matched.";
+  const header = "| # | name | tdei_dataset_id | data_type | status |";
+  const divider = "|---|------|-----------------|-----------|--------|";
+  const rows = matches.map((match, index) => {
+    const dataset = match.dataset;
+    const name = readDatasetName(dataset) ?? "";
+    const id = readDatasetId(dataset) ?? "";
+    const rawType = String(dataset.data_type ?? dataset.dataType ?? "");
+    const status = String(dataset.status ?? "");
+    return `| ${index + 1} | ${tableCell(name)} | ${tableCell(id)} | ${tableCell(rawType)} | ${tableCell(status)} |`;
+  });
+  return [header, divider, ...rows].join("\n");
 }
 
 /**
@@ -163,16 +217,18 @@ export class SemanticIntentModule {
           context,
         ),
       );
+      const matches: DatasetMatch[] = datasets.map((dataset) => ({
+        dataset,
+        matchedBy: "dataset_id",
+        evidence: `tdei_dataset_id = ${input.tdeiDatasetId?.trim()}`,
+      }));
       return {
         status: "complete",
         data: {
-          matches: datasets.map((dataset) => ({
-            dataset,
-            matchedBy: "dataset_id" as const,
-            evidence: `tdei_dataset_id = ${input.tdeiDatasetId?.trim()}`,
-          })),
+          matches,
           ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
           effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+          table: renderDatasetTable(matches),
         },
       };
     }
@@ -181,16 +237,18 @@ export class SemanticIntentModule {
       const datasets = applyCutoff(
         await this.dependencies.operations.searchDatasets({ ...common, bbox: input.bbox }, context),
       );
+      const matches: DatasetMatch[] = datasets.map((dataset) => ({
+        dataset,
+        matchedBy: "bbox",
+        evidence: `explicit bbox ${input.bbox?.join(",")}`,
+      }));
       return {
         status: "complete",
         data: {
-          matches: datasets.map((dataset) => ({
-            dataset,
-            matchedBy: "bbox" as const,
-            evidence: `explicit bbox ${input.bbox?.join(",")}`,
-          })),
+          matches,
           ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
           effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+          table: renderDatasetTable(matches),
         },
       };
     }
@@ -199,16 +257,18 @@ export class SemanticIntentModule {
       const datasets = applyCutoff(
         await this.dependencies.operations.searchDatasets({ ...common, projectGroupId: input.projectGroupId }, context),
       );
+      const matches: DatasetMatch[] = datasets.map((dataset) => ({
+        dataset,
+        matchedBy: "project_group",
+        evidence: `project group ${input.projectGroupId}`,
+      }));
       return {
         status: "complete",
         data: {
-          matches: datasets.map((dataset) => ({
-            dataset,
-            matchedBy: "project_group" as const,
-            evidence: `project group ${input.projectGroupId}`,
-          })),
+          matches,
           ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
           effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+          table: renderDatasetTable(matches),
         },
       };
     }
@@ -256,7 +316,7 @@ export class SemanticIntentModule {
         evidence = `bbox for ${resolved.label}`;
       }
     }
-    const matches = datasets.map((dataset) => ({
+    const matches: DatasetMatch[] = datasets.map((dataset) => ({
       dataset,
       matchedBy,
       evidence,
@@ -268,6 +328,7 @@ export class SemanticIntentModule {
         matches,
         ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
         effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+        table: renderDatasetTable(matches),
       },
     };
   }
@@ -609,8 +670,8 @@ export class SemanticIntentModule {
     input: DownloadDatasetInput,
     context: RequestContext = {},
   ): Promise<IntentResult<DownloadDatasetData>> {
-    const id = input.tdeiDatasetId?.trim() ?? "";
-    if (!id) {
+    const rawId = input.tdeiDatasetId?.trim() ?? "";
+    if (!rawId) {
       return {
         status: "needs_input",
         missing: [{ field: "tdeiDatasetId", question: "Which TDEI dataset id should be downloaded?" }],
@@ -619,21 +680,164 @@ export class SemanticIntentModule {
     }
     const outputDir = input.outputDir?.trim() || defaultClientDownloadsDir();
     const defaultedDir = !input.outputDir?.trim();
+    // The download endpoints require a UUID in the path. Callers often paste
+    // the dataset NAME (e.g. Seattle_WSP_TDEI_OSW_0p2_Dataset_bbox) or a whole
+    // table row instead — the old code then built /api/v1/osw/<NAME>, which
+    // the API rejects with 404/403. A UUID anywhere in the input (pasted row
+    // included) downloads immediately; a bare name goes through a consent
+    // step with a match table first.
+    const embeddedUuid = extractUuidFromText(rawId);
+    let id = embeddedUuid ?? rawId;
     let dataType: DataType | undefined = input.dataType;
     let datasetName: string | undefined;
-    if (!dataType) {
-      const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
-      if (lookup.status === "complete" && lookup.data.matches[0]) {
-        const raw = String(
-          lookup.data.matches[0].dataset.data_type ?? lookup.data.matches[0].dataset.dataType ?? "",
-        ).toLowerCase();
-        if (raw.includes("flex")) dataType = "flex";
-        else if (raw.includes("pathway")) dataType = "pathways";
-        else dataType = "osw";
-        const name = lookup.data.matches[0].dataset.name ?? lookup.data.matches[0].dataset.dataset_name;
-        if (typeof name === "string" && name.trim()) datasetName = name.trim();
+    const isUuidLike = embeddedUuid !== undefined || isUuidLikeDatasetId(rawId);
+    if (isUuidLike) {
+      if (!dataType) {
+        const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
+        if (lookup.status === "complete" && lookup.data.matches[0]) {
+          const dataset = lookup.data.matches[0].dataset;
+          dataType = readDatasetDataType(dataset) ?? "osw";
+          datasetName = readDatasetName(dataset);
+        } else {
+          dataType = "osw";
+        }
+      }
+    } else {
+      // Bare row numbers carry no dataset context on their own — the caller
+      // must also pass the name (via selection) or paste the UUID/row.
+      if (/^\d+$/.test(rawId)) {
+        return {
+          status: "needs_input",
+          missing: [
+            {
+              field: "selection",
+              question: `"${rawId}" looks like a row number without a dataset name. Re-run tdei_download_dataset with tdeiDatasetId set to the dataset name plus selection:${rawId} (1-based row from the match table), or paste the tdei_dataset_id UUID directly.`,
+            },
+          ],
+          accepted: { tdeiDatasetId: rawId },
+        };
+      }
+      // Name path: search by name (place search tries name, then city, then
+      // bbox). Never auto-downloads: show the match table and require the
+      // user to confirm with a UUID (a pasted row works too) or a row number.
+      const lookup = await this.findDatasets(
+        { place: rawId, ...(input.dataType ? { dataType: input.dataType } : {}), limit: 10 },
+        context,
+      );
+      if (lookup.status === "ambiguous") {
+        return {
+          status: "needs_input",
+          missing: [
+            {
+              field: "tdeiDatasetId",
+              question: `Multiple places match "${rawId}". Re-run tdei_find_datasets with place="${rawId}" to pick the exact dataset, then pass its tdei_dataset_id to tdei_download_dataset.`,
+            },
+          ],
+          accepted: { tdeiDatasetId: rawId },
+        };
+      }
+      if (lookup.status !== "complete" || !lookup.data.matches[0]) {
+        // Caller asserted an explicit dataType with an ID-like token the
+        // catalogue does not know (common in unit tests with fake ids):
+        // preserve the old pass-through so explicit-type calls never fail
+        // on lookup. Without an asserted type, a name that matches nothing
+        // must not become /api/v1/osw/<NAME> — ask for a UUID instead.
+        if (input.dataType) {
+          dataType = input.dataType;
+          datasetName = undefined;
+        } else {
+          return {
+            status: "needs_input",
+            missing: [
+              {
+                field: "tdeiDatasetId",
+                question: `No dataset found for "${rawId}". It looks like a dataset NAME, not a UUID — run tdei_find_datasets with place="${rawId}" (or the city) to get the exact tdei_dataset_id, then retry tdei_download_dataset with that UUID. Raw names cannot be used in the /api/v1/osw/{id} download path.`,
+              },
+            ],
+            accepted: { tdeiDatasetId: rawId },
+          };
+        }
       } else {
-        dataType = "osw";
+        const matches = lookup.data.matches;
+        const retryAccepted: Record<string, unknown> = {
+          tdeiDatasetId: rawId,
+          ...(input.dataType ? { dataType: input.dataType } : {}),
+          ...(input.outputDir ? { outputDir: input.outputDir } : {}),
+          ...(input.filename ? { filename: input.filename } : {}),
+        };
+        if (input.selection !== undefined) {
+          const row = Math.floor(input.selection);
+          if (!Number.isInteger(input.selection) || row < 1 || row > matches.length) {
+            return {
+              status: "needs_input",
+              missing: [
+                {
+                  field: "selection",
+                  question: `selection ${String(input.selection)} is out of range (1..${matches.length}) for "${rawId}":\n${lookup.data.table}\nRe-run tdei_download_dataset with tdeiDatasetId="${rawId}" and selection:<row number>, or paste the tdei_dataset_id UUID directly.`,
+                },
+              ],
+              accepted: retryAccepted,
+            };
+          }
+          const chosen = matches[row - 1];
+          const resolvedId = chosen ? readDatasetId(chosen.dataset) : undefined;
+          if (!chosen || !resolvedId) {
+            return {
+              status: "needs_input",
+              missing: [
+                {
+                  field: "tdeiDatasetId",
+                  question: `Row ${row} for "${rawId}" has no tdei_dataset_id. Re-run tdei_find_datasets to inspect it.`,
+                },
+              ],
+              accepted: retryAccepted,
+            };
+          }
+          id = resolvedId;
+          datasetName = readDatasetName(chosen.dataset);
+          dataType = input.dataType ?? readDatasetDataType(chosen.dataset) ?? "osw";
+        } else if (matches.length === 1) {
+          const only = matches[0];
+          const resolvedId = only ? readDatasetId(only.dataset) : undefined;
+          if (!only || !resolvedId) {
+            return {
+              status: "needs_input",
+              missing: [
+                {
+                  field: "tdeiDatasetId",
+                  question: `Found a dataset matching "${rawId}" but it has no tdei_dataset_id. Re-run tdei_find_datasets to inspect it.`,
+                },
+              ],
+              accepted: retryAccepted,
+            };
+          }
+          if (input.confirm !== true) {
+            return {
+              status: "needs_input",
+              missing: [
+                {
+                  field: "confirm",
+                  question: `Found 1 dataset matching "${rawId}":\n${lookup.data.table}\nTo download it, re-run tdei_download_dataset with tdeiDatasetId="${resolvedId}" (pasting the full row works too), or repeat this call with confirm:true.`,
+                },
+              ],
+              accepted: retryAccepted,
+            };
+          }
+          id = resolvedId;
+          datasetName = readDatasetName(only.dataset);
+          dataType = input.dataType ?? readDatasetDataType(only.dataset) ?? "osw";
+        } else {
+          return {
+            status: "needs_input",
+            missing: [
+              {
+                field: "tdeiDatasetId",
+                question: `Found ${matches.length} datasets matching "${rawId}":\n${lookup.data.table}\nReply with the tdei_dataset_id (UUID) of the one to download — pasting the full row works too — or re-run tdei_download_dataset with tdeiDatasetId="${rawId}" and selection:<row number> (1-based).`,
+              },
+            ],
+            accepted: retryAccepted,
+          };
+        }
       }
     }
     const resolved = (dataType ?? "osw") as DataType;
