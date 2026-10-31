@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Localsingle-image gateway lifecycle (no compose file).
 # Usage:
-#   ./scripts/gateway-local.sh up    # build image, (re)start detached container
-#   ./scripts/gateway-local.sh down  # stop and remove the container
+#   ./scripts/deploy-docker.sh up    # build image, (re)start detached container
+#   ./scripts/deploy-docker.sh down  # stop and remove the container
+# Or via pnpm: pnpm deploy:docker / pnpm deploy:docker:down
 # Env: PORT (default 3000), TDEI_IMAGE (default tdei-mcp), TDEI_CONTAINER (default tdei-mcp).
 set -euo pipefail
 

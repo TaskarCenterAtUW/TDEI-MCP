@@ -1,0 +1,14 @@
+allowBuilds:
+  esbuild: true
+# pnpm v12 minimum-release-age supply-chain policy: these well-known,
+# frequently-released transitive deps would otherwise break reproducible
+# (frozen-lockfile) installs for ~24h after each upstream release.
+minimumReleaseAgeExclude:
+  - electron-to-chromium
+  - node-releases
+  - tslib
+# Patch known-moderate transitive vulns (both live only in the stryker-only
+# dev tree) without waiting on upstream releases.
+overrides:
+  minimatch: ">=11.0.1"
+  qs: ">=6.16.1"

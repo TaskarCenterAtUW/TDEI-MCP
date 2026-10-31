@@ -43,7 +43,7 @@ on the client machine, the server also serves install scripts — see
 
 ## Requirements
 
-- **Node.js 22** and npm. Check with `node --version` and `npm --version`.
+- **Node.js 22** and pnpm. Check with `node --version` and `pnpm --version`.
 - An MCP client that can launch a local **stdio** server, such as Codex. Generated API tool definitions are loaded during MCP initialization so clients see them in the initial catalogue; invoking them still requires SSO.
 - Access to TDEI through its browser-based SSO login.
 - Internet access to install dependencies, download the OpenAPI specification, and contact TDEI.
@@ -61,10 +61,10 @@ On this repository's GitHub page, choose **Code → Download ZIP**, extract it, 
 Run these commands from the folder containing `package.json`:
 
 ```bash
-npm ci
+pnpm install --frozen-lockfile
 ```
 
-`npm ci` installs the dependency versions recorded in `package-lock.json`.
+`pnpm install --frozen-lockfile` installs the dependency versions recorded in `pnpm-lock.yaml`.
 The recommended init flow below writes the required environment into the MCP
 client config, so it does not need a `.env` file. For the manual fallback only,
 copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell),
@@ -74,7 +74,7 @@ registered for the `tdei-mcp` client, and its port must be free locally.
 ## 2. Build (checkout only — `init` users skip this)
 
 ```bash
-npm run build
+pnpm build
 ```
 
 This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for the manual fallback — `init` writes them inline in the client config.
@@ -115,7 +115,7 @@ excluded by `.gitignore`; do not commit them.
 
 The manual configuration below is a fallback. Configure your client to start
 the connector with Node.js and explicitly load `.env`. The application does not
-load `.env` on its own; `npm start` and `npm run dev` use only the environment
+load `.env` on its own; `pnpm start` and `pnpm dev` use only the environment
 already supplied to their process.
 
 ### Codex
@@ -191,7 +191,7 @@ The client process needs only Node.js and network access to the configured speci
 
 **STDIO** is started automatically by your MCP client (Codex, Claude Desktop, VS Code, etc.) after `init` writes the client config. Do not run `node dist/index.js` yourself for stdio — with a terminal attached it exits and tells you to use HTTP or `init`.
 
-For a non-blocking stdio handshake check, run `npm run check:stdio`. **Manual start** is only for Streamable HTTP (see below).
+For a non-blocking stdio handshake check, run `pnpm check:stdio`. **Manual start** is only for Streamable HTTP (see below).
 
 ### HTTP mode (Streamable HTTP, session SSO)
 
@@ -299,17 +299,17 @@ Node children only (no gateway) — one child process per server, ports
 auto-increment from `basePort`:
 
 ```bash
-npm run build
-npm run start:multi -- --file mcps.json   # dev: npm run dev:multi
+pnpm build
+pnpm start:multi -- --file mcps.json   # dev: pnpm dev:multi
 # tdei-core-dev -> http://127.0.0.1:3001/tdei-core-dev/mcp, staging -> :3002, ...
 ```
 
 Full gateway — node children plus an nginx path-based reverse proxy:
 
 ```bash
-npm run deploy:node    # host-local: nginx + children, no Docker (needs nginx installed)
-npm run deploy:docker  # single image: build + run container (needs Docker)
-npm run deploy:docker:down  # stop and remove the container
+pnpm deploy:node    # host-local: nginx + children, no Docker (needs nginx installed)
+pnpm deploy:docker  # single image: build + run container (needs Docker)
+pnpm deploy:docker:down  # stop and remove the container
 ```
 
 Both serve the same thing on `http://127.0.0.1:3000/` (`$PORT` overrides,
@@ -368,7 +368,7 @@ Local stdio mode also exposes these connector-management tools while signed out:
 
 | Tool | Purpose |
 | --- | --- |
-| `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated. |
+| `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated, including JWT identity (email, username, roles) when signed in. |
 | `tdei_health` | Report connector health: auth state, OpenAPI provider, spec reachability, callback port, and config. Read-only, safe signed-out. |
 | `tdei_sso_login` | Start browser SSO and return the login URL. |
 | `tdei_test_authentication` | Check for a usable SSO session token. |
@@ -442,7 +442,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 
 | Symptom | What to check |
 | --- | --- |
-| `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `npm run build`. For clients without `cwd`, use absolute argument paths. |
+| `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `pnpm build`. For clients without `cwd`, use absolute argument paths. |
 | SSO login is required | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | Callback port is already in use | Stop the process using port 8765, then retry login. |
 | SSO redirect returns 400 | Confirm the client ID and callback URL exactly match the backend registration. |
@@ -469,16 +469,17 @@ Connector diagnostics are written to stderr, which MCP clients usually capture i
 Run the deterministic lifecycle tests and TypeScript build without a live TDEI session:
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm lint
+pnpm build
 ```
 
-The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability.
+The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability. `pnpm lint` runs the TypeScript compiler, oxlint, and a Prettier check; fix formatting with `pnpm format` (or verify with `pnpm format:check`). The same three commands run in CI and as the pre-commit hook.
 
 To verify a real TDEI connection, configure the registered SSO client and callback in `.env`, then run:
 
 ```bash
-npm run test:live
+pnpm test:live
 ```
 
 This prints a browser login URL and waits up to five minutes for SSO. It then verifies authentication, loads and calls `listServices`, and logs out. Success prints `Live SSO session smoke test passed.`

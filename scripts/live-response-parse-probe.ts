@@ -6,7 +6,7 @@
  *
  *   TDEI_ACCESS_TOKEN='<paste-bearer-here>' \
  *   TDEI_API_URL=https://api-dev.tdei.us \
- *     npm run test:live-parse
+ *     pnpm test:live-parse
  *
  * Or equivalently:
  *
@@ -47,7 +47,12 @@ const PROBES: Probe[] = [
   { name: "data-metrics", path: "/api/v1/data-metrics", expectKind: "object" },
   { name: "listProjectGroups", path: "/api/v1/project-groups?page_no=1&page_size=10", expectKind: "records" },
   { name: "listServices", path: "/api/v1/services?page_no=1&page_size=10", expectKind: "records", allowEmpty: true },
-  { name: "listDatasetFiles", path: "/api/v1/datasets?page_no=1&page_size=10", expectKind: "records", allowEmpty: true },
+  {
+    name: "listDatasetFiles",
+    path: "/api/v1/datasets?page_no=1&page_size=10",
+    expectKind: "records",
+    allowEmpty: true,
+  },
   {
     name: "listJobs",
     path: "/api/v1/jobs?tdei_project_group_id={projectGroupId}&page_no=1&page_size=10",
@@ -107,8 +112,7 @@ function describe(body: unknown, contentType: string, byteLength: number): Shape
   }
   if (Array.isArray(body)) {
     const first = body.find((x) => x && typeof x === "object" && !Array.isArray(x)) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return {
       kind: "array",
       length: body.length,
@@ -213,8 +217,8 @@ for (const probe of PROBES) {
 
     let ok = status === 200 || status === 204 || status === 404;
     let note: string | undefined;
-    const bodyMatches = JSON.stringify(parsed.body) === JSON.stringify(body)
-      && JSON.stringify(mcpDecoded.body) === JSON.stringify(body);
+    const bodyMatches =
+      JSON.stringify(parsed.body) === JSON.stringify(body) && JSON.stringify(mcpDecoded.body) === JSON.stringify(body);
 
     if (status === 401 || status === 403) {
       ok = false;
@@ -226,11 +230,7 @@ for (const probe of PROBES) {
       } else if (!bodyMatches) {
         ok = false;
         note = "parsed/MCP body drifted from API JSON";
-      } else if (
-        probe.expectKind === "records" &&
-        parsed.records.length === 0 &&
-        !probe.allowEmpty
-      ) {
+      } else if (probe.expectKind === "records" && parsed.records.length === 0 && !probe.allowEmpty) {
         ok = false;
         note = `records empty but data required; shape=${JSON.stringify(shape)}`;
       } else if (
@@ -277,21 +277,27 @@ for (const probe of PROBES) {
   }
 }
 
-console.log(JSON.stringify({
-  api: API,
-  capturedIds: {
-    projectGroupId: ids.projectGroupId ?? null,
-    serviceId: ids.serviceId ?? null,
-    datasetId: ids.datasetId ?? null,
-    jobId: ids.jobId ?? null,
-  },
-  summary: {
-    total: rows.length,
-    ok: rows.filter((r) => r.ok).length,
-    failed: failures.length,
-  },
-  failures,
-  rows,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      api: API,
+      capturedIds: {
+        projectGroupId: ids.projectGroupId ?? null,
+        serviceId: ids.serviceId ?? null,
+        datasetId: ids.datasetId ?? null,
+        jobId: ids.jobId ?? null,
+      },
+      summary: {
+        total: rows.length,
+        ok: rows.filter((r) => r.ok).length,
+        failed: failures.length,
+      },
+      failures,
+      rows,
+    },
+    null,
+    2,
+  ),
+);
 
 if (failures.length > 0) process.exit(1);

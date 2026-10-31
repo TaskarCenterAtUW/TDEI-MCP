@@ -12,10 +12,10 @@
  *          -> POST /mcp tools/list + tools/call tdei_health
  *
  * Usage:
- *   npm run test:smoke                          # local stdio + local http
- *   npm run test:smoke -- --no-http             # stdio only
- *   npm run test:smoke -- --no-stdio            # http only
- *   npm run test:smoke -- --remote https://mcp.example.com [--timeout-ms 20000]
+ *   pnpm test:smoke                          # local stdio + local http
+ *   pnpm test:smoke -- --no-http             # stdio only
+ *   pnpm test:smoke -- --no-stdio            # http only
+ *   pnpm test:smoke -- --remote https://mcp.example.com [--timeout-ms 20000]
  *   node --import tsx scripts/smoke-test.ts [--remote URL] [--no-stdio] [--no-http] [--port 0] [--timeout-ms 20000]
  *
  * Exit 0 = PASS, 1 = FAIL. Prints a summary table at the end.
@@ -53,7 +53,10 @@ function mcpBody(id: number | string, method: string, params: unknown = {}) {
   return JSON.stringify({ jsonrpc: "2.0", id, method, params });
 }
 function textOf(result: { content?: Array<{ type?: string; text?: string }> }): string {
-  return (result.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+  return (result.content ?? [])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text ?? "")
+    .join("\n");
 }
 async function fetchTimeout(url: string, init: RequestInit = {}, ms = 10_000): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
@@ -75,7 +78,9 @@ async function waitForHttp(base: string, ms: number): Promise<boolean> {
     try {
       const r = await fetchTimeout(`${base}/`, {}, 2000);
       if (r.ok || r.status === 404) return true;
-    } catch { /* retry */ }
+    } catch {
+      /* retry */
+    }
     await new Promise((r) => setTimeout(r, 300));
   }
   return false;
@@ -83,9 +88,20 @@ async function waitForHttp(base: string, ms: number): Promise<boolean> {
 
 // ---------- STDIO ----------
 async function checkStdio(): Promise<void> {
-  if (NO_STDIO) { console.log("SKIP  stdio (flag --no-stdio)"); return; }
+  if (NO_STDIO) {
+    console.log("SKIP  stdio (flag --no-stdio)");
+    return;
+  }
   console.log("\n== STDIO ==");
-  let client: { connect(t: unknown): Promise<void>; listTools(): Promise<{ tools: Array<{ name: string }> }>; callTool(a: { name: string; arguments: Record<string, unknown> }): Promise<{ isError?: boolean; content?: Array<{ type?: string; text?: string }> }>; close(): Promise<void> };
+  let client: {
+    connect(t: unknown): Promise<void>;
+    listTools(): Promise<{ tools: Array<{ name: string }> }>;
+    callTool(a: {
+      name: string;
+      arguments: Record<string, unknown>;
+    }): Promise<{ isError?: boolean; content?: Array<{ type?: string; text?: string }> }>;
+    close(): Promise<void>;
+  };
   let transport: { stderr?: { on(e: string, f: (c: Buffer) => void): void }; close?: () => Promise<void> };
   try {
     const [{ Client }, { StdioClientTransport }] = await Promise.all([
@@ -114,7 +130,11 @@ async function checkStdio(): Promise<void> {
     record("stdio: handshake (initialize)", true);
   } catch (e) {
     record("stdio: handshake (initialize)", false, e instanceof Error ? e.message : String(e));
-    try { await transport!.close?.(); } catch { /* ignore */ }
+    try {
+      await transport!.close?.();
+    } catch {
+      /* ignore */
+    }
     return;
   }
   try {
@@ -128,12 +148,19 @@ async function checkStdio(): Promise<void> {
     const status = await client!.callTool({ name: "tdei_auth_status", arguments: {} });
     const statusText = textOf(status);
     record("stdio: call tdei_auth_status", !status.isError, statusText.slice(0, 120));
-    const intent = await client!.callTool({ name: "tdei_resolve_intent", arguments: { request: "find datasets in Seattle" } });
+    const intent = await client!.callTool({
+      name: "tdei_resolve_intent",
+      arguments: { request: "find datasets in Seattle" },
+    });
     record("stdio: call tdei_resolve_intent", !intent.isError, textOf(intent).slice(0, 120));
   } catch (e) {
     record("stdio: tool calls", false, e instanceof Error ? e.message : String(e));
   } finally {
-    try { await client!.close(); } catch { /* ignore */ }
+    try {
+      await client!.close();
+    } catch {
+      /* ignore */
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
 }
@@ -223,14 +250,21 @@ async function checkHttpEndpoint(base: string, label: string): Promise<void> {
       15_000,
     );
     const text = await r.text();
-    record(`${label}: POST /mcp call tdei_auth_status`, r.status === 200 && text.includes("signed_out") || text.includes("authenticated") || text.includes("pending"), `HTTP ${r.status}`);
+    record(
+      `${label}: POST /mcp call tdei_auth_status`,
+      (r.status === 200 && text.includes("signed_out")) || text.includes("authenticated") || text.includes("pending"),
+      `HTTP ${r.status}`,
+    );
   } catch (e) {
     record(`${label}: POST /mcp call tdei_auth_status`, false, e instanceof Error ? e.message : String(e));
   }
 }
 
 async function checkHttp(): Promise<void> {
-  if (NO_HTTP) { console.log("SKIP  http (flag --no-http)"); return; }
+  if (NO_HTTP) {
+    console.log("SKIP  http (flag --no-http)");
+    return;
+  }
   console.log("\n== HTTP ==");
   if (REMOTE) {
     await checkHttpEndpoint(REMOTE, "remote");
@@ -240,7 +274,9 @@ async function checkHttp(): Promise<void> {
   const base = `http://127.0.0.1:${port}`;
   const child = spawnLocalHttp(port);
   let stderr = "";
-  child.stderr?.on("data", (c: Buffer) => { stderr += c.toString(); });
+  child.stderr?.on("data", (c: Buffer) => {
+    stderr += c.toString();
+  });
   try {
     const up = await waitForHttp(base, TIMEOUT_MS);
     record("http: server starts locally", up, up ? base : stderr.slice(-500) || "no response");
@@ -248,12 +284,18 @@ async function checkHttp(): Promise<void> {
   } finally {
     child.kill("SIGTERM");
     await new Promise((r) => setTimeout(r, 500));
-    try { child.kill("SIGKILL"); } catch { /* already dead */ }
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already dead */
+    }
   }
 }
 
 // ---------- main ----------
-console.log(`tdei-mcp smoke test  (dist: ${HAS_DIST ? "yes" : "no — using src via tsx"}, .env: ${HAS_ENV_FILE ? "yes" : "no"})`);
+console.log(
+  `tdei-mcp smoke test  (dist: ${HAS_DIST ? "yes" : "no — using src via tsx"}, .env: ${HAS_ENV_FILE ? "yes" : "no"})`,
+);
 if (REMOTE) console.log(`remote: ${REMOTE}`);
 await checkStdio();
 await checkHttp();
@@ -264,8 +306,8 @@ if (failed.length > 0) {
   console.log("Failures:");
   for (const f of failed) console.log(`  - ${f.name}${f.detail ? `: ${f.detail}` : ""}`);
   console.log("\nTip: run with more logging via TDEI_LOG_LEVEL=debug, or test a deployed server with:");
-  console.log("  npm run test:smoke -- --remote https://YOUR-HOST/mcp");
+  console.log("  pnpm test:smoke -- --remote https://YOUR-HOST/mcp");
   process.exit(1);
 }
 console.log("Smoke test passed — server is healthy. No client config was changed and no SSO browser login was needed.");
-console.log("To go further (requires one browser SSO): npm run test:live");
+console.log("To go further (requires one browser SSO): pnpm test:live");

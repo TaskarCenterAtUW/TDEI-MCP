@@ -5,7 +5,7 @@
  * prints status, then tears everything down and exits.
  *
  * Usage:
- *   npm run check:stdio
+ *   pnpm check:stdio
  *   node --env-file=.env --import tsx scripts/stdio-check.ts [--timeout-ms 15000]
  */
 import { Client } from "@modelcontextprotocol/client";
@@ -42,15 +42,10 @@ async function main(): Promise<void> {
     await client.connect(transport);
     const { tools } = await client.listTools();
     clearTimeout(timer);
-    console.log(
-      `[tdei-mcp] stdio check OK: server started, handshake succeeded, ${tools.length} tool(s) listed.`,
-    );
+    console.log(`[tdei-mcp] stdio check OK: server started, handshake succeeded, ${tools.length} tool(s) listed.`);
   } catch (error) {
     clearTimeout(timer);
-    console.error(
-      "[tdei-mcp] stdio check FAILED:",
-      error instanceof Error ? error.message : String(error),
-    );
+    console.error("[tdei-mcp] stdio check FAILED:", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   } finally {
     try {

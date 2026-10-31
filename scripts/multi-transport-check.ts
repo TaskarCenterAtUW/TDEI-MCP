@@ -4,18 +4,14 @@
  * Uses the real MCP client (Streamable HTTP) against each resolved
  * server URL from mcps.json — no raw curl, full initialize handshake.
  *
- * Usage (servers must already be up, e.g. `npm run start:multi`):
+ * Usage (servers must already be up, e.g. `pnpm start:multi`):
  *   node --import tsx scripts/multi-transport-check.ts [--file mcps.json]
  *
  * Exit 0 = all servers passed, 1 = any failure.
  */
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
-import {
-  loadMultiMcpFile,
-  resolveMultiMcp,
-  resolveMultiMcpFilePath,
-} from "../src/multi-config.js";
+import { loadMultiMcpFile, resolveMultiMcp, resolveMultiMcpFilePath } from "../src/multi-config.js";
 
 type Check = { server: string; name: string; ok: boolean; detail: string };
 const checks: Check[] = [];
@@ -66,8 +62,7 @@ for (const s of servers) {
         .join("\n");
       // tdei_test_authentication signed-out returns isError with
       // TDEI_SSO_REQUIRED — still a successful transport round-trip.
-      const ok =
-        tool === "tdei_auth_status" ? !res.isError : text.includes("SSO login is required");
+      const ok = tool === "tdei_auth_status" ? !res.isError : text.includes("SSO login is required");
       record(s.name, `call ${tool} (signed-out safe)`, ok, text.slice(0, 100).replace(/\n/g, " "));
     } catch (e) {
       record(s.name, `call ${tool}`, false, e instanceof Error ? e.message : String(e));

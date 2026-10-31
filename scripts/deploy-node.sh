@@ -4,9 +4,9 @@
 # path-based reverse proxy on $PORT.
 #
 # Usage:
-#   npm run deploy:node
-#   PORT=4000 npm run deploy:node
-#   TDEI_MCPS_FILE=my-mcps.json npm run deploy:node
+#   pnpm deploy:node
+#   PORT=4000 pnpm deploy:node
+#   TDEI_MCPS_FILE=my-mcps.json pnpm deploy:node
 #
 # Requires: nginx binary (brew install nginx / sudo apt install nginx), node 22+.
 set -euo pipefail
@@ -33,7 +33,7 @@ fi
 # Build first so dist/ matches src/ (skipped if already built and fresh).
 if [ ! -f dist/multi-serve.js ] || [ src/multi-serve.ts -nt dist/multi-serve.js ]; then
   echo "building..."
-  npm run build
+  pnpm build
 fi
 
 mkdir -p "$PREFIX/html" "$PREFIX/logs"

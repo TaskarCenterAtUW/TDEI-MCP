@@ -19,26 +19,27 @@
 #                   routes from it on every boot (REGENERATE_NGINX=0 to skip).
 
 FROM node:22-bookworm-slim AS build
+RUN npm i -g pnpm@12.6.0
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY tsconfig.json ./tsconfig.json
 COPY scripts ./scripts
 COPY src ./src
 COPY mcps.json ./mcps.json
-RUN npm run build \
+RUN pnpm build \
   && node scripts/generate-nginx-conf.mjs --file mcps.json --out nginx/nginx.conf --direct
 
 FROM node:22-bookworm-slim
-RUN apt-get update \
+RUN npm i -g pnpm@12.6.0 && apt-get update \
   && apt-get install -y --no-install-recommends nginx \
   && rm -rf /var/lib/apt/lists/* \
   && rm -f /etc/nginx/sites-enabled/default \
   && ln -sf /dev/stdout /var/log/nginx/access.log \
   && ln -sf /dev/stderr /var/log/nginx/error.log
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prod && pnpm store prune
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts/generate-nginx-conf.mjs ./scripts/generate-nginx-conf.mjs
 COPY --from=build /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
@@ -49,6 +50,8 @@ RUN chmod +x scripts/docker-entrypoint.sh
 # nginx master runs as root (workers drop to www-data); node children bind
 # loopback-only child ports — nginx on $PORT is the single public entrypoint.
 ENV PORT=3000 TDEI_TRANSPORT=http
+ARG GIT_SHA=unknown
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA
 EXPOSE 3000
 # Gateway landing page proves nginx is up and serving the generated routes.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -13,7 +13,7 @@
  *   5. tdei_logout -> asserts signed out
  *
  * Usage:
- *   npm run test:live
+ *   pnpm test:live
  *   node --env-file=.env --import tsx scripts/live-session-smoke.ts [--timeout-ms 20000]
  *
  * Requires one browser SSO login. Tokens live in the child server memory.
@@ -29,9 +29,7 @@ const DIST = `${REPO_ROOT}/dist/index.js`;
 const HAS_DIST = existsSync(DIST);
 const HAS_ENV_FILE = existsSync(`${REPO_ROOT}/.env`);
 const TIMEOUT_MS = Number(
-  process.argv.find((a) => a.startsWith("--timeout-ms="))?.split("=")[1] ??
-    process.env.TDEI_LIVE_TIMEOUT_MS ??
-    20_000,
+  process.argv.find((a) => a.startsWith("--timeout-ms="))?.split("=")[1] ?? process.env.TDEI_LIVE_TIMEOUT_MS ?? 20_000,
 );
 
 type TextContent = { type?: string; text?: string };
@@ -101,14 +99,9 @@ async function main(): Promise<void> {
     process.stdin.once("data", (value) => {
       const callbackUrl = value.trim();
       if (!callbackUrl) return;
-      void client
-        .callTool({ name: "tdei_sso_complete", arguments: { callbackUrl } })
-        .catch((error) => {
-          console.error(
-            "[auth] callback relay failed:",
-            error instanceof Error ? error.message : String(error),
-          );
-        });
+      void client.callTool({ name: "tdei_sso_complete", arguments: { callbackUrl } }).catch((error) => {
+        console.error("[auth] callback relay failed:", error instanceof Error ? error.message : String(error));
+      });
     });
 
     const loginDeadline = Date.now() + 5 * 60_000;
@@ -148,7 +141,16 @@ async function main(): Promise<void> {
     const found = await call("tdei_find_datasets", { place: "Seattle", limit: 5 });
     const foundText = textOf(found);
     const parsed = JSON.parse(foundText) as {
-      data?: { matches?: Array<{ dataset?: { metadata?: { dataset_detail?: { name?: string } }; tdei_dataset_id?: string; status?: string; data_type?: string } }> };
+      data?: {
+        matches?: Array<{
+          dataset?: {
+            metadata?: { dataset_detail?: { name?: string } };
+            tdei_dataset_id?: string;
+            status?: string;
+            data_type?: string;
+          };
+        }>;
+      };
     };
     const matches = parsed.data?.matches ?? [];
     assert.ok(matches.length > 0, "tdei_find_datasets returned zero matches for Seattle");
