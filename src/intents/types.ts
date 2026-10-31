@@ -214,11 +214,12 @@ export interface TagInclineInput {
 
 export interface CheckInclineData {
   tdeiDatasetId: string;
-  dataType?: string;
-  hasIncline?: boolean;
-  checkedFiles: string[];
-  evidence: string;
-  downloadFile?: string;
+  dataType: DataType;
+  apiOperation: "getOswFile";
+  method: "GET";
+  path: string;
+  curlCommand: string;
+  instruction: string;
 }
 
 export interface ListFeedbacksInput {
@@ -263,6 +264,32 @@ export interface DownloadFeedbacksData {
   apiOperation: "oswDatasetViewerFeedbacksDownload";
   method: "GET";
   path: "/api/v1/osw/dataset-viewer/feedbacks/download/{tdei_project_group_id}";
+}
+
+export interface DownloadDatasetInput {
+  tdeiDatasetId?: string;
+  dataType?: DataType;
+  /**
+   * Absolute folder on the CLIENT machine the ZIP is saved to
+   * (the user-connected folder). The MCP server never writes files.
+   */
+  outputDir?: string;
+  /** Optional ZIP filename override (defaults to <dataset-name-or-id>.zip). */
+  filename?: string;
+}
+
+export interface DownloadDatasetData {
+  tdeiDatasetId: string;
+  dataType: DataType;
+  datasetName?: string;
+  /** Client-local destination path (joined, not written server-side). */
+  filePath: string;
+  apiOperation: "getOswFile" | "getGtfsFlexFile" | "getGtfsPathwaysFile";
+  method: "GET";
+  path: string;
+  /** Ready-to-run client-side download command for the connected folder. */
+  curlCommand: string;
+  instruction: string;
 }
 
 export interface SubmitFeedbackInput {

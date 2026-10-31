@@ -41,9 +41,12 @@ test("registered getOswFile tool routes locally, child never sees binary", async
       downloadCalls.push({ tool, input });
       return {
         tool,
-        path: "/tmp/getOswFile-yakima.zip",
-        bytes: 12_345,
-        contentType: "application/zip",
+        method: "GET",
+        path: "/api/v1/osw/288715e9-b17f-47b8-837a-eca897987061",
+        filename: "getOswFile-288715e9-b17f-47b8-837a-eca897987061.zip",
+        curlCommand:
+          'curl -L -H "Authorization: Bearer $TDEI_TOKEN" "https://api.test/api/v1/osw/288715e9-b17f-47b8-837a-eca897987061" -o "getOswFile-288715e9-b17f-47b8-837a-eca897987061.zip"',
+        instruction: "Run on the CLIENT machine — the MCP server never downloads files.",
       };
     },
   };
@@ -91,12 +94,12 @@ test("registered getOswFile tool routes locally, child never sees binary", async
     const first = result.content[0];
     assert.equal(first?.type, "text");
     const body = JSON.parse(first?.type === "text" ? first.text : "{}");
-    assert.deepEqual(body, {
-      tool: "getOswFile",
-      path: "/tmp/getOswFile-yakima.zip",
-      bytes: 12_345,
-      contentType: "application/zip",
-    });
+    assert.equal(body.tool, "getOswFile");
+    assert.equal(body.method, "GET");
+    assert.match(body.curlCommand, /curl -L/);
+    assert.match(body.instruction, /CLIENT machine/);
+    assert.equal("bytes" in body, false);
+    assert.match(body.path, /^\/api\/v1\//);
     assert.deepEqual(downloadCalls, [
       {
         tool: "getOswFile",

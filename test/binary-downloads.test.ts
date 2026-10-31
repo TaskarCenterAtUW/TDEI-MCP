@@ -1,102 +1,79 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import { BinaryTdeiDownloads } from "../src/adapters/binary-tdei-downloads.js";
 
-// Byte 0x83 at position 50 reproduces the reported
-// "'utf-8' codec can't decode byte 0x83 in position 50" failure: any path
-// that decodes this payload as text is broken.
-function zipBytes(): Buffer {
-  const body = Buffer.alloc(200, 0);
-  body.write("PK\x03\x04", 0, "binary");
-  body[50] = 0x83;
-  return body;
-}
+// The MCP server never touches file bytes: no fetch, no fs. These tests prove
+// the download adapter is pure — it resolves routes and returns a client-side
+// curl command with zero network or disk activity.
 
-function fetchReturning(body: Buffer, status = 200) {
-  const requests: Request[] = [];
-  const fetchImpl = (async (input: unknown, init?: RequestInit) => {
-    const request = new Request(input as URL, init);
-    requests.push(request);
-    return new Response(new Uint8Array(body), {
-      status,
-      headers: { "Content-Type": "application/octet-stream" },
-    });
+test("getOswFile resolves to a client-side curl instruction without network", async () => {
+  let fetchCalls = 0;
+  const fetchImpl = (async () => {
+    fetchCalls += 1;
+    throw new Error("must not fetch");
   }) as typeof fetch;
-  return { fetchImpl, requests };
-}
-
-test("binary payload with byte 0x83 round-trips without UTF-8 decode", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "tdei-download-"));
-  const payload = zipBytes();
-  // A UTF-8 text round-trip corrupts byte 0x83 (Node replaces it instead of
-  // throwing like Python's strict decoder), so binary must never go through
-  // response.text()/toString("utf-8").
-  assert.equal(Buffer.from(payload.toString("utf-8"), "utf-8").equals(payload), false);
-  const { fetchImpl, requests } = fetchReturning(payload);
   const downloads = new BinaryTdeiDownloads({
     baseUrl: "https://api.example.test",
     fetchImpl,
-    outputDir: dir,
+    outputDir: "/tmp/ignored",
   });
 
   const result = await downloads.download("getOswFile", { tdei_dataset_id: "yakima-1" }, { accessToken: "bearer-A" });
 
-  assert.equal(requests.length, 1);
-  const request = requests[0] as Request;
-  assert.equal(request.url, "https://api.example.test/api/v1/osw/yakima-1");
-  assert.equal(request.headers.get("Authorization"), "Bearer bearer-A");
-  assert.deepEqual(readFileSync(result.path), payload);
-  assert.equal(result.bytes, payload.byteLength);
-  assert.match(result.path, /getOswFile-yakima-1\.zip$/);
+  assert.equal(fetchCalls, 0);
+  assert.equal(result.tool, "getOswFile");
+  assert.equal(result.method, "GET");
+  assert.equal(result.path, "/api/v1/osw/yakima-1");
+  assert.equal(result.filename, "getOswFile-yakima-1.zip");
+  assert.equal(
+    result.curlCommand,
+    'curl -L -H "Authorization: Bearer $TDEI_TOKEN" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
+  );
+  assert.match(result.instruction, /CLIENT machine/);
 });
 
 test("download routes map to spec streaming endpoints", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "tdei-download-"));
-  const payload = zipBytes();
-  const seen: string[] = [];
-  const fetchImpl = (async (input: unknown) => {
-    seen.push(String(input instanceof URL ? input.href : input));
-    return new Response(new Uint8Array(payload), { status: 200 });
-  }) as typeof fetch;
-  const downloads = new BinaryTdeiDownloads({
-    baseUrl: "https://api.example.test/",
-    fetchImpl,
-    outputDir: dir,
-  });
+  const downloads = new BinaryTdeiDownloads({ baseUrl: "https://api.example.test/" });
 
-  await downloads.download("getGtfsFlexFile", { tdei_dataset_id: "f1" }, { accessToken: "t" });
-  await downloads.download("getGtfsPathwaysFile", { tdei_dataset_id: "p1" }, { accessToken: "t" });
-  await downloads.download("job-download", { job_id: "j1" }, { accessToken: "t" });
+  const flex = await downloads.download("getGtfsFlexFile", { tdei_dataset_id: "f1" }, { accessToken: "t" });
+  const pathways = await downloads.download("getGtfsPathwaysFile", { tdei_dataset_id: "p1" }, { accessToken: "t" });
+  const job = await downloads.download("job-download", { job_id: "j1" }, { accessToken: "t" });
   // Both the spec ("job-download") and normalized ("job_download") ids route locally.
-  await downloads.download("job_download", { job_id: "j2" }, { accessToken: "t" });
+  const jobAlias = await downloads.download("job_download", { job_id: "j2" }, { accessToken: "t" });
 
-  assert.deepEqual(seen, [
-    "https://api.example.test/api/v1/gtfs-flex/f1",
-    "https://api.example.test/api/v1/gtfs-pathways/p1",
-    "https://api.example.test/api/v1/job/download/j1",
-    "https://api.example.test/api/v1/job/download/j2",
-  ]);
+  assert.equal(flex.path, "/api/v1/gtfs-flex/f1");
+  assert.equal(pathways.path, "/api/v1/gtfs-pathways/p1");
+  assert.equal(job.path, "/api/v1/job/download/j1");
+  assert.equal(jobAlias.path, "/api/v1/job/download/j2");
+  for (const result of [flex, pathways, job, jobAlias]) {
+    assert.equal(result.curlCommand.startsWith("curl -L"), true);
+  }
 });
 
-test("missing ids and HTTP errors surface without touching the child", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "tdei-download-"));
-  const { fetchImpl } = fetchReturning(Buffer.from("nope"), 404);
-  const downloads = new BinaryTdeiDownloads({
-    baseUrl: "https://api.example.test",
-    fetchImpl,
-    outputDir: dir,
-  });
+test("getOswFile forwards format and file_version query params", async () => {
+  const downloads = new BinaryTdeiDownloads({ baseUrl: "https://api.example.test" });
+
+  const result = await downloads.download(
+    "getOswFile",
+    { tdei_dataset_id: "yakima-1", format: "osm", file_version: "v1" },
+    { accessToken: "t" },
+  );
+
+  assert.equal(result.path, "/api/v1/osw/yakima-1?format=osm&file_version=v1");
+  assert.match(result.curlCommand, /format=osm/);
+  assert.notEqual(result.curlCommand.indexOf("$TDEI_TOKEN"), -1);
+});
+
+test("missing ids surface without touching the network", async () => {
+  const downloads = new BinaryTdeiDownloads({ baseUrl: "https://api.example.test" });
 
   await assert.rejects(downloads.download("getOswFile", {}, { accessToken: "t" }), /tdei_dataset_id/);
-  const error = await downloads.download("getOswFile", { tdei_dataset_id: "missing" }, { accessToken: "t" }).then(
-    () => assert.fail("should throw"),
-    (e) => e as Error & { status?: number },
+  await assert.rejects(downloads.download("job-download", {}, { accessToken: "t" }), /job_id/);
+  await assert.rejects(
+    downloads.download("not-a-download-tool", { tdei_dataset_id: "x" }, { accessToken: "t" }),
+    /not supported/,
   );
-  assert.equal(error.status, 404);
 });
 
 test("isDownloadTool only matches binary streaming tools", () => {
@@ -105,102 +82,4 @@ test("isDownloadTool only matches binary streaming tools", () => {
   assert.equal(BinaryTdeiDownloads.isDownloadTool("job_download"), true);
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listDatasetFiles"), false);
   assert.equal(BinaryTdeiDownloads.isDownloadTool("listServices"), false);
-});
-
-test("streaming download resumes with HTTP Range after mid-stream interruption", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "tdei-download-resume-"));
-  const payload = zipBytes();
-  const half = Math.floor(payload.byteLength / 2);
-  const rangeHeaders: Array<string | null> = [];
-  let attempt = 0;
-
-  const fetchImpl = (async (input: unknown, init?: RequestInit) => {
-    attempt += 1;
-    const req = new Request(input as URL, init);
-    rangeHeaders.push(req.headers.get("Range"));
-    if (attempt === 1) {
-      let sentFirstChunk = false;
-      const stream = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (!sentFirstChunk) {
-            sentFirstChunk = true;
-            controller.enqueue(new Uint8Array(payload.subarray(0, half)));
-            return;
-          }
-          controller.error(new Error("simulated socket reset"));
-        },
-      });
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/zip",
-          "Content-Length": String(payload.byteLength),
-        },
-      });
-    }
-    const rest = payload.subarray(half);
-    return new Response(new Uint8Array(rest), {
-      status: 206,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Length": String(rest.byteLength),
-      },
-    });
-  }) as typeof fetch;
-
-  const downloads = new BinaryTdeiDownloads({
-    baseUrl: "https://api.example.test",
-    fetchImpl,
-    outputDir: dir,
-  });
-
-  const result = await downloads.download("getOswFile", { tdei_dataset_id: "resume-ds" }, { accessToken: "tok" });
-
-  assert.equal(result.status, "resumed");
-  assert.equal(result.attempts, 2);
-  assert.equal(result.bytes, payload.byteLength);
-  assert.deepEqual(rangeHeaders, [null, `bytes=${half}-`]);
-  assert.deepEqual(readFileSync(result.path), payload);
-  assert.match(result.message, /resumed/i);
-});
-
-test("streaming download restarts from byte 0 when server returns 200 instead of 206 on retry", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "tdei-download-restart-"));
-  const payload = zipBytes();
-  let attempt = 0;
-
-  const fetchImpl = (async () => {
-    attempt += 1;
-    if (attempt === 1) {
-      // Return truncated body with Content-Length larger than actual bytes
-      return new Response(new Uint8Array(payload.subarray(0, 40)), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/zip",
-          "Content-Length": String(payload.byteLength),
-        },
-      });
-    }
-    return new Response(new Uint8Array(payload), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Length": String(payload.byteLength),
-      },
-    });
-  }) as typeof fetch;
-
-  const downloads = new BinaryTdeiDownloads({
-    baseUrl: "https://api.example.test",
-    fetchImpl,
-    outputDir: dir,
-  });
-
-  const result = await downloads.download("getOswFile", { tdei_dataset_id: "restart-ds" }, { accessToken: "tok" });
-
-  assert.equal(result.status, "restarted");
-  assert.equal(result.attempts, 2);
-  assert.equal(result.bytes, payload.byteLength);
-  assert.deepEqual(readFileSync(result.path), payload);
-  assert.match(result.message, /restarted/i);
 });

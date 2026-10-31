@@ -2,7 +2,6 @@ import type { TdeiOperations } from "./operations.js";
 import type { PlaceResolver } from "./place-resolver.js";
 import { extractAuthIdentity } from "../auth/auth-manager.js";
 import { signInText } from "../mcp/errors.js";
-import { scanZipForIncline } from "./incline-scan.js";
 import type {
   CheckInclineData,
   CloneDatasetInput,
@@ -11,6 +10,8 @@ import type {
   ConvertPathwaysInput,
   CutBboxInput,
   DeleteDatasetInput,
+  DownloadDatasetData,
+  DownloadDatasetInput,
   DownloadFeedbacksData,
   DownloadFeedbacksInput,
   EditMetadataInput,
@@ -64,6 +65,11 @@ export interface SemanticIntentDependencies {
   operations: TdeiOperations;
   places: PlaceResolver;
   identityProvider?: IdentityProvider;
+  /**
+   * Public TDEI API base URL used to build the client-side curl command
+   * (e.g. https://api-dev.tdei.us). Falls back to TDEI_API_URL env.
+   */
+  apiUrl?: string;
 }
 
 function uploadedTimestampMs(dataset: Record<string, unknown>): number | undefined {
@@ -529,7 +535,83 @@ export class SemanticIntentModule {
       data: {
         ...result.data,
         inclineNote:
-          "Incline presence is not in dataset metadata. Use tdei_check_dataset_incline for an automatic verdict, or download the OSW ZIP with the getOswFile raw tool and inspect edges files; to tag it, call tdei_tag_incline.",
+          "Incline presence is not in dataset metadata. Use tdei_check_dataset_incline for an automatic verdict, or download the dataset ZIP with tdei_download_dataset and inspect edges files; to tag it, call tdei_tag_incline.",
+      },
+    };
+  }
+
+  /**
+   * Build a client-side dataset download command. The MCP server never
+   * writes files and never touches dataset bytes: it resolves the dataset
+   * id + data type, requires the user-connected client folder
+   * (outputDir, via needs_input when missing), and returns a ready-to-run
+   * curl command the LLM executes on the CLIENT machine into that folder.
+   */
+  async downloadDataset(
+    input: DownloadDatasetInput,
+    context: RequestContext = {},
+  ): Promise<IntentResult<DownloadDatasetData>> {
+    const id = input.tdeiDatasetId?.trim() ?? "";
+    if (!id) {
+      return {
+        status: "needs_input",
+        missing: [{ field: "tdeiDatasetId", question: "Which TDEI dataset id should be downloaded?" }],
+        accepted: {},
+      };
+    }
+    const outputDir = input.outputDir?.trim() ?? "";
+    if (!outputDir) {
+      return {
+        status: "needs_input",
+        missing: [
+          {
+            field: "outputDir",
+            question:
+              "Which absolute folder on your machine should the dataset ZIP be saved to? Connect a folder (e.g. /Users/you/downlaods) and reply with its absolute path.",
+          },
+        ],
+        accepted: { tdeiDatasetId: id },
+      };
+    }
+    let dataType: DataType | undefined = input.dataType;
+    let datasetName: string | undefined;
+    if (!dataType) {
+      const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
+      if (lookup.status === "complete" && lookup.data.matches[0]) {
+        const raw = String(
+          lookup.data.matches[0].dataset.data_type ?? lookup.data.matches[0].dataset.dataType ?? "",
+        ).toLowerCase();
+        if (raw.includes("flex")) dataType = "flex";
+        else if (raw.includes("pathway")) dataType = "pathways";
+        else dataType = "osw";
+        const name = lookup.data.matches[0].dataset.name ?? lookup.data.matches[0].dataset.dataset_name;
+        if (typeof name === "string" && name.trim()) datasetName = name.trim();
+      } else {
+        dataType = "osw";
+      }
+    }
+    const resolved = (dataType ?? "osw") as DataType;
+    const apiPath = `/api/v1/${resolved === "osw" ? "osw" : resolved === "flex" ? "gtfs-flex" : "gtfs-pathways"}/${id}`;
+    const apiOperation =
+      resolved === "osw" ? "getOswFile" : resolved === "flex" ? "getGtfsFlexFile" : "getGtfsPathwaysFile";
+    const safeBase = (datasetName ?? id).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || id;
+    const filename = (input.filename?.trim() || `${safeBase}.zip`).replace(/[/\\]/g, "_");
+    const base = outputDir.replace(/[/\\]+$/, "");
+    const filePath = `${base}/${filename}`;
+    const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
+    const curlCommand = `curl -L -H "Authorization: Bearer $TDEI_TOKEN" "${apiUrl}${apiPath}" -o "${filePath}"`;
+    return {
+      status: "complete",
+      data: {
+        tdeiDatasetId: id,
+        dataType: resolved,
+        ...(datasetName ? { datasetName } : {}),
+        filePath,
+        apiOperation,
+        method: "GET",
+        path: apiPath,
+        curlCommand,
+        instruction: `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. $TDEI_TOKEN must hold the caller's SSO bearer token.`,
       },
     };
   }
@@ -1043,6 +1125,12 @@ export class SemanticIntentModule {
     return this.launchValidatedJob("datasetTagIncline", input.tdeiDatasetId, {}, context);
   }
 
+  /**
+   * Client-side incline inspection runbook. The MCP server never downloads
+   * dataset bytes: it resolves the dataset id + data type from metadata and
+   * returns a ready-to-run curl command plus inspection steps the LLM
+   * executes on the CLIENT machine.
+   */
   async checkDatasetIncline(
     input: TagInclineInput,
     context: RequestContext = {},
@@ -1055,30 +1143,28 @@ export class SemanticIntentModule {
         accepted: {},
       };
     }
-    if (!this.dependencies.operations.downloadFileBytes) {
-      return {
-        status: "unsupported",
-        reason:
-          "Automatic incline inspection needs a byte-download adapter. Download the OSW ZIP with the getOswFile raw tool and inspect edges files for an incline tag instead.",
-      };
-    }
     const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
     let dataType: DataType = "osw";
     if (lookup.status === "complete" && lookup.data.matches[0]) {
       const raw = (lookup.data.matches[0].dataset.data_type as string | undefined)?.toLowerCase();
       if (raw === "flex" || raw === "pathways" || raw === "osw") dataType = raw;
     }
-    const bytes = await this.dependencies.operations.downloadFileBytes({ dataType, tdeiDatasetId: id }, context);
-    const scan = scanZipForIncline(bytes);
+    const apiPath = `/api/v1/osw/${id}`;
+    const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
+    const curlCommand = `curl -L -H "Authorization: Bearer $TDEI_TOKEN" "${apiUrl}${apiPath}" -o "${id}.zip"`;
     return {
       status: "complete",
       data: {
         tdeiDatasetId: id,
         dataType,
-        hasIncline: scan.hasIncline,
-        checkedFiles: scan.checkedFiles,
-        evidence: scan.evidence,
-        downloadFile: `Incline tagging for dataset ${id} runs with tdei_tag_incline.`,
+        apiOperation: "getOswFile",
+        method: "GET",
+        path: apiPath,
+        curlCommand,
+        instruction:
+          `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with $TDEI_TOKEN set to the SSO bearer; ` +
+          `2) unzip and inspect edges files (edges.geojson) for an incline tag/column; ` +
+          `3) if inclines are missing, tag them with tdei_tag_incline.`,
       },
     };
   }

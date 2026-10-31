@@ -150,7 +150,7 @@ test("stdio list my project groups calls GET /api/v1/project-groups", async (t) 
   }
 });
 
-test("stdio semantic validation sends a local file directly to TDEI", async (t) => {
+test("stdio semantic validation never sends bytes — returns a client-side curl instruction", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tdei-semantic-upload-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const datasetPath = join(directory, "dataset.zip");
@@ -158,19 +158,8 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
   await writeFile(datasetPath, datasetBytes);
 
   const childCalls: string[] = [];
-  t.mock.method(globalThis, "fetch", async (input, init) => {
-    const request = new Request(input, init);
-    assert.equal(new URL(request.url).pathname, "/api/v1/osw/validate");
-    assert.equal(request.headers.get("Authorization"), "Bearer test-token");
-    const form = await request.formData();
-    const dataset = form.get("dataset");
-    assert.ok(dataset instanceof File);
-    assert.equal(dataset.name, "dataset.zip");
-    assert.deepEqual(Buffer.from(await dataset.arrayBuffer()), datasetBytes);
-    return new Response('"validation-job"', {
-      status: 202,
-      headers: { Location: "/api/v1/jobs/validation-job" },
-    });
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("server must not fetch bytes");
   });
 
   const server = await createServer({
@@ -218,14 +207,12 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
       },
     });
     const first = result.content[0];
-    const body = JSON.parse(first?.type === "text" ? first.text : "{}");
-    assert.deepEqual(body, {
-      status: "complete",
-      data: {
-        jobId: "validation-job",
-        location: "/api/v1/jobs/validation-job",
-      },
-    });
+    const text = first?.type === "text" ? first.text : "{}";
+    assert.equal(result.isError, true);
+    assert.match(text, /MCP never accepts file bytes/);
+    assert.match(text, /curl -X POST/);
+    assert.match(text, /validate/);
+    assert.equal(fetchMock.mock.calls.length, 0);
     assert.deepEqual(childCalls, []);
   } finally {
     await client.close();

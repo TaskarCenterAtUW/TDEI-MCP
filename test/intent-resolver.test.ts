@@ -68,6 +68,7 @@ test("unknown requests ask which supported domain the user means", () => {
     "projects/project groups",
     "datasets",
     "dataset details",
+    "download a dataset",
     "services",
     "jobs",
     "roles/identity",

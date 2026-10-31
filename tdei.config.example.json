@@ -4,12 +4,12 @@
   "workflows": [
     {
       "name": "download_osw_dataset_bundle",
-      "description": "List project groups and datasets, fetch the OSW file, then locate and download the job output (all GET, no uploads).",
+      "description": "List project groups, datasets, and jobs to resolve ids. File bytes never move through the MCP server: actual ZIP downloads run as curl on the client machine via tdei_download_dataset (or the curlCommand returned by getOswFile / job-download steps).",
       "steps": [
         { "id": "pick_group", "tool": "listProjectGroups", "ask": [], "input": {} },
         { "id": "pick_dataset", "tool": "listDatasetFiles", "ask": ["tdei_project_group_id"], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
         { "id": "fetch_osw", "tool": "getOswFile", "ask": ["tdei_dataset_id"], "input": { "tdei_dataset_id": "{{user.tdei_dataset_id}}" } },
-        { "id": "find_job", "tool": "listJobs", "ask": [], "input": { "tdei_project_group_id": "{{user.tdei_project_group_id}}" } },
+        { "id": "find_job", "tool": "listJobs", "ask": [], "input": {} },
         { "id": "download_output", "tool": "job-download", "ask": ["job_id"], "input": { "job_id": "{{user.job_id}}" } }
       ]
     }

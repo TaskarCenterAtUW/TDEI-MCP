@@ -346,7 +346,7 @@ test("dataset details include status and the incline follow-up note", async () =
   assert.equal(result.status, "complete");
   if (result.status !== "complete") return;
   assert.equal(result.data.matches[0]?.dataset, dataset);
-  assert.match(result.data.inclineNote, /getOswFile/);
+  assert.match(result.data.inclineNote, /tdei_download_dataset/);
 });
 
 test("identity falls back to decoding the request access token", async () => {
@@ -498,77 +498,7 @@ test("per-op job wrappers fan out to launchJob with the right operation and para
   assert.equal(byOp.get("oswConfidenceCalculate")?.tdeiDatasetId, "abc");
 });
 
-/** Minimal stored (uncompressed) ZIP builder; CRC is zeroed (the scanner never verifies it). */
-function buildStoredZip(entries: Array<{ name: string; content: string }>): Uint8Array {
-  const chunks: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const { name, content } of entries) {
-    const nameBuf = Buffer.from(name, "utf-8");
-    const data = Buffer.from(content, "utf-8");
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 8);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    chunks.push(local, nameBuf, data);
-    const header = Buffer.alloc(46);
-    header.writeUInt32LE(0x02014b50, 0);
-    header.writeUInt16LE(20, 4);
-    header.writeUInt16LE(20, 6);
-    header.writeUInt16LE(0, 10);
-    header.writeUInt32LE(data.length, 20);
-    header.writeUInt32LE(data.length, 24);
-    header.writeUInt16LE(nameBuf.length, 28);
-    header.writeUInt32LE(offset, 42);
-    central.push(header, nameBuf);
-    offset += 30 + nameBuf.length + data.length;
-  }
-  const cdStart = offset;
-  const cd = Buffer.concat(central);
-  chunks.push(cd);
-  offset += cd.length;
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(entries.length, 8);
-  eocd.writeUInt16LE(entries.length, 10);
-  eocd.writeUInt32LE(cd.length, 12);
-  eocd.writeUInt32LE(cdStart, 16);
-  chunks.push(eocd);
-  return new Uint8Array(Buffer.concat(chunks));
-}
-
-test("incline scan finds incline tags in stored edges files", async () => {
-  const { scanZipForIncline } = await import("../src/intents/incline-scan.js");
-
-  const withIncline = scanZipForIncline(
-    buildStoredZip([
-      { name: "edges.geojson", content: `{"type":"Feature","properties":{"incline":0.05},"geometry":null}` },
-      { name: "nodes.geojson", content: `{"type":"FeatureCollection","features":[]}` },
-    ]),
-  );
-  assert.equal(withIncline.hasIncline, true);
-  assert.deepEqual(withIncline.checkedFiles, ["edges.geojson"]);
-  assert.match(withIncline.evidence, /incline/i);
-
-  const withoutIncline = scanZipForIncline(
-    buildStoredZip([
-      { name: "edges.geojson", content: `{"type":"Feature","properties":{"highway":"footway"},"geometry":null}` },
-    ]),
-  );
-  assert.equal(withoutIncline.hasIncline, false);
-  assert.deepEqual(withoutIncline.checkedFiles, ["edges.geojson"]);
-
-  const noEdges = scanZipForIncline(buildStoredZip([{ name: "nodes.geojson", content: "{}" }]));
-  assert.equal(noEdges.hasIncline, false);
-  assert.deepEqual(noEdges.checkedFiles, []);
-});
-
-test("checkDatasetIncline downloads the ZIP and returns a verdict", async () => {
-  const zip = buildStoredZip([{ name: "edges.geojson", content: `{"properties":{"incline":0.02}}` }]);
-  const downloads: Array<Record<string, unknown>> = [];
+test("checkDatasetIncline returns a client-side runbook without touching bytes", async () => {
   const operations: TdeiOperations = {
     async searchDatasets() {
       return [{ tdei_dataset_id: "abc", data_type: "osw" }];
@@ -578,10 +508,6 @@ test("checkDatasetIncline downloads the ZIP and returns a verdict", async () => 
     },
     async listProjectGroups() {
       return [];
-    },
-    async downloadFileBytes(input) {
-      downloads.push(input as unknown as Record<string, unknown>);
-      return zip;
     },
   };
   const module = new SemanticIntentModule({
@@ -599,7 +525,37 @@ test("checkDatasetIncline downloads the ZIP and returns a verdict", async () => 
   if (result.status !== "complete") return;
   assert.equal(result.data.tdeiDatasetId, "abc");
   assert.equal(result.data.dataType, "osw");
-  assert.equal(result.data.hasIncline, true);
-  assert.deepEqual(result.data.checkedFiles, ["edges.geojson"]);
-  assert.deepEqual(downloads, [{ dataType: "osw", tdeiDatasetId: "abc" }]);
+  assert.equal(result.data.method, "GET");
+  assert.equal(result.data.path, "/api/v1/osw/abc");
+  assert.match(result.data.curlCommand, /curl -L.*\/api\/v1\/osw\/abc/);
+  assert.match(result.data.instruction, /CLIENT machine/);
+  // The operations surface must not expose a byte-download path.
+  assert.equal("downloadFileBytes" in operations, false);
+});
+
+test("checkDatasetIncline asks for the dataset id when missing", async () => {
+  const module = new SemanticIntentModule({
+    operations: {
+      async searchDatasets() {
+        return [];
+      },
+      async listServices() {
+        return [];
+      },
+      async listProjectGroups() {
+        return [];
+      },
+    },
+    places: {
+      async forwardGeocode() {
+        return [];
+      },
+    },
+  });
+
+  const result = await module.checkDatasetIncline({});
+
+  assert.equal(result.status, "needs_input");
+  if (result.status !== "needs_input") return;
+  assert.ok(result.missing.some((m) => m.field === "tdeiDatasetId"));
 });

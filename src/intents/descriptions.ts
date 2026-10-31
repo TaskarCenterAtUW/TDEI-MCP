@@ -11,15 +11,17 @@ export const SEMANTIC_TOOL_DESCRIPTIONS = {
   listServices:
     "List TDEI services, optionally filtered by name, project group, or data type (OSW, GTFS Flex, or GTFS Pathways). Use for requests such as 'get me the list of services'. Cache returned service IDs, names, project_group_id, and service types in conversation context and reuse them for subsequent dataset queries or uploads instead of re-fetching.",
   validateDataset:
-    'Validate an OSW, GTFS Flex, or GTFS Pathways dataset ZIP. MCP never accepts file bytes — no inline_base64, no url fetch, no local_path on hosted. If the data type or asset is missing, returns structured questions. Otherwise instruct the client to run curl from its own machine (any size, single hop): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" and then poll with tdei_list_jobs. Never suggest local stdio for hosted bytes.',
+    'Validate an OSW, GTFS Flex, or GTFS Pathways dataset ZIP. MCP never accepts file bytes — no inline_base64, no url fetch, no local_path. If the data type or asset is missing, returns structured questions. Otherwise instruct the client to run curl from its own machine (any size, single hop): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" and then poll with tdei_list_jobs. Never suggest local stdio for hosted bytes.',
   uploadDataset:
-    'Upload a dataset to TDEI. MCP never accepts file bytes — no inline_base64, no url fetch, no local_path on hosted. Checks the target project group, service, and required metadata first, then instructs the client to run curl from its own machine (any size, single hop): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -F "metadata=@metadata.json". Then poll with tdei_list_jobs. Reuse cached projectGroupId and serviceId from earlier calls.',
+    'Upload a dataset to TDEI. MCP never accepts file bytes — no inline_base64, no url fetch, no local_path. Checks the target project group, service, and required metadata first, then instructs the client to run curl from its own machine (any size, single hop): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -F "metadata=@metadata.json". Then poll with tdei_list_jobs. Reuse cached projectGroupId and serviceId from earlier calls.',
   getMyIdentity:
     "Return the caller's identity and roles decoded from the SSO JWT (username, email, roles, groups). Use for 'who am I' / 'my email' / 'what are my roles'. This is the ONLY source of the login email — never infer it from project-group poc contacts. TDEI has no roles endpoint; roles come from JWT realm_access/resource_access claims. Requires a signed-in session.",
   listJobs:
     "List TDEI jobs (GET /api/v1/jobs). The API requires tdei_project_group_id, so without projectGroupId this fans out across your accessible groups. Supports jobId lookup, jobType, status, and recent filtering via createdAfter / createdWithinDays (client-side on created_at).",
   getDatasetDetails:
-    "Get dataset details by exact tdei_dataset_id (status/release + metadata). Includes an incline note: incline presence is not in metadata — download the OSW ZIP via the getOswFile raw tool and inspect edges for an incline tag; tag via tdei_tag_incline.",
+    "Get dataset details by exact tdei_dataset_id (status/release + metadata). Includes an incline note: incline presence is not in metadata — download the ZIP via tdei_download_dataset and inspect edges for an incline tag; tag via tdei_tag_incline.",
+  downloadDataset:
+    "Download a TDEI dataset ZIP to the user's machine. The MCP server never writes files or touches bytes — it resolves the dataset id + data type and returns a ready-to-run curl command. Requires tdeiDatasetId and the user-connected client folder (outputDir, absolute path); asks for the folder when missing. The LLM runs the returned curlCommand on the CLIENT machine into the connected folder with $TDEI_TOKEN as the SSO bearer.",
   publishDataset:
     "Publish a dataset as an official release. Provide dataType and tdeiDatasetId; launches the publish job. Track with tdei_list_jobs.",
   deleteDataset: "Delete a dataset permanently (cannot be undone). Requires tdeiDatasetId and confirm:true.",
@@ -43,9 +45,10 @@ export const SEMANTIC_TOOL_DESCRIPTIONS = {
   unionDatasets: "Union two OSW datasets (DS2 merged into DS1). Requires confirm:true. Returns a job_id.",
   cutDatasetBbox: "Cut a subgraph of an OSW dataset to a bounding box (osw/osm output). Returns a job_id.",
   tagRoad: "Tag sidewalks in a target dataset with the road network from a source dataset. Returns a job_id.",
-  tagIncline: "Tag inclines on an OSW dataset. Returns a job_id. Use tdei_check_dataset_incline first for a verdict.",
+  tagIncline:
+    "Tag inclines on an OSW dataset. Returns a job_id. Use tdei_check_dataset_incline first for the client-side inspection runbook.",
   checkDatasetIncline:
-    "Check whether an OSW dataset includes inclines: downloads the ZIP server-side and scans edges files. Returns a verdict with evidence.",
+    "Check whether an OSW dataset includes inclines. The MCP server never touches bytes — it returns a client-side runbook: the LLM downloads the ZIP via curl on the client machine and inspects edges files for an incline tag.",
   listFeedbacks: "List dataset-viewer feedbacks, optionally filtered by project group, dataset, date range, or status.",
   getFeedbackSummary: "Feedback summary (counts, overdue) for viewer feedbacks, optionally scoped to a project group.",
   downloadFeedbacks:

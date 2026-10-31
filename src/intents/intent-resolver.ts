@@ -20,7 +20,8 @@ export interface IntentRoute {
     | "get_system_info"
     | "verify_email"
     | "recover_password"
-    | "regenerate_api_key";
+    | "regenerate_api_key"
+    | "download_dataset";
   tool:
     | "tdei_list_my_project_groups"
     | "tdei_find_datasets"
@@ -40,7 +41,8 @@ export interface IntentRoute {
     | "tdei_get_system_info"
     | "tdei_verify_email"
     | "tdei_recover_password"
-    | "tdei_regenerate_api_key";
+    | "tdei_regenerate_api_key"
+    | "tdei_download_dataset";
   apiOperation:
     | "listProjectGroups"
     | "listDatasetFiles"
@@ -196,6 +198,13 @@ const ROUTES = {
     method: "POST",
     path: "/api/v1/regenerate-api-key",
   },
+  download: {
+    intent: "download_dataset",
+    tool: "tdei_download_dataset",
+    apiOperation: "listDatasetFiles",
+    method: "GET",
+    path: "/api/v1/{data-type}/{id}",
+  },
 } as const satisfies Record<string, IntentRoute>;
 
 // Phrases that ask about jobs or their progress. They mention "upload" or
@@ -254,6 +263,10 @@ export function resolveUserIntent(request: string): IntentResult<IntentRoute> {
     /\b(?:recover|reset|forgot)\b.{0,20}\bpassword\b|\bpassword\b.{0,20}\b(?:recover|reset)\b/,
   );
   const wantsRegenKey = contains(normalized, /\bregenerat\w*\b.{0,20}\bapi key\b|\bapi key\b.{0,20}\bregenerat\w*\b/);
+  const wantsDownloadDataset =
+    contains(normalized, /\b(download|save|fetch|get file|pull)\b/) &&
+    contains(normalized, /\b(dataset|data files?|osw|gtfs|sidewalk data|zip)\b/) &&
+    !wantsFeedback;
   const explicitlyCombinesIntents = /\b(and|then|also)\b/.test(normalized);
   const explicitlyRetrievesDatasets =
     /\b(find|list|show|get|search|download)(?:\s+\w+){0,3}\s+(datasets?|data files?|osw|gtfs|sidewalk data)\b/.test(
@@ -278,6 +291,7 @@ export function resolveUserIntent(request: string): IntentResult<IntentRoute> {
   if (wantsRecover && (routes.length === 0 || explicitlyCombinesIntents)) routes.push(ROUTES.recoverPassword);
   if (wantsRegenKey && (routes.length === 0 || explicitlyCombinesIntents)) routes.push(ROUTES.regenKey);
   if (wantsServices && (routes.length === 0 || explicitlyCombinesIntents)) routes.push(ROUTES.services);
+  if (wantsDownloadDataset && (routes.length === 0 || explicitlyCombinesIntents)) routes.push(ROUTES.download);
   if (
     !wantsDatasetDetails &&
     wantsDatasets &&
@@ -304,11 +318,12 @@ export function resolveUserIntent(request: string): IntentResult<IntentRoute> {
       {
         field: "intent",
         question:
-          "Are you looking for projects, datasets, dataset details, services, jobs, roles/identity, dataset validation, dataset upload, publish, delete, clone, metadata, feedbacks, metrics, versions, system info, email verification, password recovery, or API key regeneration?",
+          "Are you looking for projects, datasets, dataset details, dataset download, services, jobs, roles/identity, dataset validation, dataset upload, publish, delete, clone, metadata, feedbacks, metrics, versions, system info, email verification, password recovery, or API key regeneration?",
         allowedValues: [
           "projects/project groups",
           "datasets",
           "dataset details",
+          "download a dataset",
           "services",
           "jobs",
           "roles/identity",

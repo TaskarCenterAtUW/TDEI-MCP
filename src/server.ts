@@ -145,17 +145,21 @@ export async function createServer(
     dependencies.binaryDownloads ??
       new BinaryTdeiDownloads({
         baseUrl: getConfig().apiUrl,
-        tokenProvider: () => auth.getAccessToken(),
       }),
   );
   // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
   // generated tools use the in-process OpenAPI provider.
+  // File bytes never move through this server in any mode: dataset downloads
+  // run as curl on the client machine (tdei_download_dataset / raw download
+  // tools return commands, never bytes), and uploads also run as client-side
+  // curl, so no local_path asset is accepted here either.
   const semanticModule = new SemanticIntentModule({
     operations: new HttpTdeiOperations(getConfig().apiUrl, fetch, 15_000, {
       tokenProvider: () => auth.getAccessToken(),
-      allowedAssetKinds: new Set(["local_path"]),
+      allowedAssetKinds: new Set(),
     }),
     places: createConfiguredPlaceResolver(getConfig()),
+    apiUrl: getConfig().apiUrl,
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
   registerSemanticTools(server, semanticModule);
