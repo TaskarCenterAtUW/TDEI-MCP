@@ -28,7 +28,7 @@ test("getOswFile resolves to a client-side curl instruction without network", as
   assert.equal(result.filename, "getOswFile-yakima-1.zip");
   assert.equal(
     result.curlCommand,
-    'curl -L -H "Authorization: Bearer $TDEI_TOKEN" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
+    'curl -L -H "Authorization: Bearer bearer-A" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
   );
   assert.match(result.instruction, /CLIENT machine/);
 });
@@ -62,7 +62,8 @@ test("getOswFile forwards format and file_version query params", async () => {
 
   assert.equal(result.path, "/api/v1/osw/yakima-1?format=osm&file_version=v1");
   assert.match(result.curlCommand, /format=osm/);
-  assert.notEqual(result.curlCommand.indexOf("$TDEI_TOKEN"), -1);
+  assert.match(result.curlCommand, /Bearer t/);
+  assert.equal(result.curlCommand.indexOf("$TDEI_TOKEN"), -1);
 });
 
 test("missing ids surface without touching the network", async () => {
