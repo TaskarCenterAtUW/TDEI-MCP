@@ -1,8 +1,8 @@
 import { decodeOpenApiRecords } from "./openapi-result-decoder.js";
 import type { ApiQuery, DatasetSearch, JobSearch, ServiceSearch, TdeiOperations } from "../intents/operations.js";
 import type {
-  AcceptedJob,
   DataType,
+  ClientUploadInstruction,
   DatasetAsset,
   DatasetMetadata,
   Dataset,
@@ -25,7 +25,7 @@ export class OpenApiTdeiOperations implements TdeiOperations {
   async validateDataset(
     input: { dataType: DataType; asset: DatasetAsset },
     context: RequestContext,
-  ): Promise<AcceptedJob> {
+  ): Promise<ClientUploadInstruction> {
     if (!this.mutations) throw new Error("Dataset validation is not configured.");
     return this.mutations.validateDataset(input, context);
   }
@@ -41,7 +41,7 @@ export class OpenApiTdeiOperations implements TdeiOperations {
       changeset?: DatasetAsset;
     },
     context: RequestContext,
-  ): Promise<AcceptedJob> {
+  ): Promise<ClientUploadInstruction> {
     if (!this.mutations) throw new Error("Dataset upload is not configured.");
     return this.mutations.uploadDataset(input, context);
   }

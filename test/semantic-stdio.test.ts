@@ -208,10 +208,13 @@ test("stdio semantic validation never sends bytes — returns a client-side curl
     });
     const first = result.content[0];
     const text = first?.type === "text" ? first.text : "{}";
-    assert.equal(result.isError, true);
-    assert.match(text, /MCP never accepts file bytes/);
-    assert.match(text, /curl -X POST/);
-    assert.match(text, /validate/);
+    assert.equal(result.isError, undefined);
+    const body = JSON.parse(text);
+    assert.equal(body.status, "complete");
+    assert.equal(body.data.apiOperation, "validateDataset");
+    assert.ok(body.data.curlCommand.includes(`-F "dataset=@${datasetPath}"`));
+    assert.ok(body.data.curlCommand.includes("Bearer test-token"));
+    assert.match(body.data.instruction, /CLIENT machine/);
     assert.equal(fetchMock.mock.calls.length, 0);
     assert.deepEqual(childCalls, []);
   } finally {

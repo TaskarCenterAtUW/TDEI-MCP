@@ -40,7 +40,6 @@ export async function createOpenApiMcpServer(options: OpenApiMcpServerOptions): 
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.loadSpec ? { loadSpec: options.loadSpec } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
-    ...(options.allowLocalFileUploads !== undefined ? { allowLocalFileUploads: options.allowLocalFileUploads } : {}),
     operationName: (operationId) => `${prefix}${defaultOperationName(operationId)}`,
   });
   const server = new McpServer({ name: options.name, version: options.version });

@@ -131,12 +131,12 @@ test("executes flattened JSON request bodies", async () => {
   assert.deepEqual(await request?.json(), { name: "Seattle", active: true });
 });
 
-test("streams absolute binary fields into multipart requests", async (t) => {
+test("refuses binary file paths in multipart requests with a curl runbook", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tdei-openapi-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, "dataset.zip");
   await writeFile(filePath, Buffer.from([0x50, 0x4b, 0x83]));
-  let request: Request | undefined;
+  let calledFetch = false;
   const multipartSpec = {
     openapi: "3.0.1",
     paths: {
@@ -167,23 +167,24 @@ test("streams absolute binary fields into multipart requests", async (t) => {
     apiUrl: "https://api.example.test",
     loadSpec: async () => multipartSpec,
     headersProvider: async () => ({ Authorization: "Bearer token" }),
-    allowLocalFileUploads: true,
-    fetchImpl: async (input, init) => {
-      request = new Request(input, init);
-      return new Response("accepted", { status: 202 });
+    fetchImpl: async () => {
+      calledFetch = true;
+      return new Response("must not fetch bytes", { status: 500 });
     },
   });
 
-  await client.callTool("uploadDataset", { dataset: filePath, description: "test" });
-  const form = await request?.formData();
-  const dataset = form?.get("dataset");
-  assert.ok(dataset instanceof File);
-  assert.equal(dataset.name, "dataset.zip");
-  assert.deepEqual(Buffer.from(await dataset.arrayBuffer()), Buffer.from([0x50, 0x4b, 0x83]));
-  assert.equal(form?.get("description"), "test");
+  await assert.rejects(
+    () => client.callTool("uploadDataset", { dataset: filePath, description: "test" }),
+    /MCP never accepts file bytes/,
+  );
+  await assert.rejects(
+    () => client.callTool("uploadDataset", { dataset: filePath, description: "test" }),
+    /curl from the client machine/,
+  );
+  assert.equal(calledFetch, false);
 });
 
-test("rejects disallowed local file extensions during multipart upload", async (t) => {
+test("refuses all binary path strings during multipart upload without fetching", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tdei-openapi-ext-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const badPath = join(directory, "payload.exe");
@@ -217,25 +218,17 @@ test("rejects disallowed local file extensions during multipart upload", async (
   const client = new OpenApiMcpClient({
     apiUrl: "https://api.example.test",
     loadSpec: async () => multipartSpec,
-    allowLocalFileUploads: true,
     fetchImpl: async () => {
       calledFetch = true;
-      return new Response("accepted", { status: 202 });
+      return new Response("must not fetch bytes", { status: 500 });
     },
   });
 
-  await assert.rejects(
-    () => client.callTool("uploadDataset", { dataset: badPath }),
-    /Unsupported upload file extension "\.exe"/,
-  );
+  await assert.rejects(() => client.callTool("uploadDataset", { dataset: badPath }), /MCP never accepts file bytes/);
   assert.equal(calledFetch, false);
 });
 
-test("retries streaming multipart upload once on transient 503 failure", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "tdei-openapi-retry-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const filePath = join(directory, "dataset.zip");
-  await writeFile(filePath, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+test("posts non-binary multipart fields without touching bytes", async () => {
   let attempts = 0;
   const multipartSpec = {
     openapi: "3.0.1",
@@ -249,9 +242,10 @@ test("retries streaming multipart upload once on transient 503 failure", async (
               "multipart/form-data": {
                 schema: {
                   type: "object",
-                  required: ["dataset"],
+                  required: ["description"],
                   properties: {
                     dataset: { type: "string", format: "binary" },
+                    description: { type: "string" },
                   },
                 },
               },
@@ -265,12 +259,12 @@ test("retries streaming multipart upload once on transient 503 failure", async (
   const client = new OpenApiMcpClient({
     apiUrl: "https://api.example.test",
     loadSpec: async () => multipartSpec,
-    allowLocalFileUploads: true,
     fetchImpl: async (input, init) => {
       attempts += 1;
       const req = new Request(input, init);
       const form = await req.formData();
-      assert.ok(form.get("dataset") instanceof File);
+      assert.equal(form.get("description"), "test");
+      assert.equal(form.get("dataset"), null);
       if (attempts === 1) {
         return new Response("gateway timeout", { status: 503 });
       }
@@ -278,7 +272,7 @@ test("retries streaming multipart upload once on transient 503 failure", async (
     },
   });
 
-  const result = await client.callTool("uploadDataset", { dataset: filePath });
+  const result = await client.callTool("uploadDataset", { description: "test" });
   assert.equal(attempts, 2);
   assert.equal(result.content[0]?.text, "job-123");
 });

@@ -6,7 +6,7 @@ import type { ApiQuery, DatasetSearch, JobSearch, ServiceSearch, TdeiOperations 
 import { JOB_OPERATION_PATHS } from "../intents/operations.js";
 import type {
   Dataset,
-  AcceptedJob,
+  ClientUploadInstruction,
   DatasetAsset,
   DatasetMetadata,
   DataType,
@@ -23,7 +23,6 @@ function appendIfDefined(params: URLSearchParams, name: string, value: string | 
 
 export interface HttpTdeiOperationsOptions {
   tokenProvider?: () => Promise<string>;
-  allowedAssetKinds?: ReadonlySet<DatasetAsset["kind"]>;
 }
 
 function queryParams(query?: ApiQuery): URLSearchParams {
@@ -78,7 +77,6 @@ export class HttpTdeiOperations implements TdeiOperations {
     this.mutations = new DirectMultipartTdeiMutations({
       baseUrl,
       fetchImpl,
-      allowedAssetKinds: options.allowedAssetKinds ?? new Set<DatasetAsset["kind"]>(),
       timeoutMs,
       ...(options.tokenProvider !== undefined ? { tokenProvider: options.tokenProvider } : {}),
     });
@@ -147,7 +145,7 @@ export class HttpTdeiOperations implements TdeiOperations {
   async validateDataset(
     input: { dataType: DataType; asset: DatasetAsset },
     context: RequestContext,
-  ): Promise<AcceptedJob> {
+  ): Promise<ClientUploadInstruction> {
     return this.mutations.validateDataset(input, context);
   }
 
@@ -162,7 +160,7 @@ export class HttpTdeiOperations implements TdeiOperations {
       changeset?: DatasetAsset;
     },
     context: RequestContext,
-  ): Promise<AcceptedJob> {
+  ): Promise<ClientUploadInstruction> {
     return this.mutations.uploadDataset(input, context);
   }
 

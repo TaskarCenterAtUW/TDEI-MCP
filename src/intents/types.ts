@@ -292,6 +292,18 @@ export interface DownloadDatasetData {
   instruction: string;
 }
 
+export interface ClientUploadInstruction {
+  dataType: DataType;
+  /** Absolute dataset path on the CLIENT machine; curl reads it, the MCP server never touches bytes. */
+  datasetPath: string;
+  apiOperation: "validateDataset" | "uploadDataset";
+  method: "POST";
+  path: string;
+  /** Ready-to-run client-side upload command with the SSO bearer embedded when available. */
+  curlCommand: string;
+  instruction: string;
+}
+
 export interface SubmitFeedbackInput {
   projectId?: string;
   tdeiDatasetId?: string;

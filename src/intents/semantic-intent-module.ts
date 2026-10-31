@@ -1,6 +1,11 @@
 import type { TdeiOperations } from "./operations.js";
 import type { PlaceResolver } from "./place-resolver.js";
 import { extractAuthIdentity } from "../auth/auth-manager.js";
+import {
+  buildClientDownloadCurl,
+  defaultClientDownloadsDir,
+  joinDownloadPath,
+} from "../adapters/binary-tdei-downloads.js";
 import { signInText } from "../mcp/errors.js";
 import type {
   CheckInclineData,
@@ -38,7 +43,7 @@ import type {
   RecoverPasswordInput,
   RegenerateApiKeyInput,
   RequestContext,
-  AcceptedJob,
+  ClientUploadInstruction,
   SanitizeInput,
   SelfMergeInput,
   SpatialJoinInput,
@@ -101,6 +106,17 @@ function resolveCutoffMs(after?: string, withinDays?: number): number | undefine
     return Date.now() - withinDays * 86_400_000;
   }
   return undefined;
+}
+
+/**
+ * Client-machine upload path for a dataset asset. Only local_path assets are
+ * usable — their path is embedded in the curl command and never read by the
+ * server. Returns undefined for missing or non-local assets so callers ask
+ * for a client file path instead of sending bytes through MCP.
+ */
+function clientUploadPath(asset: DatasetAsset | undefined): string | undefined {
+  if (!asset || asset.kind !== "local_path") return undefined;
+  return asset.path.trim() ? asset.path.trim() : undefined;
 }
 
 export class SemanticIntentModule {
@@ -304,7 +320,11 @@ export class SemanticIntentModule {
     };
   }
 
-  async validateDataset(input: ValidateDatasetInput, context: RequestContext = {}): Promise<IntentResult<AcceptedJob>> {
+  async validateDataset(
+    input: ValidateDatasetInput,
+    context: RequestContext = {},
+  ): Promise<IntentResult<ClientUploadInstruction>> {
+    const assetPath = clientUploadPath(input.asset);
     const missing = [
       ...(!input.dataType
         ? [
@@ -315,12 +335,12 @@ export class SemanticIntentModule {
             },
           ]
         : []),
-      ...(!input.asset
+      ...(!input.asset || !assetPath
         ? [
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be validated? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip", then poll with tdei_list_jobs.',
+                'Which dataset ZIP should be validated? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip). MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip", then poll with tdei_list_jobs.',
             },
           ]
         : []),
@@ -350,8 +370,13 @@ export class SemanticIntentModule {
     };
   }
 
-  async uploadDataset(input: UploadDatasetInput, context: RequestContext = {}): Promise<IntentResult<AcceptedJob>> {
+  async uploadDataset(
+    input: UploadDatasetInput,
+    context: RequestContext = {},
+  ): Promise<IntentResult<ClientUploadInstruction>> {
     const detail = input.metadata?.dataset_detail;
+    const assetPath = clientUploadPath(input.asset);
+    const changesetPath = input.changeset ? clientUploadPath(input.changeset) : undefined;
     const requiredMetadata: Array<[keyof NonNullable<typeof detail>, string]> = [
       ["name", "What is the dataset name?"],
       ["version", "What is the dataset version?"],
@@ -370,12 +395,12 @@ export class SemanticIntentModule {
             },
           ]
         : []),
-      ...(!input.asset
+      ...(!input.asset || !assetPath
         ? [
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be uploaded? MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -F "metadata=@metadata.json", then poll with tdei_list_jobs.',
+                'Which dataset ZIP should be uploaded? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip). MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -F "metadata=<json>;type=application/json", then poll with tdei_list_jobs.',
             },
           ]
         : []),
@@ -403,6 +428,19 @@ export class SemanticIntentModule {
         ...(input.metadata ? { metadata: input.metadata } : {}),
       };
       return { status: "needs_input", missing, accepted };
+    }
+    if (input.changeset && !changesetPath) {
+      return {
+        status: "needs_input",
+        missing: [
+          {
+            field: "changeset",
+            question:
+              "The changeset must be a local_path asset with the absolute file path on the CLIENT machine (MCP never takes file bytes). Which changeset file should be uploaded?",
+          },
+        ],
+        accepted: {},
+      };
     }
     if (!this.dependencies.operations.uploadDataset) {
       return {
@@ -562,9 +600,10 @@ export class SemanticIntentModule {
   /**
    * Build a client-side dataset download command. The MCP server never
    * writes files and never touches dataset bytes: it resolves the dataset
-   * id + data type, requires the user-connected client folder
-   * (outputDir, via needs_input when missing), and returns a ready-to-run
-   * curl command the LLM executes on the CLIENT machine into that folder.
+   * id + data type, targets the user-connected client folder (outputDir,
+   * defaulting to the machine's standard Downloads folder), and returns a
+   * ready-to-run curl command the LLM executes on the CLIENT machine into
+   * that folder.
    */
   async downloadDataset(
     input: DownloadDatasetInput,
@@ -578,20 +617,8 @@ export class SemanticIntentModule {
         accepted: {},
       };
     }
-    const outputDir = input.outputDir?.trim() ?? "";
-    if (!outputDir) {
-      return {
-        status: "needs_input",
-        missing: [
-          {
-            field: "outputDir",
-            question:
-              "Which absolute folder on your machine should the dataset ZIP be saved to? Connect a folder (e.g. /Users/you/downlaods) and reply with its absolute path.",
-          },
-        ],
-        accepted: { tdeiDatasetId: id },
-      };
-    }
+    const outputDir = input.outputDir?.trim() || defaultClientDownloadsDir();
+    const defaultedDir = !input.outputDir?.trim();
     let dataType: DataType | undefined = input.dataType;
     let datasetName: string | undefined;
     if (!dataType) {
@@ -614,12 +641,18 @@ export class SemanticIntentModule {
     const apiOperation =
       resolved === "osw" ? "getOswFile" : resolved === "flex" ? "getGtfsFlexFile" : "getGtfsPathwaysFile";
     const safeBase = (datasetName ?? id).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || id;
-    const filename = (input.filename?.trim() || `${safeBase}.zip`).replace(/[/\\]/g, "_");
-    const base = outputDir.replace(/[/\\]+$/, "");
-    const filePath = `${base}/${filename}`;
+    // Always end the download in .zip: a user-supplied filename may omit the
+    // extension or carry a wrong one (e.g. ".err"), which confuses clients.
+    const rawName = input.filename?.trim() || `${safeBase}.zip`;
+    const noSlashes = rawName.replace(/[/\\]/g, "_");
+    const filename = /\.zip$/i.test(noSlashes) ? noSlashes : `${noSlashes}.zip`;
+    const filePath = joinDownloadPath(outputDir, filename);
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
     const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
-    const curlCommand = `curl -L -H "Authorization: Bearer ${bearer}" "${apiUrl}${apiPath}" -o "${filePath}"`;
+    const curlCommand = buildClientDownloadCurl(`${apiUrl}${apiPath}`, bearer, filePath);
+    const dirNote = defaultedDir
+      ? ` No folder was specified, so the command targets $HOME/Downloads expanded on the CLIENT machine (your Downloads folder on macOS/Linux, and in PowerShell on Windows); if the client shell is Windows cmd.exe — which does not expand $HOME — substitute the connected folder's absolute path for $HOME/Downloads before running.`
+      : "";
     return {
       status: "complete",
       data: {
@@ -633,8 +666,8 @@ export class SemanticIntentModule {
         curlCommand,
         instruction:
           bearer === "$TDEI_TOKEN"
-            ? `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. Sign in via tdei_sso_login first so $TDEI_TOKEN holds the caller's SSO bearer token.`
-            : `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. The SSO bearer from tdei_sso_login is already embedded — no $TDEI_TOKEN export needed.`,
+            ? `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. Sign in via tdei_sso_login first so $TDEI_TOKEN holds the caller's SSO bearer token.${dirNote}`
+            : `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. The SSO bearer from tdei_sso_login is already embedded — no $TDEI_TOKEN export needed.${dirNote}`,
       },
     };
   }
@@ -1175,7 +1208,7 @@ export class SemanticIntentModule {
     const apiPath = `/api/v1/osw/${id}`;
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
     const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
-    const curlCommand = `curl -L -H "Authorization: Bearer ${bearer}" "${apiUrl}${apiPath}" -o "${id}.zip"`;
+    const curlCommand = buildClientDownloadCurl(`${apiUrl}${apiPath}`, bearer, `${id}.zip`);
     return {
       status: "complete",
       data: {

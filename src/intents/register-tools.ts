@@ -68,7 +68,13 @@ const listProjectGroupsSchema = z.object({
 const assetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("local_path"),
-    path: z.string().trim().min(1),
+    path: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(
+        "Absolute file path on the CLIENT machine running the agent (never on the MCP server); used only to build a client-side curl command.",
+      ),
     name: z.string().trim().min(1).optional(),
   }),
   z.object({
