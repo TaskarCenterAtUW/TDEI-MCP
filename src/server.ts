@@ -13,6 +13,7 @@ import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
+import { resolveDownloadSettings } from "./intents/server-download.js";
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { TDEI_SERVER_INSTRUCTIONS } from "./intents/descriptions.js";
@@ -154,6 +155,8 @@ export async function createServer(
   // run as curl on the client machine (tdei_download_dataset / raw download
   // tools return commands, never bytes), and uploads also return client-side
   // curl commands, so no asset bytes are ever read here.
+  const downloadSettings = resolveDownloadSettings(process.env, getConfig().transport, getConfig().httpHost);
+  for (const warning of downloadSettings.warnings) process.stderr.write(`[tdei-mcp] ${warning}\n`);
   const semanticModule = new SemanticIntentModule({
     operations: new HttpTdeiOperations(getConfig().apiUrl, fetch, 15_000, {
       tokenProvider: () => auth.getAccessToken(),
@@ -161,6 +164,8 @@ export async function createServer(
     places: createConfiguredPlaceResolver(getConfig()),
     apiUrl: getConfig().apiUrl,
     tokenProvider: () => auth.getAccessToken(),
+    downloadSettings: downloadSettings.settings,
+    fetchImpl: fetch,
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
   registerSemanticTools(server, semanticModule);
