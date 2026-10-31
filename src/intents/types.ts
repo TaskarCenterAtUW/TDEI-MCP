@@ -297,8 +297,12 @@ export interface DownloadDatasetData {
   apiOperation: "getOswFile" | "getGtfsFlexFile" | "getGtfsPathwaysFile";
   method: "GET";
   path: string;
-  /** Ready-to-run client-side download command for the connected folder. */
-  curlCommand: string;
+  /** Ready-to-run client-side download command (client mode only). */
+  curlCommand?: string;
+  /** Server mode only: absolute path the MCP server wrote the ZIP to. */
+  savedTo?: string;
+  bytes?: number;
+  httpStatus?: number;
   instruction: string;
 }
 

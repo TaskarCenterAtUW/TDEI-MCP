@@ -6,7 +6,9 @@ import {
   defaultClientDownloadsDir,
   joinDownloadPath,
 } from "../adapters/binary-tdei-downloads.js";
+import { isAbsolute } from "node:path";
 import { signInText } from "../mcp/errors.js";
+import { saveDatasetToDisk, type DownloadSettings } from "./server-download.js";
 import type {
   CheckInclineData,
   CloneDatasetInput,
@@ -82,6 +84,10 @@ export interface SemanticIntentDependencies {
    * placeholder when unavailable.
    */
   tokenProvider?: () => Promise<string>;
+  /** Server-side download settings. Client mode (default) returns a curl command. */
+  downloadSettings?: DownloadSettings;
+  /** Injected for tests; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 function uploadedTimestampMs(dataset: Record<string, unknown>): number | undefined {
@@ -852,6 +858,46 @@ export class SemanticIntentModule {
     const filename = /\.zip$/i.test(noSlashes) ? noSlashes : `${noSlashes}.zip`;
     const filePath = joinDownloadPath(outputDir, filename);
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
+    if (this.dependencies.downloadSettings?.mode === "server") {
+      const token = await this.resolveCurlToken(context);
+      if (!token) {
+        return {
+          status: "needs_input",
+          missing: [
+            { field: "tdei_sso_login", question: "Sign in with tdei_sso_login first, then retry the download." },
+          ],
+          accepted: { tdeiDatasetId: id },
+        };
+      }
+      const requestedDir = input.outputDir?.trim();
+      const dir =
+        requestedDir && isAbsolute(requestedDir) && !requestedDir.includes("$")
+          ? requestedDir
+          : this.dependencies.downloadSettings.serverDir;
+      const saved = await saveDatasetToDisk({
+        url: `${apiUrl}${apiPath}`,
+        bearer: token,
+        dir,
+        filename,
+        fetchImpl: this.dependencies.fetchImpl,
+      });
+      return {
+        status: "complete",
+        data: {
+          tdeiDatasetId: id,
+          dataType: resolved,
+          ...(datasetName ? { datasetName } : {}),
+          filePath: saved.filePath,
+          savedTo: saved.filePath,
+          bytes: saved.bytes,
+          httpStatus: saved.httpStatus,
+          apiOperation,
+          method: "GET",
+          path: apiPath,
+          instruction: `Saved ${saved.bytes} bytes to ${saved.filePath} by the MCP server. No client-side command is needed.`,
+        },
+      };
+    }
     const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
     const curlCommand = buildClientDownloadCurl(`${apiUrl}${apiPath}`, bearer, filePath);
     const dirNote = defaultedDir
