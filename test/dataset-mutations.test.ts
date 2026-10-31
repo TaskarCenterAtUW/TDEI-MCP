@@ -7,8 +7,12 @@ function moduleWithMutations() {
   const mutations: Array<{ kind: string; input: Record<string, unknown> }> = [];
   const module = new SemanticIntentModule({
     operations: {
-      async searchDatasets() { return []; },
-      async listServices() { return []; },
+      async searchDatasets() {
+        return [];
+      },
+      async listServices() {
+        return [];
+      },
       async validateDataset(input) {
         mutations.push({ kind: "validate", input: input as unknown as Record<string, unknown> });
         return { jobId: "validation-job", location: "/jobs/validation-job" };
@@ -18,7 +22,11 @@ function moduleWithMutations() {
         return { jobId: "upload-job", location: "/jobs/upload-job" };
       },
     },
-    places: { async forwardGeocode() { return []; } },
+    places: {
+      async forwardGeocode() {
+        return [];
+      },
+    },
   });
   return { module, mutations };
 }
@@ -28,7 +36,10 @@ test("incomplete validation asks for every missing input without mutating", asyn
   const result = await harness.module.validateDataset({});
   assert.equal(result.status, "needs_input");
   if (result.status !== "needs_input") return;
-  assert.deepEqual(result.missing.map((item) => item.field), ["dataType", "asset"]);
+  assert.deepEqual(
+    result.missing.map((item) => item.field),
+    ["dataType", "asset"],
+  );
   assert.deepEqual(harness.mutations, []);
 });
 
@@ -37,27 +48,28 @@ test("incomplete upload returns target and metadata questions without mutating",
   const result = await harness.module.uploadDataset({ dataType: "osw" });
   assert.equal(result.status, "needs_input");
   if (result.status !== "needs_input") return;
-  assert.deepEqual(result.missing.map((item) => item.field), [
-    "asset",
-    "projectGroupId",
-    "serviceId",
-    "metadata.dataset_detail.name",
-    "metadata.dataset_detail.version",
-    "metadata.dataset_detail.collected_by",
-    "metadata.dataset_detail.collection_date",
-    "metadata.dataset_detail.data_source",
-    "metadata.dataset_detail.schema_version",
-  ]);
+  assert.deepEqual(
+    result.missing.map((item) => item.field),
+    [
+      "asset",
+      "projectGroupId",
+      "serviceId",
+      "metadata.dataset_detail.name",
+      "metadata.dataset_detail.version",
+      "metadata.dataset_detail.collected_by",
+      "metadata.dataset_detail.collection_date",
+      "metadata.dataset_detail.data_source",
+      "metadata.dataset_detail.schema_version",
+    ],
+  );
   assert.deepEqual(harness.mutations, []);
 });
 
 test("complete validation and upload return accepted jobs", async () => {
   const harness = moduleWithMutations();
   const asset = {
-    kind: "inline_base64" as const,
-    name: "dataset.zip",
-    mediaType: "application/zip",
-    data: "UEsDBA==",
+    kind: "local_path" as const,
+    path: "/tmp/dataset.zip",
   };
   const validation = await harness.module.validateDataset({ dataType: "osw", asset });
   assert.deepEqual(validation, {
@@ -84,5 +96,8 @@ test("complete validation and upload return accepted jobs", async () => {
     status: "complete",
     data: { jobId: "upload-job", location: "/jobs/upload-job" },
   });
-  assert.deepEqual(harness.mutations.map((item) => item.kind), ["validate", "upload"]);
+  assert.deepEqual(
+    harness.mutations.map((item) => item.kind),
+    ["validate", "upload"],
+  );
 });

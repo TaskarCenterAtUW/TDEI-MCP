@@ -57,13 +57,65 @@ test("empty jobs list is a valid complete parse", () => {
 
 test("non-JSON upstream text surfaces a short actionable error", () => {
   assert.throws(
-    () => decodeOpenApiRecords({
-      content: [{ type: "text", text: "tdei_project_group_id is required for non-admin user" }],
-    }),
+    () =>
+      decodeOpenApiRecords({
+        content: [{ type: "text", text: "tdei_project_group_id is required for non-admin user" }],
+      }),
     /tdei_project_group_id is required/,
   );
 });
 
 test("object metrics envelopes are not mistaken for empty list failures", () => {
   assert.deepEqual(recordsFrom(fixtures.systemCapabilities), []);
+});
+
+test("async job acceptances replay to a single job record", () => {
+  const jobs = [
+    "cloneDataset",
+    "publishOswFile",
+    "oswConfidenceCalculate",
+    "oswQualityCalculate",
+    "qualityMetricTag",
+    "oswQualityReportGenerate",
+    "sanitizeOswFile",
+    "oswOnDemandFormat",
+    "convertGtfsPathways",
+    "oswSelfMerge",
+    "oswSpatialJoin",
+    "oswUnion",
+    "datasetBbox",
+    "datasetTagRoad",
+    "datasetTagIncline",
+  ];
+  for (const key of jobs) {
+    const direct = recordsFrom(fixtures[key]);
+    assert.equal(direct.length, 1, key);
+    assert.equal(direct[0]?.jobId, "job-1", key);
+    assert.equal(decodeOpenApiRecords(asMcp(fixtures[key])).length, 1, key);
+  }
+});
+
+test("flex and pathways versions parse like osw versions", () => {
+  for (const key of ["listGtfsFlexVersions", "listGtfsPathwaysVersions"]) {
+    const direct = recordsFrom(fixtures[key]);
+    assert.equal(direct.length, 1, key);
+    assert.equal(typeof direct[0]?.version, "string", key);
+  }
+});
+
+test("message and text returns replay without throwing", () => {
+  for (const key of [
+    "deleteDataset",
+    "submitFeedback",
+    "updateFeedbackStatus",
+    "feedbacksDownload",
+    "pmTilesUrl",
+    "viewerAccess",
+    "verifyEmail",
+    "recoverPassword",
+    "regenerateApiKey",
+  ]) {
+    assert.deepEqual(recordsFrom(fixtures[key]), [], key);
+    assert.deepEqual(decodeOpenApiRecords(asMcp(fixtures[key])), [], key);
+  }
 });

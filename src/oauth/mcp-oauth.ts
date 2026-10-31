@@ -106,10 +106,9 @@ export function openAuthorizationCode(code: string, verifier: string): SealedAcc
   try {
     const decipher = createDecipheriv("aes-256-gcm", challengeKey(challenge), Buffer.from(ivPart, "base64url"));
     decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
-    const json = Buffer.concat([
-      decipher.update(Buffer.from(cipherPart, "base64url")),
-      decipher.final(),
-    ]).toString("utf8");
+    const json = Buffer.concat([decipher.update(Buffer.from(cipherPart, "base64url")), decipher.final()]).toString(
+      "utf8",
+    );
     payload = JSON.parse(json) as SealedAccessToken;
   } catch {
     throw new Error("invalid_grant");
@@ -137,13 +136,17 @@ export function issueOAuthCookie(pending: OAuthPendingLogin, apiUrl: string, sec
   return `${COOKIE_NAME}=${body}.${sig}; ${flags.join("; ")}`;
 }
 
-export function clearOAuthCookie(secure: boolean): string {
+function clearOAuthCookie(secure: boolean): string {
   const flags = ["Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
   if (secure) flags.push("Secure");
   return `${COOKIE_NAME}=; ${flags.join("; ")}`;
 }
 
-export function readOAuthCookie(cookieHeader: string | undefined, apiUrl: string, slug: string): OAuthPendingLogin | undefined {
+export function readOAuthCookie(
+  cookieHeader: string | undefined,
+  apiUrl: string,
+  slug: string,
+): OAuthPendingLogin | undefined {
   const raw = readCookieValue(cookieHeader, COOKIE_NAME);
   if (!raw) return undefined;
   const splitAt = raw.lastIndexOf(".");
@@ -175,7 +178,7 @@ function readCookieValue(header: string | undefined, name: string): string | und
   return undefined;
 }
 
-export function ssoRedirectUrl(apiUrl: string): string {
+function ssoRedirectUrl(apiUrl: string): string {
   const loginUrl = new URL("/api/v1/sso-redirect", `${apiUrl}/`);
   loginUrl.searchParams.set("redirect_uri", REGISTERED_SSO_REDIRECT_URI);
   loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
@@ -183,11 +186,13 @@ export function ssoRedirectUrl(apiUrl: string): string {
 }
 
 export function matchesOAuthPath(pathname: string, endpoints: OAuthEndpoints): boolean {
-  return pathname === new URL(endpoints.protectedResourceMetadata).pathname
-    || pathname === new URL(endpoints.authorizationServerMetadata).pathname
-    || pathname === new URL(endpoints.authorize).pathname
-    || pathname === new URL(endpoints.token).pathname
-    || pathname === new URL(endpoints.register).pathname;
+  return (
+    pathname === new URL(endpoints.protectedResourceMetadata).pathname ||
+    pathname === new URL(endpoints.authorizationServerMetadata).pathname ||
+    pathname === new URL(endpoints.authorize).pathname ||
+    pathname === new URL(endpoints.token).pathname ||
+    pathname === new URL(endpoints.register).pathname
+  );
 }
 
 export interface OAuthDispatchInput {
@@ -260,7 +265,9 @@ export async function dispatchOAuth(input: OAuthDispatchInput): Promise<OAuthHtt
   if (input.method === "POST" && pathname === new URL(endpoints.register).pathname) {
     const requested = parseJson(input.body);
     const redirectUris = Array.isArray(requested.redirect_uris)
-      ? requested.redirect_uris.filter((value): value is string => typeof value === "string" && isAllowedClientRedirect(value))
+      ? requested.redirect_uris.filter(
+          (value): value is string => typeof value === "string" && isAllowedClientRedirect(value),
+        )
       : [];
     return jsonResult(201, {
       client_id: TDEI_SSO_CLIENT_ID,
@@ -356,9 +363,10 @@ export async function oauthCallbackResult(input: {
   const secure = input.origin.startsWith("https://");
   const pending = readOAuthCookie(input.cookieHeader, input.apiUrl, input.slug);
   if (!pending) return undefined;
-  const fail = (status: number, body: string): OAuthHttpResult => textResult(status, body, {
-    "Set-Cookie": clearOAuthCookie(secure),
-  });
+  const fail = (status: number, body: string): OAuthHttpResult =>
+    textResult(status, body, {
+      "Set-Cookie": clearOAuthCookie(secure),
+    });
   const providerError = input.url.searchParams.get("error");
   if (providerError) return fail(401, "TDEI sign-in was declined.");
   const code = input.url.searchParams.get("code")?.trim() ?? "";
@@ -388,7 +396,7 @@ function parseJson(body: string | undefined): Record<string, unknown> {
   if (!body) return {};
   try {
     const parsed = JSON.parse(body) as unknown;
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

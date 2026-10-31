@@ -16,17 +16,19 @@ test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
     requests.push(request);
     assert.equal(request.headers.get("Authorization"), "Bearer test-token");
     if (new URL(request.url).pathname === "/api/v1/datasets") {
-      return new Response(JSON.stringify([
-        { tdei_dataset_id: "dataset-1", name: "Seattle OSW" },
-      ]), { status: 200 });
+      return new Response(JSON.stringify([{ tdei_dataset_id: "dataset-1", name: "Seattle OSW" }]), { status: 200 });
     }
     return new Response("[]", { status: 200 });
   });
 
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
       getStatus: () => ({
         configured: true,
         authenticated: true,
@@ -34,7 +36,9 @@ test("stdio server exposes semantic tools over direct TDEI HTTP", async (t) => {
         loginMethod: "sso" as const,
       }),
       getTokenVersion: () => 1,
-      async logout() { throw new Error("not used"); },
+      async logout() {
+        throw new Error("not used");
+      },
     },
     openApiMcpClient: {
       async listTools() {
@@ -84,18 +88,25 @@ test("stdio list my project groups calls GET /api/v1/project-groups", async (t) 
     const request = new Request(input, init);
     assert.equal(new URL(request.url).pathname, "/api/v1/project-groups");
     assert.equal(request.headers.get("Authorization"), "Bearer test-token");
-    return new Response(JSON.stringify([
-      {
-        tdei_project_group_id: "1ec1c79b-6b7a-4011-936b-c75dbbd903e3",
-        project_group_name: "AA Viewer Internal",
-      },
-    ]), { status: 200 });
+    return new Response(
+      JSON.stringify([
+        {
+          tdei_project_group_id: "1ec1c79b-6b7a-4011-936b-c75dbbd903e3",
+          project_group_name: "AA Viewer Internal",
+        },
+      ]),
+      { status: 200 },
+    );
   });
 
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
       getStatus: () => ({
         configured: true,
         authenticated: true,
@@ -103,11 +114,17 @@ test("stdio list my project groups calls GET /api/v1/project-groups", async (t) 
         loginMethod: "sso" as const,
       }),
       getTokenVersion: () => 1,
-      async logout() { throw new Error("not used"); },
+      async logout() {
+        throw new Error("not used");
+      },
     },
     openApiMcpClient: {
-      async listTools() { return { tools: [] }; },
-      async callTool() { throw new Error("must not use OpenAPI provider"); },
+      async listTools() {
+        return { tools: [] };
+      },
+      async callTool() {
+        throw new Error("must not use OpenAPI provider");
+      },
       async close() {},
       isConnected: () => false,
     },
@@ -127,10 +144,7 @@ test("stdio list my project groups calls GET /api/v1/project-groups", async (t) 
     assert.equal(body.status, "complete");
     assert.equal(body.data.apiOperation, "listProjectGroups");
     assert.equal(body.data.path, "/api/v1/project-groups");
-    assert.equal(
-      body.data.projectGroups[0].project_group_name,
-      "AA Viewer Internal",
-    );
+    assert.equal(body.data.projectGroups[0].project_group_name, "AA Viewer Internal");
   } finally {
     await client.close();
   }
@@ -161,8 +175,12 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
 
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
       getStatus: () => ({
         configured: true,
         authenticated: true,
@@ -170,10 +188,14 @@ test("stdio semantic validation sends a local file directly to TDEI", async (t) 
         loginMethod: "sso" as const,
       }),
       getTokenVersion: () => 1,
-      async logout() { throw new Error("not used"); },
+      async logout() {
+        throw new Error("not used");
+      },
     },
     openApiMcpClient: {
-      async listTools() { return { tools: [] }; },
+      async listTools() {
+        return { tools: [] };
+      },
       async callTool(name) {
         childCalls.push(name);
         throw new Error("multipart validation must bypass the OpenAPI provider");

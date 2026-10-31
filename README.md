@@ -354,13 +354,47 @@ Both transports expose the common semantic tools:
 | Tool | Purpose |
 | --- | --- |
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
-| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
+| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
+| `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for an automatic verdict. |
+| `tdei_get_my_identity` | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint). |
+| `tdei_list_jobs` | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering. |
 | `tdei_list_services` | List services by text, project group, or service type. |
 | `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
+| `tdei_publish_dataset` | Publish a dataset release (`publishOswFile`/`publishGtfsFlexFile`/`publishGtfsPathwaysFile`). |
+| `tdei_delete_dataset` | Permanently delete a dataset. Requires `confirm:true`. |
+| `tdei_clone_dataset` | Clone a dataset into a target project group/service with new metadata. Requires `confirm:true`. |
+| `tdei_edit_metadata` | Overwrite a dataset's metadata document. Requires `confirm:true`. |
+| `tdei_calculate_confidence` | Confidence job for an OSW dataset, optional sub-region GeoJSON. |
+| `tdei_calculate_quality_intersection` | Intersection-quality job for an OSW dataset, optional polygon. |
+| `tdei_tag_quality_metric` | Tag quality metrics on OSW elements via a tag-quality file. |
+| `tdei_generate_quality_report` | Quality-report job for an OSW dataset. |
+| `tdei_sanitize_dataset` | Sanitize an OSW ZIP (correct invalid/unsupported values). |
+| `tdei_convert_osw` | Convert between OSW and OSM formats. |
+| `tdei_convert_pathways` | Convert CAD DXF ZIP or an ArcGIS service into a Pathways draft. |
+| `tdei_self_merge` | Self-merge spatial entities within one OSW dataset. |
+| `tdei_spatial_join` | Spatial join between two OSW datasets (dimensions + join condition). |
+| `tdei_union_datasets` | Union DS2 into DS1. Requires `confirm:true`. |
+| `tdei_cut_dataset_bbox` | Cut a dataset subgraph to a bounding box (`datasetBbox`). |
+| `tdei_tag_road` | Tag sidewalks in a target dataset with a source road network. |
+| `tdei_tag_incline` | Incline-tagging job for an OSW dataset. |
+| `tdei_check_dataset_incline` | Download the OSW ZIP server-side and scan edges files for incline tags; returns a verdict with evidence. |
+| `tdei_list_feedbacks` | List dataset-viewer feedbacks with optional filters. |
+| `tdei_get_feedback_summary` | Feedback counts/overdue summary, optionally per project group. |
+| `tdei_download_feedbacks` | Download feedbacks for a project group (CSV/GeoJSON preview). |
+| `tdei_submit_feedback` | Submit viewer feedback for a dataset element. |
+| `tdei_update_feedback_status` | Resolve/triage feedbacks (open/resolved + resolution). |
+| `tdei_get_pm_tiles_url` | PMTiles SAS URL for viewing a dataset. |
+| `tdei_set_viewer_access` | Dataset-viewer visibility preferences. |
+| `tdei_get_metrics` | Data/service/system metrics (service scope needs a project group). |
+| `tdei_list_versions` | Supported data-standard versions for OSW/Flex/Pathways. |
+| `tdei_get_system_info` | Capabilities plus supported API versions. |
+| `tdei_verify_email` | Send an email-verification link. |
+| `tdei_recover_password` | Send a password-recovery link. |
+| `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
 
-Hosted validation/upload accepts `inline_base64` assets up to 10MB. Client-local paths are intentionally unavailable to a remote server. Local stdio validation/upload accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token.
+File bytes never go through MCP on hosted — any size goes via curl from the client machine (single hop), then poll with `tdei_list_jobs`. Local stdio accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 

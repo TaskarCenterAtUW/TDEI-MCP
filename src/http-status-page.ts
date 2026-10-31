@@ -1,7 +1,7 @@
 import { clientMcpName } from "./http-setup-script.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
-export interface StatusPageUrls {
+interface StatusPageUrls {
   origin: string;
   mcpUrl: string;
   setupBase: string;
@@ -9,7 +9,7 @@ export interface StatusPageUrls {
   callbackUrl: string;
 }
 
-export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", gatewaySlug?: string): StatusPageUrls {
+function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", _gatewaySlug?: string): StatusPageUrls {
   const origin = publicBaseUrl.replace(/\/$/, "");
   const prefix = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
   return {
@@ -22,11 +22,7 @@ export function statusPageUrls(publicBaseUrl: string, basePath = "/mcp", gateway
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /**
@@ -155,7 +151,7 @@ button { cursor: pointer; }
 <li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>).</li>
 <li>MCP broken later (server moved, entry stale)? Pick <em>Update / reinstall</em> in the builder, run it, restart the app, start a new chat. To remove TDEI instead, pick <em>Uninstall</em>.</li>
 </ol>
-<p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo (quickstart via <code>npx -y tdei-mcp init</code>, HTTP mode, Docker, troubleshooting). Hosted validation/upload accepts <code>inline_base64</code> up to 10MB; local stdio accepts absolute <code>local_path</code> assets.</p>
+<p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo. File bytes never go through MCP — run curl from the client machine for any size, then poll with tdei_list_jobs; local stdio also accepts absolute <code>local_path</code> assets.</p>
 </section>
 </main>
 <script>

@@ -6,10 +6,27 @@ import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
-import { clientMcpName, isSetupScriptAction, normalizeSetupClientTarget, renderClientSetupPowershell, renderClientSetupScript, renderSetupOverview, type SetupScriptAction } from "./http-setup-script.js";
+import {
+  clientMcpName,
+  isSetupScriptAction,
+  normalizeSetupClientTarget,
+  renderClientSetupPowershell,
+  renderClientSetupScript,
+  renderSetupOverview,
+  type SetupScriptAction,
+} from "./http-setup-script.js";
 import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
-import { dispatchOAuth, matchesOAuthPath, oauthCallbackResult, oauthChallengeHeader, oauthEndpoints, type OAuthHttpResult } from "./oauth/mcp-oauth.js";
+import {
+  dispatchOAuth,
+  matchesOAuthPath,
+  oauthCallbackResult,
+  oauthChallengeHeader,
+  oauthEndpoints,
+  type OAuthHttpResult,
+} from "./oauth/mcp-oauth.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
+import { BUILD } from "./build-info.js";
+import { setSignInMode, signInText, tokenExpiredText } from "./mcp/errors.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 
@@ -121,9 +138,7 @@ export function resolvePublicBaseUrl(input: {
 }): string {
   const override = (input.envOverride ?? "").trim().replace(/\/+$/, "");
   if (/^https?:\/\//i.test(override)) return override;
-  const rawProto = Array.isArray(input.forwardedProto)
-    ? (input.forwardedProto[0] ?? "")
-    : (input.forwardedProto ?? "");
+  const rawProto = Array.isArray(input.forwardedProto) ? (input.forwardedProto[0] ?? "") : (input.forwardedProto ?? "");
   const proto = rawProto.split(",")[0]?.trim().toLowerCase();
   const scheme = proto === "https" || proto === "http" ? proto : "http";
   const host = (input.hostHeader ?? "").trim() || input.fallbackHost;
@@ -198,7 +213,7 @@ async function handleMcpRequest(
       "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Mcp-Session-Id",
       "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
-      "Vary": "Origin",
+      Vary: "Origin",
     });
     response.end();
     return;
@@ -209,7 +224,7 @@ async function handleMcpRequest(
   if (authHeader.length > 0) {
     const match = /^Bearer (.+)$/.exec(authHeader);
     if (!match || !match[1]?.trim()) {
-      unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
+      unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
       return;
     }
     const bearer = match[1].trim();
@@ -223,9 +238,15 @@ async function handleMcpRequest(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message === "TDEI_TOKEN_EXPIRED") {
-        unauthorized(response, message, "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", { refresh_hint: true, retryable: true });
+        unauthorized(response, message, `TDEI access token expired. ${tokenExpiredText()}`, {
+          refresh_hint: true,
+          retryable: true,
+        });
       } else {
-        unauthorized(response, "TDEI_TOKEN_INVALID", "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", { refresh_hint: true, retryable: false });
+        unauthorized(response, "TDEI_TOKEN_INVALID", `TDEI access token is invalid. ${signInText()}`, {
+          refresh_hint: true,
+          retryable: false,
+        });
       }
       return;
     }
@@ -240,16 +261,22 @@ async function handleMcpRequest(
     });
   } else if (options.gatewaySlug && !options.sessionAuth.getStatus().authenticated) {
     const endpoints = oauthEndpoints(publicBaseUrl, options.gatewaySlug, mcpPath);
-    sendJson(response, 401, {
-      code: "TDEI_SSO_REQUIRED",
-      message: "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
-    }, {
-      "WWW-Authenticate": oauthChallengeHeader(endpoints),
-      "Cache-Control": "no-store",
-    });
+    sendJson(
+      response,
+      401,
+      {
+        code: "TDEI_SSO_REQUIRED",
+        message:
+          "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
+      },
+      {
+        "WWW-Authenticate": oauthChallengeHeader(endpoints),
+        "Cache-Control": "no-store",
+      },
+    );
     return;
   } else if (options.requireBearerAuth) {
-    unauthorized(response, "TDEI_SSO_REQUIRED", "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", { retryable: false });
+    unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
     return;
   } else {
     server = await createReadyHttpSemanticServer({
@@ -267,7 +294,10 @@ async function handleMcpRequest(
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
     await server.connect(transport);
-    const bodyText = request.method === "GET" || request.method === "HEAD" || request.method === "DELETE" ? "" : await readBody(request);
+    const bodyText =
+      request.method === "GET" || request.method === "HEAD" || request.method === "DELETE"
+        ? ""
+        : await readBody(request);
     let parsed: unknown;
     if (bodyText) {
       try {
@@ -296,13 +326,17 @@ export async function serveHttp(
   try {
     httpConfig = getConfig();
   } catch (error) {
-    console.error(JSON.stringify({
-      code: "TDEI_CONFIG_INVALID",
-      errors: error instanceof TdeiConfigError ? error.errors : [{ var: "unknown", rule: String(error), example: "" }],
-    }));
+    console.error(
+      JSON.stringify({
+        code: "TDEI_CONFIG_INVALID",
+        errors:
+          error instanceof TdeiConfigError ? error.errors : [{ var: "unknown", rule: String(error), example: "" }],
+      }),
+    );
     process.exit(1);
   }
   const gatewaySlug = options.gatewaySlug?.trim() || process.env.TDEI_GATEWAY_SLUG?.trim() || undefined;
+  setSignInMode(gatewaySlug ? "gateway" : options.requireBearerAuth ? "bearer" : "tool");
   const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
   const sessionOpenApiClient = new OpenApiMcpClient({
@@ -329,7 +363,7 @@ export async function serveHttp(
   const basePath = httpConfig.httpBasePath;
   const callbackPort = gatewaySlug
     ? Number(new URL(REGISTERED_SSO_REDIRECT_URI).port)
-    : (Number(new URL(httpConfig.ssoCallbackUrl).port) || 8765);
+    : Number(new URL(httpConfig.ssoCallbackUrl).port) || 8765;
 
   const server: Server = createHttpServer((request, response) => {
     void (async () => {
@@ -358,9 +392,14 @@ export async function serveHttp(
           try {
             const report = await checkHealth(
               { auth: sessionAuth, openapi: sessionOpenApiClient },
-              { ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
+              options.fetchImpl ? { fetchImpl: options.fetchImpl } : {},
             );
-            sendJson(response, 200, report, { "Cache-Control": "no-store" });
+            sendJson(
+              response,
+              200,
+              { ...report, build: { version: BUILD.version, sha: BUILD.sha } },
+              { "Cache-Control": "no-store" },
+            );
           } catch (error) {
             sendJson(response, 500, {
               code: "TDEI_HEALTH_FAILED",
@@ -370,10 +409,7 @@ export async function serveHttp(
           return;
         }
 
-        if (
-          request.method === "GET" &&
-          (url.pathname === `${basePath}/setup` || url.pathname === "/setup")
-        ) {
+        if (request.method === "GET" && (url.pathname === `${basePath}/setup` || url.pathname === "/setup")) {
           const text = renderSetupOverview(publicBaseUrl, basePath, mcpName);
           response.writeHead(200, {
             "Content-Type": "text/plain; charset=utf-8",
@@ -383,12 +419,11 @@ export async function serveHttp(
           return;
         }
 
-        const setupMatch =
-          url.pathname.startsWith(`${basePath}/setup/`)
-            ? url.pathname.slice(`${basePath}/setup/`.length)
-            : url.pathname.startsWith("/setup/")
-              ? url.pathname.slice("/setup/".length)
-              : undefined;
+        const setupMatch = url.pathname.startsWith(`${basePath}/setup/`)
+          ? url.pathname.slice(`${basePath}/setup/`.length)
+          : url.pathname.startsWith("/setup/")
+            ? url.pathname.slice("/setup/".length)
+            : undefined;
         if (request.method === "GET" && setupMatch !== undefined) {
           const rawClient = setupMatch.replace(/\/+$/, "").toLowerCase();
           const wantsPowershell = rawClient.endsWith(".ps1");
@@ -468,7 +503,8 @@ export async function serveHttp(
             return;
           }
           const authState = sessionAuth.getStatus().state;
-          const loginReturn = url.searchParams.has("code") || (url.searchParams.has("error") && authState === "login_pending");
+          const loginReturn =
+            url.searchParams.has("code") || (url.searchParams.has("error") && authState === "login_pending");
           // 404 means "not this child". The gateway retries the other
           // children. A real exchange failure stays 401 so nginx stops.
           if (loginReturn && authState !== "login_pending") {
@@ -506,7 +542,9 @@ export async function serveHttp(
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end(`<!doctype html><title>${title}</title><h1>${heading}</h1><p>You may close this window and return to your agent.</p>`);
+            response.end(
+              `<!doctype html><title>${title}</title><h1>${heading}</h1><p>You may close this window and return to your agent.</p>`,
+            );
           } catch (error) {
             const detail = sanitizeAuthErrorDetail(error instanceof Error ? error.message : String(error));
             response.writeHead(401, {
@@ -529,7 +567,10 @@ export async function serveHttp(
           request.method !== "DELETE" &&
           request.method !== "OPTIONS"
         ) {
-          sendJson(response, 405, { code: "TDEI_METHOD_NOT_ALLOWED", message: "Use POST for JSON-RPC, GET for SSE, or DELETE." });
+          sendJson(response, 405, {
+            code: "TDEI_METHOD_NOT_ALLOWED",
+            message: "Use POST for JSON-RPC, GET for SSE, or DELETE.",
+          });
           return;
         }
         await handleMcpRequest(request, response, resolved, host, publicBaseUrl, basePath);

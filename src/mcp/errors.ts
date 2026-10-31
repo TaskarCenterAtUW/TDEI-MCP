@@ -1,8 +1,31 @@
 export const MAX_OUTPUT_BYTES = 262144;
 
+export type SignInMode = "tool" | "gateway" | "bearer";
+let signInMode: SignInMode = "tool";
+export const setSignInMode = (m: SignInMode): void => {
+  signInMode = m;
+};
+export function signInText(): string {
+  switch (signInMode) {
+    case "gateway":
+      return "Reconnect this MCP server in your client and approve the browser sign-in.";
+    case "bearer":
+      return "Send a valid TDEI access token in the Authorization: Bearer header.";
+    default:
+      return "Call tdei_sso_login and open the returned URL.";
+  }
+}
+
+export function tokenExpiredText(): string {
+  if (signInMode === "tool") {
+    return "Refresh via POST /api/v1/refresh-token or call tdei_sso_login.";
+  }
+  return signInText();
+}
+
 const TRUNCATION_HINT = "Output exceeded 256KB; refine filters or call a narrower operation.";
 
-export type TdeiErrorCode =
+type TdeiErrorCode =
   | "TDEI_SSO_REQUIRED"
   | "TDEI_TOKEN_EXPIRED"
   | "TDEI_TOKEN_INVALID"
@@ -21,7 +44,7 @@ export interface TdeiErrorStepRef {
   tool: string;
 }
 
-export interface TdeiMcpError {
+interface TdeiMcpError {
   code: TdeiErrorCode;
   message: string;
   hint: string;
@@ -48,28 +71,42 @@ function extractBackendMessage(body: unknown): string | undefined {
 // Status table folded in from the deleted dead API helper's
 // getErrorMessage(). That module is gone: nothing imported its request
 // helper, and workflow steps must go through the version-gated child.
-export function inferCode(err: unknown): { code: TdeiErrorCode; message: string; retryable: boolean } {
+function inferCode(err: unknown): { code: TdeiErrorCode; message: string; retryable: boolean } {
   const message = err instanceof Error ? err.message : String(err ?? "");
-  const status = typeof err === "object" && err !== null && typeof (err as BackendShaped).status === "number"
-    ? (err as BackendShaped).status as number
-    : undefined;
-  const backendMessage = typeof err === "object" && err !== null
-    ? extractBackendMessage((err as BackendShaped).body)
-    : undefined;
+  const status =
+    typeof err === "object" && err !== null && typeof (err as BackendShaped).status === "number"
+      ? ((err as BackendShaped).status as number)
+      : undefined;
+  const backendMessage =
+    typeof err === "object" && err !== null ? extractBackendMessage((err as BackendShaped).body) : undefined;
 
   if (/TDEI_SSO_REQUIRED/.test(message)) {
-    return { code: "TDEI_SSO_REQUIRED", message: "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.", retryable: false };
+    return {
+      code: "TDEI_SSO_REQUIRED",
+      message: `TDEI SSO login is required. ${signInText()}`,
+      retryable: false,
+    };
   }
   if (/TDEI_TOKEN_EXPIRED/.test(message)) {
-    return { code: "TDEI_TOKEN_EXPIRED", message: "TDEI access token expired. Refresh via POST /api/v1/refresh-token or call tdei_sso_login.", retryable: true };
+    return {
+      code: "TDEI_TOKEN_EXPIRED",
+      message: `TDEI access token expired. ${tokenExpiredText()}`,
+      retryable: true,
+    };
   }
   if (/TDEI_TOKEN_INVALID/.test(message)) {
-    return { code: "TDEI_TOKEN_INVALID", message: "TDEI access token is invalid. Call tdei_sso_login and open the returned URL.", retryable: false };
+    return {
+      code: "TDEI_TOKEN_INVALID",
+      message: `TDEI access token is invalid. ${signInText()}`,
+      retryable: false,
+    };
   }
   if (status === 403 || /forbidden|permission/i.test(message)) {
     return {
       code: "TDEI_FORBIDDEN",
-      message: backendMessage ? `You do not have permission: ${backendMessage}` : "You do not have permission to perform this TDEI operation.",
+      message: backendMessage
+        ? `You do not have permission: ${backendMessage}`
+        : "You do not have permission to perform this TDEI operation.",
       retryable: false,
     };
   }
@@ -77,24 +114,41 @@ export function inferCode(err: unknown): { code: TdeiErrorCode; message: string;
     return { code: "TDEI_NOT_FOUND", message: "The requested TDEI resource was not found.", retryable: false };
   }
   if (status === 409) {
-    return { code: "TDEI_CONFLICT", message: backendMessage ? `TDEI request conflict: ${backendMessage}` : "The TDEI request conflicts with the current resource state.", retryable: false };
+    return {
+      code: "TDEI_CONFLICT",
+      message: backendMessage
+        ? `TDEI request conflict: ${backendMessage}`
+        : "The TDEI request conflicts with the current resource state.",
+      retryable: false,
+    };
   }
   if ((status !== undefined && status >= 500) || /child|spawn|ENOENT|ECONNRESET/i.test(message)) {
-    return { code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE", message: status !== undefined && status >= 500 ? "The TDEI service returned a server error." : "The OpenAPI tool provider is unavailable.", retryable: true };
+    return {
+      code: status !== undefined && status >= 500 ? "TDEI_UPSTREAM_5XX" : "TDEI_CHILD_UNAVAILABLE",
+      message:
+        status !== undefined && status >= 500
+          ? "The TDEI service returned a server error."
+          : "The OpenAPI tool provider is unavailable.",
+      retryable: true,
+    };
   }
   if (/disabled by config/.test(message)) {
     return { code: "TDEI_TOOL_DISABLED", message, retryable: false };
   }
   if (status === 400) {
-    return { code: "TDEI_CONFIG_INVALID", message: backendMessage ? `TDEI request was invalid: ${backendMessage}` : "TDEI request was invalid.", retryable: false };
+    return {
+      code: "TDEI_CONFIG_INVALID",
+      message: backendMessage ? `TDEI request was invalid: ${backendMessage}` : "TDEI request was invalid.",
+      retryable: false,
+    };
   }
   return { code: "TDEI_UPSTREAM_5XX", message: message || "Unexpected TDEI error.", retryable: false };
 }
 
-const HINTS: Record<TdeiErrorCode, string> = {
-  TDEI_SSO_REQUIRED: "Call tdei_sso_login and open the returned URL.",
-  TDEI_TOKEN_EXPIRED: "Refresh via POST /api/v1/refresh-token or call tdei_sso_login.",
-  TDEI_TOKEN_INVALID: "Call tdei_sso_login and open the returned URL.",
+const HINTS: Record<
+  Exclude<TdeiErrorCode, "TDEI_SSO_REQUIRED" | "TDEI_TOKEN_EXPIRED" | "TDEI_TOKEN_INVALID">,
+  string
+> = {
   TDEI_FORBIDDEN: "Check your TDEI account's project-group permissions for this operation.",
   TDEI_NOT_FOUND: "Verify the resource id and environment (dev/stage/prod).",
   TDEI_CONFLICT: "Re-read the resource state and retry with current values.",
@@ -104,15 +158,22 @@ const HINTS: Record<TdeiErrorCode, string> = {
   TDEI_CHILD_UNAVAILABLE: "Call tdei_load_api_tools to reload the OpenAPI provider.",
 };
 
+function hintFor(code: TdeiErrorCode): string {
+  if (code === "TDEI_SSO_REQUIRED" || code === "TDEI_TOKEN_INVALID") return signInText();
+  if (code === "TDEI_TOKEN_EXPIRED") return tokenExpiredText();
+  return HINTS[code];
+}
+
 export function formatError(err: unknown): { isError: true; content: [{ type: "text"; text: string }] } {
   const inferred = inferCode(err);
-  const stepRef = typeof err === "object" && err !== null && "stepRef" in err
-    ? (err as { stepRef: TdeiErrorStepRef }).stepRef
-    : undefined;
+  const stepRef =
+    typeof err === "object" && err !== null && "stepRef" in err
+      ? (err as { stepRef: TdeiErrorStepRef }).stepRef
+      : undefined;
   const payload: TdeiMcpError = {
     code: inferred.code,
     message: inferred.message,
-    hint: HINTS[inferred.code],
+    hint: hintFor(inferred.code),
     retryable: inferred.retryable,
     ...(stepRef ? { stepRef } : {}),
   };
@@ -138,11 +199,15 @@ export function truncateText(text: string): { text: string; truncated: boolean }
     if (leadIndex >= 0) {
       const leadByte = bytes[leadIndex]!;
       const expectedLength =
-        (leadByte & 0x80) === 0x00 ? 1
-        : (leadByte & 0xe0) === 0xc0 ? 2
-        : (leadByte & 0xf0) === 0xe0 ? 3
-        : (leadByte & 0xf8) === 0xf0 ? 4
-        : 1;
+        (leadByte & 0x80) === 0x00
+          ? 1
+          : (leadByte & 0xe0) === 0xc0
+            ? 2
+            : (leadByte & 0xf0) === 0xe0
+              ? 3
+              : (leadByte & 0xf8) === 0xf0
+                ? 4
+                : 1;
       if (leadIndex + expectedLength > end) {
         end = leadIndex;
       }

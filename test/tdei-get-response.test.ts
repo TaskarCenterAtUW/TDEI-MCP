@@ -33,12 +33,7 @@ test("array GET responses keep API rows and field names", () => {
 });
 
 test("versions GET envelopes preserve body and expose version rows", () => {
-  for (const key of [
-    "listOswVersions",
-    "listApiVersions",
-    "listGtfsFlexVersions",
-    "listGtfsPathwaysVersions",
-  ]) {
+  for (const key of ["listOswVersions", "listApiVersions", "listGtfsFlexVersions", "listGtfsPathwaysVersions"]) {
     const body = fixtures[key] as { versions: Array<{ version: string }> };
     const parsed = parseTdeiGetResponse(body);
     assert.equal(parsed.kind, "records", key);
@@ -80,20 +75,24 @@ test("MCP text wrapping round-trips each GET shape via decodeOpenApiJson", () =>
 
 test("normalizeOpenApiToolResult keeps object GET JSON valid for LLMs", () => {
   const normalized = normalizeOpenApiToolResult({
-    content: [{
-      type: "text",
-      text: "```json\n" + JSON.stringify(fixtures.systemCapabilities) + "\n```",
-    }],
+    content: [
+      {
+        type: "text",
+        text: "```json\n" + JSON.stringify(fixtures.systemCapabilities) + "\n```",
+      },
+    ],
   }) as { content: Array<{ text: string }> };
   assert.deepEqual(JSON.parse(normalized.content[0]!.text), fixtures.systemCapabilities);
 });
 
 test("normalizeOpenApiToolResult keeps list GET arrays valid for LLMs", () => {
   const normalized = normalizeOpenApiToolResult({
-    content: [{
-      type: "text",
-      text: JSON.stringify(JSON.stringify(fixtures.listProjectGroups)),
-    }],
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(JSON.stringify(fixtures.listProjectGroups)),
+      },
+    ],
   }) as { content: Array<{ text: string }> };
   assert.deepEqual(JSON.parse(normalized.content[0]!.text), fixtures.listProjectGroups);
 });

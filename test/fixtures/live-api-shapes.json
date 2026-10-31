@@ -9,7 +9,10 @@
       "polygon": null,
       "data_viewer_config": {
         "dataset_viewer_allowed": true,
-        "feedback_turnaround_time": { "number": 15, "units": "days" }
+        "feedback_turnaround_time": {
+          "number": 15,
+          "units": "days"
+        }
       },
       "poc": []
     }
@@ -59,10 +62,18 @@
   },
   "serviceMetrics": {
     "services": [
-      { "tdei_service_id": "svc-1", "service_name": "A" },
-      { "tdei_service_id": "svc-2", "service_name": "B" }
+      {
+        "tdei_service_id": "svc-1",
+        "service_name": "A"
+      },
+      {
+        "tdei_service_id": "svc-2",
+        "service_name": "B"
+      }
     ],
-    "project_group": { "tdei_project_group_id": "pg-1" }
+    "project_group": {
+      "tdei_project_group_id": "pg-1"
+    }
   },
   "oswDatasetViewerFeedbacks": [
     {
@@ -74,15 +85,25 @@
     }
   ],
   "systemCapabilities": {
-    "dataset_upload_limits": { "max_file_size_mb": 500 }
+    "dataset_upload_limits": {
+      "max_file_size_mb": 500
+    }
   },
   "systemMetrics": {
-    "systemMetrics": { "users": 1 },
-    "datasetMetrics": { "osw": 1 },
-    "apiCalls": { "total": 10 }
+    "systemMetrics": {
+      "users": 1
+    },
+    "datasetMetrics": {
+      "osw": 1
+    },
+    "apiCalls": {
+      "total": 10
+    }
   },
   "dataMetrics": {
-    "dataMetrics": { "published": 1 }
+    "dataMetrics": {
+      "published": 1
+    }
   },
   "oswDatasetViewerFeedbacksMetadata": {
     "total_count": 10,
@@ -91,17 +112,163 @@
   },
   "listGtfsFlexVersions": {
     "versions": [
-      { "version": "2.0", "documentation": "https://example.test/flex", "specification": "https://example.test/flex.json" }
+      {
+        "version": "2.0",
+        "documentation": "https://example.test/flex",
+        "specification": "https://example.test/flex.json"
+      }
     ]
   },
   "listGtfsPathwaysVersions": {
     "versions": [
-      { "version": "1.0", "documentation": "https://example.test/pathways", "specification": "https://example.test/pathways.json" }
+      {
+        "version": "1.0",
+        "documentation": "https://example.test/pathways",
+        "specification": "https://example.test/pathways.json"
+      }
     ]
   },
   "wrappedProjectGroups": {
     "project_groups": [
-      { "tdei_project_group_id": "pg-wrap", "project_group_name": "Wrapped" }
+      {
+        "tdei_project_group_id": "pg-wrap",
+        "project_group_name": "Wrapped"
+      }
     ]
-  }
+  },
+  "cloneDataset": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "cloneDataset",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "publishOswFile": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "publishOswFile",
+    "jobId": "job-1",
+    "datasetId": "abc-123",
+    "dataType": "osw"
+  },
+  "oswConfidenceCalculate": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "oswConfidenceCalculate",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "oswQualityCalculate": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "oswQualityCalculate",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "qualityMetricTag": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "qualityMetricTag",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "oswQualityReportGenerate": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "oswQualityReportGenerate",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "sanitizeOswFile": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "sanitizeOswFile",
+    "jobId": "job-1"
+  },
+  "oswOnDemandFormat": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "oswOnDemandFormat",
+    "jobId": "job-1"
+  },
+  "convertGtfsPathways": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "convertGtfsPathways",
+    "jobId": "job-1"
+  },
+  "oswSelfMerge": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "osw-self-merge",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "oswSpatialJoin": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "osw-spatial-join",
+    "jobId": "job-1"
+  },
+  "oswUnion": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "osw-union",
+    "jobId": "job-1"
+  },
+  "datasetBbox": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "datasetBbox",
+    "jobId": "job-1",
+    "datasetId": "abc-123",
+    "dataType": "osw"
+  },
+  "datasetTagRoad": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "datasetTagRoad",
+    "jobId": "job-1"
+  },
+  "datasetTagIncline": {
+    "note": "async job accepted",
+    "source": "fixture",
+    "generatedAt": "2026-09-30T12:00:00.000Z",
+    "operation": "datasetTagIncline",
+    "jobId": "job-1",
+    "datasetId": "abc-123"
+  },
+  "deleteDataset": "dataset abc-123 deleted",
+  "submitFeedback": {
+    "message": "feedback recorded"
+  },
+  "updateFeedbackStatus": {
+    "message": "feedback status updated"
+  },
+  "feedbacksDownload": "id,status\n1,open\n2,resolved\n",
+  "pmTilesUrl": "https://example.test/tiles/abc-123.pmtiles?sig=fixture",
+  "viewerAccess": {
+    "message": "viewer access updated"
+  },
+  "verifyEmail": {
+    "message": "verification link sent"
+  },
+  "recoverPassword": {
+    "message": "recovery link sent"
+  },
+  "regenerateApiKey": "tdei-new-api-key-fixture"
 }

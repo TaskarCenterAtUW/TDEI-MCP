@@ -10,12 +10,14 @@ await serveOpenApiStdio({
       "/pets/{pet_id}": {
         get: {
           operationId: "get-pet",
-          parameters: [{
-            name: "pet_id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          }],
+          parameters: [
+            {
+              name: "pet_id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
           responses: { "200": { description: "OK" } },
         },
       },

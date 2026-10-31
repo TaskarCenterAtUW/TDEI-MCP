@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
+import { BUILD } from "./build-info.js";
 import type { AuthManager } from "./auth/auth-manager.js";
 import { getConfig } from "./config.js";
 import { TDEI_LLM_CACHE_INSTRUCTIONS } from "./intents/descriptions.js";
@@ -9,8 +10,10 @@ import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { errorResult } from "./mcp/responses.js";
+import { signInText } from "./mcp/errors.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
+import type { DatasetAsset } from "./intents/types.js";
 import { REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 
@@ -62,13 +65,11 @@ function normalizeCallbackUrlForComplete(input: string, configuredCallbackUrl: s
   return trimmed;
 }
 
-export function createHttpSemanticServer(
-  options: HttpSemanticServerOptions,
-): McpServer {
+export function createHttpSemanticServer(options: HttpSemanticServerOptions): McpServer {
   const server = new McpServer(
     {
       name: "tdei-mcp",
-      version: "0.1.0",
+      version: BUILD.serverVersion,
     },
     {
       instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
@@ -83,22 +84,19 @@ export function createHttpSemanticServer(
       auth
         ? {
             tokenProvider: () => auth.getAccessToken(),
-            allowedAssetKinds: new Set(["local_path", "inline_base64"]),
+            allowedAssetKinds: new Set<DatasetAsset["kind"]>(),
           }
         : undefined,
     ),
     places: options.places ?? {
-      async forwardGeocode() { return []; },
+      async forwardGeocode() {
+        return [];
+      },
     },
+    ...(auth ? { identityProvider: () => auth.getIdentity() } : {}),
   });
   const accessToken = options.accessToken;
-  registerSemanticTools(
-    server,
-    module,
-    accessToken !== undefined
-      ? () => ({ accessToken })
-      : undefined,
-  );
+  registerSemanticTools(server, module, accessToken !== undefined ? () => ({ accessToken }) : undefined);
 
   if (auth) {
     const gatewaySlug = options.gatewaySlug?.trim() || undefined;
@@ -109,12 +107,7 @@ export function createHttpSemanticServer(
       ...(browserRedirectUri ? { redirectUri: browserRedirectUri } : {}),
     };
     const openApiLifecycle = options.openApiMcpClient
-      ? new OpenApiToolsLifecycle(
-          server,
-          auth,
-          options.openApiMcpClient,
-          registerTdeiOpenApiTools,
-        )
+      ? new OpenApiToolsLifecycle(server, auth, options.openApiMcpClient, registerTdeiOpenApiTools)
       : undefined;
 
     server.registerTool(
@@ -131,10 +124,12 @@ export function createHttpSemanticServer(
               await openApiLifecycle.load().catch(() => undefined);
             }
             return {
-              content: [{
-                type: "text",
-                text: "TDEI SSO session is already authenticated.",
-              }],
+              content: [
+                {
+                  type: "text",
+                  text: "TDEI SSO session is already authenticated.",
+                },
+              ],
             };
           }
 
@@ -151,12 +146,17 @@ export function createHttpSemanticServer(
             content: [
               {
                 type: "text",
-                text: JSON.stringify({
-                  status: "login_pending",
-                  loginUrl: login.loginUrl,
-                  callbackUrl: browserRedirectUri ?? login.callbackUrl,
-                  message: "Open loginUrl in your browser to sign in to TDEI. Keycloak returns the browser to http://127.0.0.1:8765/callback. The client installer runs a local relay there that forwards the login to this gateway. When the page says login complete, return here.",
-                }, null, 2),
+                text: JSON.stringify(
+                  {
+                    status: "login_pending",
+                    loginUrl: login.loginUrl,
+                    callbackUrl: browserRedirectUri ?? login.callbackUrl,
+                    message:
+                      "Open loginUrl in your browser to sign in to TDEI. Keycloak returns the browser to http://127.0.0.1:8765/callback. The client installer runs a local relay there that forwards the login to this gateway. When the page says login complete, return here.",
+                  },
+                  null,
+                  2,
+                ),
               },
             ],
           };
@@ -172,15 +172,17 @@ export function createHttpSemanticServer(
         description:
           "Complete a pending TDEI SSO login using the final callback URL (or ?code=...&state=... query string) from the browser address bar.",
         inputSchema: z.object({
-          callbackUrl: z.string().min(1).describe("The final callback URL (e.g. http://127.0.0.1:8765/callback?code=...&state=...) from the browser address bar."),
+          callbackUrl: z
+            .string()
+            .min(1)
+            .describe(
+              "The final callback URL (e.g. http://127.0.0.1:8765/callback?code=...&state=...) from the browser address bar.",
+            ),
         }),
       },
       async ({ callbackUrl }) => {
         try {
-          const normalized = normalizeCallbackUrlForComplete(
-            callbackUrl,
-            getConfig().ssoCallbackUrl,
-          );
+          const normalized = normalizeCallbackUrlForComplete(callbackUrl, getConfig().ssoCallbackUrl);
           await auth.completeSsoLogin(normalized);
           if (openApiLifecycle) {
             await openApiLifecycle.load().catch(() => undefined);
@@ -201,21 +203,24 @@ export function createHttpSemanticServer(
           "Check whether TDEI SSO is configured and whether the current session is signed out, pending, or authenticated.",
         inputSchema: z.object({}),
       },
-      async () => ({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(auth.getStatus(), null, 2),
-          },
-        ],
-      }),
+      async () => {
+        const status = auth.getStatus();
+        const identity = auth.getIdentity();
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(identity ? { ...status, identity } : status, null, 2),
+            },
+          ],
+        };
+      },
     );
 
     server.registerTool(
       "tdei_test_authentication",
       {
-        description:
-          "Check whether the connector currently has a usable TDEI SSO access token.",
+        description: "Check whether the connector currently has a usable TDEI SSO access token.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -232,7 +237,7 @@ export function createHttpSemanticServer(
               content: [
                 {
                   type: "text",
-                  text: "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.",
+                  text: `TDEI SSO login is required. ${signInText()}`,
                 },
               ],
             };
@@ -261,12 +266,17 @@ export function createHttpSemanticServer(
             content: [
               {
                 type: "text",
-                text: JSON.stringify({
-                  status: "logout_pending",
-                  logoutUrl: logout.logoutUrl,
-                  callbackUrl: logout.callbackUrl,
-                  message: "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens have been cleared.",
-                }, null, 2),
+                text: JSON.stringify(
+                  {
+                    status: "logout_pending",
+                    logoutUrl: logout.logoutUrl,
+                    callbackUrl: logout.callbackUrl,
+                    message:
+                      "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens have been cleared.",
+                  },
+                  null,
+                  2,
+                ),
               },
             ],
           };
@@ -280,8 +290,7 @@ export function createHttpSemanticServer(
       server.registerTool(
         "tdei_load_api_tools",
         {
-          description:
-            "Load all OpenAPI-generated TDEI API tools into this MCP server.",
+          description: "Load all OpenAPI-generated TDEI API tools into this MCP server.",
           inputSchema: z.object({}),
         },
         async () => {
@@ -304,8 +313,9 @@ export function createHttpSemanticServer(
         },
       );
       if (options.preloadOpenApiTools || options.openApiMcpClient?.isConnected()) {
-        (server as McpServer & { __openApiInit?: Promise<unknown> }).__openApiInit =
-          openApiLifecycle.load().catch(() => undefined);
+        (server as McpServer & { __openApiInit?: Promise<unknown> }).__openApiInit = openApiLifecycle
+          .load()
+          .catch(() => undefined);
       }
     }
   }
@@ -313,9 +323,7 @@ export function createHttpSemanticServer(
   return server;
 }
 
-export async function createReadyHttpSemanticServer(
-  options: HttpSemanticServerOptions,
-): Promise<McpServer> {
+export async function createReadyHttpSemanticServer(options: HttpSemanticServerOptions): Promise<McpServer> {
   const server = createHttpSemanticServer(options) as McpServer & {
     __openApiInit?: Promise<unknown>;
   };
