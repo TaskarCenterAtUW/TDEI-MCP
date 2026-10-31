@@ -33,6 +33,8 @@ jobs:
           tags: |
             ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:${{ github.sha }}
             ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:dev-latest
+          build-args: |
+            GIT_SHA=${{ github.sha }}
 
   deploy:
     needs: build
@@ -74,3 +76,20 @@ jobs:
             echo "Azure Container App image does not match the image built by this run" >&2
             exit 1
           fi
+
+      - name: Wait for deployed build to answer requests
+        env:
+          MCP_BASE_URL: ${{ secrets.MCP_BASE_URL }}
+        run: |
+          : "${MCP_BASE_URL:?MCP_BASE_URL secret is not configured}"
+          for attempt in $(seq 1 30); do
+            served_sha="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r .build.sha)" || true
+            if [[ "$served_sha" == "$GITHUB_SHA" ]]; then
+              echo "Deployed build $served_sha is serving traffic."
+              exit 0
+            fi
+            echo "Attempt $attempt: serving sha '${served_sha:-unreachable}', waiting for $GITHUB_SHA..."
+            sleep 20
+          done
+          echo "Timed out waiting for build $GITHUB_SHA to serve traffic" >&2
+          exit 1

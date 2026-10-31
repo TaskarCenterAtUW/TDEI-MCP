@@ -43,7 +43,7 @@ on the client machine, the server also serves install scripts — see
 
 ## Requirements
 
-- **Node.js 22** and npm. Check with `node --version` and `npm --version`.
+- **Node.js 22** and pnpm. Check with `node --version` and `pnpm --version`.
 - An MCP client that can launch a local **stdio** server, such as Codex. Generated API tool definitions are loaded during MCP initialization so clients see them in the initial catalogue; invoking them still requires SSO.
 - Access to TDEI through its browser-based SSO login.
 - Internet access to install dependencies, download the OpenAPI specification, and contact TDEI.
@@ -61,10 +61,10 @@ On this repository's GitHub page, choose **Code → Download ZIP**, extract it, 
 Run these commands from the folder containing `package.json`:
 
 ```bash
-npm ci
+pnpm install --frozen-lockfile
 ```
 
-`npm ci` installs the dependency versions recorded in `package-lock.json`.
+`pnpm install --frozen-lockfile` installs the dependency versions recorded in `pnpm-lock.yaml`.
 The recommended init flow below writes the required environment into the MCP
 client config, so it does not need a `.env` file. For the manual fallback only,
 copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell),
@@ -74,7 +74,7 @@ registered for the `tdei-mcp` client, and its port must be free locally.
 ## 2. Build (checkout only — `init` users skip this)
 
 ```bash
-npm run build
+pnpm build
 ```
 
 This creates `dist/index.js`, the entry point your MCP client will launch. Rebuild after changing files in `src/` or downloading an updated version of the source. The `.env` values below are only needed for the manual fallback — `init` writes them inline in the client config.
@@ -115,7 +115,7 @@ excluded by `.gitignore`; do not commit them.
 
 The manual configuration below is a fallback. Configure your client to start
 the connector with Node.js and explicitly load `.env`. The application does not
-load `.env` on its own; `npm start` and `npm run dev` use only the environment
+load `.env` on its own; `pnpm start` and `pnpm dev` use only the environment
 already supplied to their process.
 
 ### Codex
@@ -191,7 +191,7 @@ The client process needs only Node.js and network access to the configured speci
 
 **STDIO** is started automatically by your MCP client (Codex, Claude Desktop, VS Code, etc.) after `init` writes the client config. Do not run `node dist/index.js` yourself for stdio — with a terminal attached it exits and tells you to use HTTP or `init`.
 
-For a non-blocking stdio handshake check, run `npm run check:stdio`. **Manual start** is only for Streamable HTTP (see below).
+For a non-blocking stdio handshake check, run `pnpm check:stdio`. **Manual start** is only for Streamable HTTP (see below).
 
 ### HTTP mode (Streamable HTTP, session SSO)
 
@@ -299,17 +299,17 @@ Node children only (no gateway) — one child process per server, ports
 auto-increment from `basePort`:
 
 ```bash
-npm run build
-npm run start:multi -- --file mcps.json   # dev: npm run dev:multi
+pnpm build
+pnpm start:multi -- --file mcps.json   # dev: pnpm dev:multi
 # tdei-core-dev -> http://127.0.0.1:3001/tdei-core-dev/mcp, staging -> :3002, ...
 ```
 
 Full gateway — node children plus an nginx path-based reverse proxy:
 
 ```bash
-npm run deploy:node    # host-local: nginx + children, no Docker (needs nginx installed)
-npm run deploy:docker  # single image: build + run container (needs Docker)
-npm run deploy:docker:down  # stop and remove the container
+pnpm deploy:node    # host-local: nginx + children, no Docker (needs nginx installed)
+pnpm deploy:docker  # single image: build + run container (needs Docker)
+pnpm deploy:docker:down  # stop and remove the container
 ```
 
 Both serve the same thing on `http://127.0.0.1:3000/` (`$PORT` overrides,
@@ -354,13 +354,47 @@ Both transports expose the common semantic tools:
 | Tool | Purpose |
 | --- | --- |
 | `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
-| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting. |
+| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
+| `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for an automatic verdict. |
+| `tdei_get_my_identity` | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint). |
+| `tdei_list_jobs` | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering. |
 | `tdei_list_services` | List services by text, project group, or service type. |
 | `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
 | `tdei_validate_dataset` | Ask for missing inputs, then validate OSW/Flex/Pathways data through adapters that support multipart. |
 | `tdei_upload_dataset` | Collect all required target and metadata fields before performing one upload. |
+| `tdei_publish_dataset` | Publish a dataset release (`publishOswFile`/`publishGtfsFlexFile`/`publishGtfsPathwaysFile`). |
+| `tdei_delete_dataset` | Permanently delete a dataset. Requires `confirm:true`. |
+| `tdei_clone_dataset` | Clone a dataset into a target project group/service with new metadata. Requires `confirm:true`. |
+| `tdei_edit_metadata` | Overwrite a dataset's metadata document. Requires `confirm:true`. |
+| `tdei_calculate_confidence` | Confidence job for an OSW dataset, optional sub-region GeoJSON. |
+| `tdei_calculate_quality_intersection` | Intersection-quality job for an OSW dataset, optional polygon. |
+| `tdei_tag_quality_metric` | Tag quality metrics on OSW elements via a tag-quality file. |
+| `tdei_generate_quality_report` | Quality-report job for an OSW dataset. |
+| `tdei_sanitize_dataset` | Sanitize an OSW ZIP (correct invalid/unsupported values). |
+| `tdei_convert_osw` | Convert between OSW and OSM formats. |
+| `tdei_convert_pathways` | Convert CAD DXF ZIP or an ArcGIS service into a Pathways draft. |
+| `tdei_self_merge` | Self-merge spatial entities within one OSW dataset. |
+| `tdei_spatial_join` | Spatial join between two OSW datasets (dimensions + join condition). |
+| `tdei_union_datasets` | Union DS2 into DS1. Requires `confirm:true`. |
+| `tdei_cut_dataset_bbox` | Cut a dataset subgraph to a bounding box (`datasetBbox`). |
+| `tdei_tag_road` | Tag sidewalks in a target dataset with a source road network. |
+| `tdei_tag_incline` | Incline-tagging job for an OSW dataset. |
+| `tdei_check_dataset_incline` | Download the OSW ZIP server-side and scan edges files for incline tags; returns a verdict with evidence. |
+| `tdei_list_feedbacks` | List dataset-viewer feedbacks with optional filters. |
+| `tdei_get_feedback_summary` | Feedback counts/overdue summary, optionally per project group. |
+| `tdei_download_feedbacks` | Download feedbacks for a project group (CSV/GeoJSON preview). |
+| `tdei_submit_feedback` | Submit viewer feedback for a dataset element. |
+| `tdei_update_feedback_status` | Resolve/triage feedbacks (open/resolved + resolution). |
+| `tdei_get_pm_tiles_url` | PMTiles SAS URL for viewing a dataset. |
+| `tdei_set_viewer_access` | Dataset-viewer visibility preferences. |
+| `tdei_get_metrics` | Data/service/system metrics (service scope needs a project group). |
+| `tdei_list_versions` | Supported data-standard versions for OSW/Flex/Pathways. |
+| `tdei_get_system_info` | Capabilities plus supported API versions. |
+| `tdei_verify_email` | Send an email-verification link. |
+| `tdei_recover_password` | Send a password-recovery link. |
+| `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
 
-Hosted validation/upload accepts `inline_base64` assets up to 10MB. Client-local paths are intentionally unavailable to a remote server. Local stdio validation/upload accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token.
+File bytes never go through MCP on hosted — any size goes via curl from the client machine (single hop), then poll with `tdei_list_jobs`. Local stdio accepts absolute `local_path` assets and streams them directly to the TDEI multipart endpoints with the current local SSO token.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 
@@ -368,7 +402,7 @@ Local stdio mode also exposes these connector-management tools while signed out:
 
 | Tool | Purpose |
 | --- | --- |
-| `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated. |
+| `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated, including JWT identity (email, username, roles) when signed in. |
 | `tdei_health` | Report connector health: auth state, OpenAPI provider, spec reachability, callback port, and config. Read-only, safe signed-out. |
 | `tdei_sso_login` | Start browser SSO and return the login URL. |
 | `tdei_test_authentication` | Check for a usable SSO session token. |
@@ -442,7 +476,7 @@ getOswFile → listJobs → job-download). File-upload steps are rejected in v1.
 
 | Symptom | What to check |
 | --- | --- |
-| `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `npm run build`. For clients without `cwd`, use absolute argument paths. |
+| `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `pnpm build`. For clients without `cwd`, use absolute argument paths. |
 | SSO login is required | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | Callback port is already in use | Stop the process using port 8765, then retry login. |
 | SSO redirect returns 400 | Confirm the client ID and callback URL exactly match the backend registration. |
@@ -469,16 +503,17 @@ Connector diagnostics are written to stderr, which MCP clients usually capture i
 Run the deterministic lifecycle tests and TypeScript build without a live TDEI session:
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm lint
+pnpm build
 ```
 
-The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability.
+The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability. `pnpm lint` runs the TypeScript compiler, oxlint, and a Prettier check; fix formatting with `pnpm format` (or verify with `pnpm format:check`). The same three commands run in CI and as the pre-commit hook.
 
 To verify a real TDEI connection, configure the registered SSO client and callback in `.env`, then run:
 
 ```bash
-npm run test:live
+pnpm test:live
 ```
 
 This prints a browser login URL and waits up to five minutes for SSO. It then verifies authentication, loads and calls `listServices`, and logs out. Success prints `Live SSO session smoke test passed.`

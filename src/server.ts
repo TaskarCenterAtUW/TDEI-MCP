@@ -1,13 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
-import {
-  authManager,
-  type AuthManager,
-} from "./auth/auth-manager.js";
+import { authManager, type AuthManager } from "./auth/auth-manager.js";
+import { BUILD } from "./build-info.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { openApiMcpClient } from "./tdei/openapi-provider.js";
 import { errorResult } from "./mcp/responses.js";
+import { signInText } from "./mcp/errors.js";
 import { log } from "./mcp/log.js";
 import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
@@ -35,9 +34,9 @@ export interface HealthReport {
 }
 
 async function defaultCanBind(port: number, host: string): Promise<boolean> {
-  const { createServer } = await import("node:net");
+  const { createServer: createNetServer } = await import("node:net");
   return new Promise((resolve) => {
-    const probe = createServer();
+    const probe = createNetServer();
     probe.once("error", () => resolve(false));
     probe.once("listening", () => probe.close(() => resolve(true)));
     probe.listen(port, host);
@@ -63,23 +62,39 @@ export async function checkHealth(
     await response.body?.cancel().catch(() => undefined);
     spec = { url: getConfig().specUrl, reachable: response.ok, latencyMs: Date.now() - specStart };
   } catch {
-    spec = { url: getConfig().specUrl, reachable: false, hint: "Spec URL unreachable; check network and TDEI_SPEC_URL." };
+    spec = {
+      url: getConfig().specUrl,
+      reachable: false,
+      hint: "Spec URL unreachable; check network and TDEI_SPEC_URL.",
+    };
   }
 
   let callback: HealthReport["callback"];
   try {
     const url = new URL(getConfig().ssoCallbackUrl);
     if (url.protocol === "https:") {
-      callback = { url: getConfig().ssoCallbackUrl, portFree: "n/a", hint: "https callback terminates remotely; no local bind applies." };
+      callback = {
+        url: getConfig().ssoCallbackUrl,
+        portFree: "n/a",
+        hint: "https callback terminates remotely; no local bind applies.",
+      };
     } else {
       const port = Number(url.port);
       const free = await (probes.canBind ?? defaultCanBind)(port, url.hostname);
       callback = free
         ? { url: getConfig().ssoCallbackUrl, portFree: true }
-        : { url: getConfig().ssoCallbackUrl, portFree: false, hint: `Port ${port} is in use; stop the occupying process before SSO login.` };
+        : {
+            url: getConfig().ssoCallbackUrl,
+            portFree: false,
+            hint: `Port ${port} is in use; stop the occupying process before SSO login.`,
+          };
     }
   } catch {
-    callback = { url: getConfig().ssoCallbackUrl, portFree: false, hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL." };
+    callback = {
+      url: getConfig().ssoCallbackUrl,
+      portFree: false,
+      hint: "Callback URL is invalid; check TDEI_SSO_CALLBACK_URL.",
+    };
   }
 
   const ok = spec.reachable && callback.portFree !== false;
@@ -96,12 +111,9 @@ export async function checkHealth(
 export interface ServerDependencies {
   authManager: Pick<
     AuthManager,
-    "completeSsoLogin" | "getAccessToken" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
+    "completeSsoLogin" | "getAccessToken" | "getIdentity" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
   >;
-  openApiMcpClient: Pick<
-    OpenApiMcpClient,
-    "callTool" | "close" | "listTools" | "isConnected"
-  >;
+  openApiMcpClient: Pick<OpenApiMcpClient, "callTool" | "close" | "listTools" | "isConnected">;
   registerTdeiOpenApiTools: typeof registerTdeiOpenApiTools;
   binaryDownloads?: Pick<BinaryTdeiDownloads, "download">;
 }
@@ -119,7 +131,7 @@ export async function createServer(
   const server = new McpServer(
     {
       name: "tdei-mcp",
-      version: "0.1.0",
+      version: BUILD.serverVersion,
     },
     {
       instructions: TDEI_LLM_CACHE_INSTRUCTIONS,
@@ -139,34 +151,31 @@ export async function createServer(
   // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
   // generated tools use the in-process OpenAPI provider.
   const semanticModule = new SemanticIntentModule({
-    operations: new HttpTdeiOperations(
-      getConfig().apiUrl,
-      fetch,
-      15_000,
-      {
-        tokenProvider: () => auth.getAccessToken(),
-        allowedAssetKinds: new Set(["local_path"]),
-      },
-    ),
+    operations: new HttpTdeiOperations(getConfig().apiUrl, fetch, 15_000, {
+      tokenProvider: () => auth.getAccessToken(),
+      allowedAssetKinds: new Set(["local_path"]),
+    }),
     places: createConfiguredPlaceResolver(getConfig()),
+    ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
   registerSemanticTools(server, semanticModule);
 
   server.registerTool(
     "tdei_sso_login",
     {
-      description:
-        "Start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
+      description: "Start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
       inputSchema: z.object({}),
     },
     async () => {
       try {
         if (auth.getStatus().authenticated) {
           return {
-            content: [{
-              type: "text",
-              text: "TDEI SSO session is already authenticated.",
-            }],
+            content: [
+              {
+                type: "text",
+                text: "TDEI SSO session is already authenticated.",
+              },
+            ],
           };
         }
 
@@ -178,22 +187,23 @@ export async function createServer(
             await openApiToolsLifecycle.load();
           })
           .catch((error) => {
-            console.error(
-              "[auth] SSO login did not complete:",
-              error instanceof Error ? error.message : String(error),
-            );
+            console.error("[auth] SSO login did not complete:", error instanceof Error ? error.message : String(error));
           });
 
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({
-                status: "login_pending",
-                loginUrl: login.loginUrl,
-                callbackUrl: login.callbackUrl,
-                message: "Open loginUrl in your browser to sign in to TDEI.",
-              }, null, 2),
+              text: JSON.stringify(
+                {
+                  status: "login_pending",
+                  loginUrl: login.loginUrl,
+                  callbackUrl: login.callbackUrl,
+                  message: "Open loginUrl in your browser to sign in to TDEI.",
+                },
+                null,
+                2,
+              ),
             },
           ],
         };
@@ -209,7 +219,10 @@ export async function createServer(
       description:
         "Complete a pending TDEI SSO login using the final callback URL when the browser cannot reach the local callback listener.",
       inputSchema: z.object({
-        callbackUrl: z.string().url().describe("The complete final http://127.0.0.1 callback URL from the browser address bar."),
+        callbackUrl: z
+          .string()
+          .url()
+          .describe("The complete final http://127.0.0.1 callback URL from the browser address bar."),
       }),
     },
     async ({ callbackUrl }) => {
@@ -225,7 +238,6 @@ export async function createServer(
     },
   );
 
-
   server.registerTool(
     "tdei_auth_status",
     {
@@ -235,12 +247,13 @@ export async function createServer(
     },
     async (_args) => {
       const status = auth.getStatus();
+      const identity = typeof auth.getIdentity === "function" ? auth.getIdentity() : undefined;
 
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(status, null, 2),
+            text: JSON.stringify(identity ? { ...status, identity } : status, null, 2),
           },
         ],
       };
@@ -271,8 +284,7 @@ export async function createServer(
   server.registerTool(
     "tdei_test_authentication",
     {
-      description:
-        "Check whether the connector currently has a usable TDEI SSO access token.",
+      description: "Check whether the connector currently has a usable TDEI SSO access token.",
       inputSchema: z.object({}),
     },
     async (_args) => {
@@ -288,10 +300,7 @@ export async function createServer(
           ],
         };
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : String(error);
+        const message = error instanceof Error ? error.message : String(error);
 
         if (message === "TDEI_SSO_REQUIRED") {
           return {
@@ -299,8 +308,7 @@ export async function createServer(
             content: [
               {
                 type: "text",
-                text:
-                  "TDEI SSO login is required. Call tdei_sso_login and open the returned URL.",
+                text: `TDEI SSO login is required. ${signInText()}`,
               },
             ],
           };
@@ -341,12 +349,17 @@ export async function createServer(
           content: [
             {
               type: "text",
-              text: JSON.stringify({
-                status: "logout_pending",
-                logoutUrl: logout.logoutUrl,
-                callbackUrl: logout.callbackUrl,
-                message: "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the OpenAPI tool session have already been cleared.",
-              }, null, 2),
+              text: JSON.stringify(
+                {
+                  status: "logout_pending",
+                  logoutUrl: logout.logoutUrl,
+                  callbackUrl: logout.callbackUrl,
+                  message:
+                    "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the OpenAPI tool session have already been cleared.",
+                },
+                null,
+                2,
+              ),
             },
           ],
         };
@@ -358,8 +371,7 @@ export async function createServer(
   server.registerTool(
     "tdei_load_api_tools",
     {
-      description:
-        "Authenticate with TDEI and load all OpenAPI-generated TDEI API tools into this MCP server.",
+      description: "Authenticate with TDEI and load all OpenAPI-generated TDEI API tools into this MCP server.",
       inputSchema: z.object({}),
     },
     async () => {
@@ -422,10 +434,7 @@ export async function createServer(
   try {
     await openApiToolsLifecycle.load();
   } catch (error) {
-    console.error(
-      "[openapi-tools] initial discovery failed:",
-      error instanceof Error ? error.message : String(error),
-    );
+    console.error("[openapi-tools] initial discovery failed:", error instanceof Error ? error.message : String(error));
   }
 
   return server;

@@ -17,18 +17,14 @@ export type TdeiOpenApiToolCall = OpenApiToolCall;
 export type TdeiOpenApiToolRegistrationResult = OpenApiToolRegistrationResult;
 export { sanitizeJsonSchema };
 
-const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
-  "authenticate",
-  "refreshToken",
-  "ssoRedirect",
-  "ssoLogin",
-  "ssoLogout",
-]);
+const CONNECTOR_MANAGED_AUTH_TOOLS = new Set(["authenticate", "refreshToken", "ssoRedirect", "ssoLogin", "ssoLogout"]);
 
 function truncateResult<T>(result: T): T {
   if (
-    typeof result === "object" && result !== null &&
-    "content" in result && Array.isArray((result as { content: unknown }).content)
+    typeof result === "object" &&
+    result !== null &&
+    "content" in result &&
+    Array.isArray((result as { content: unknown }).content)
   ) {
     const content = (result as { content: Array<Record<string, unknown>> }).content.map((block) => {
       if (block.type === "text" && typeof block.text === "string") {
@@ -53,7 +49,7 @@ export async function registerTdeiOpenApiTools(
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
     isAllowed: (name, tags) => isToolAllowed(name, filter, tags ?? []),
     ...(onCall ? { onCall } : {}),
-    mapResult: (result) => truncateResult(normalizeOpenApiToolResult(result)),
+    mapResult: (toolResult) => truncateResult(normalizeOpenApiToolResult(toolResult)),
     mapError: formatError,
     logger: (message) => console.error(message),
   });

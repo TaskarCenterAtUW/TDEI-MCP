@@ -35,6 +35,7 @@
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "pnpm@12.6.0",
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:multi": "tsx src/multi-serve.ts",
@@ -44,14 +45,21 @@
     "deploy:node": "bash scripts/deploy-node.sh",
     "deploy:docker": "bash scripts/deploy-docker.sh up",
     "deploy:docker:down": "bash scripts/deploy-docker.sh down",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "pnpm build",
     "test": "node --import tsx --test test/**/*.test.ts",
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",
     "check:stdio": "node --env-file=.env --import tsx scripts/stdio-check.ts",
     "test:smoke": "node --import tsx scripts/smoke-test.ts",
-    "lint": "tsc --noEmit",
-    "prepare": "husky || true"
+    "lint": "tsc --noEmit && oxlint src test scripts && prettier --check src test scripts",
+    "knip": "knip",
+    "prepare": "husky || true",
+    "format": "prettier --write src test scripts",
+    "format:check": "prettier --check src test scripts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=70 --test-coverage-functions=72 test/**/*.test.ts",
+    "audit": "pnpm audit --audit-level=moderate",
+    "secret-scan": "bash scripts/secret-scan.sh",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
@@ -60,8 +68,12 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.1.1",
     "@types/node": "^26.6.6",
     "husky": "^9.1.7",
+    "knip": "^6.44.0",
+    "oxlint": "^1.90.0",
+    "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

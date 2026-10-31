@@ -5,11 +5,7 @@ export interface TokenResponse {
   refresh_expires_in?: number;
 }
 
-export type AuthState =
-  | "signed_out"
-  | "login_pending"
-  | "authenticated"
-  | "logout_pending";
+type AuthState = "signed_out" | "login_pending" | "authenticated" | "logout_pending";
 
 export interface AuthStatus {
   configured: boolean;

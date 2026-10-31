@@ -3,16 +3,9 @@ import { openAsBlob } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, extname, isAbsolute } from "node:path";
 
-type JsonObject = Record<string, unknown>;
+import { ALLOWED_UPLOAD_EXTENSIONS } from "../adapters/direct-multipart-tdei-mutations.js";
 
-export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
-  ".zip",
-  ".json",
-  ".geojson",
-  ".osm",
-  ".osc",
-  ".xml",
-]);
+type JsonObject = Record<string, unknown>;
 
 export async function loadOpenApiDocument(specUrl: string): Promise<JsonObject> {
   const isRemote = /^https?:\/\//i.test(specUrl);
@@ -57,10 +50,7 @@ interface CompiledSpecCacheEntry {
   operations: Map<string, CompiledOperation>;
 }
 
-const compiledSpecCache = new WeakMap<
-  Record<string, unknown>,
-  Map<string, CompiledSpecCacheEntry>
->();
+const compiledSpecCache = new WeakMap<Record<string, unknown>, Map<string, CompiledSpecCacheEntry>>();
 
 interface CompiledOperation {
   method: string;
@@ -106,7 +96,7 @@ export function defaultOperationName(operationId: string): string {
 
 function schemaForParameter(parameter: OpenApiParameter): JsonObject {
   return {
-    ...(parameter.schema ?? {}),
+    ...parameter.schema,
     ...(parameter.description ? { description: parameter.description } : {}),
   };
 }
@@ -119,7 +109,9 @@ function descriptionFor(operation: OpenApiOperation): string | undefined {
   const base = operation.description ?? operation.summary;
   const statuses = responseStatuses(operation);
   const withReturns = statuses.length === 0 ? base : `${base ? `${base} | ` : ""}Returns: ${statuses.join(", ")}`;
-  const tags = Array.isArray(operation.tags) ? operation.tags.filter((t) => typeof t === "string" && t.trim().length > 0) : [];
+  const tags = Array.isArray(operation.tags)
+    ? operation.tags.filter((t) => typeof t === "string" && t.trim().length > 0)
+    : [];
   if (tags.length === 0) return withReturns;
   const prefix = `[${tags.join(", ")}]`;
   if (!withReturns) return prefix;
@@ -129,12 +121,10 @@ function descriptionFor(operation: OpenApiOperation): string | undefined {
 function bodySchema(operation: OpenApiOperation): { mediaType: string; schema: JsonObject } | undefined {
   const content = operation.requestBody?.content;
   if (!content) return undefined;
-  const mediaType = [
-    "application/json",
-    "multipart/form-data",
-    "application/x-www-form-urlencoded",
-    "text/plain",
-  ].find((candidate) => content[candidate]) ?? Object.keys(content)[0];
+  const mediaType =
+    ["application/json", "multipart/form-data", "application/x-www-form-urlencoded", "text/plain"].find(
+      (candidate) => content[candidate],
+    ) ?? Object.keys(content)[0];
   if (!mediaType) return undefined;
   return { mediaType, schema: content[mediaType]?.schema ?? {} };
 }
@@ -202,13 +192,18 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
 
 function uploadMimeType(filePath: string): string {
   switch (extname(filePath).toLowerCase()) {
-    case ".zip": return "application/zip";
-    case ".json": return "application/json";
-    case ".geojson": return "application/geo+json";
+    case ".zip":
+      return "application/zip";
+    case ".json":
+      return "application/json";
+    case ".geojson":
+      return "application/geo+json";
     case ".osm":
     case ".osc":
-    case ".xml": return "application/xml";
-    default: return "application/octet-stream";
+    case ".xml":
+      return "application/xml";
+    default:
+      return "application/octet-stream";
   }
 }
 
@@ -313,15 +308,14 @@ export class OpenApiMcpClient {
     }
     url.pathname = new URL(path.replace(/^\/+/, ""), `${this.apiUrl.replace(/\/+$/, "")}/`).pathname;
 
-    let buildBody: (() => Promise<BodyInit | undefined>) = async () => undefined;
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- reassigned per request below; module scope would share mutable state across concurrent calls.
+    let buildBody: () => Promise<BodyInit | undefined> = async () => undefined;
     const requestBody = operation.requestBody;
     const selectedBody = requestBody ? bodySchema({ requestBody }) : undefined;
     const isMultipart = selectedBody?.mediaType === "multipart/form-data";
     if (selectedBody) {
       const values = Object.fromEntries(
-        [...operation.bodyPropertyNames]
-          .filter((key) => args[key] !== undefined)
-          .map((key) => [key, args[key]]),
+        [...operation.bodyPropertyNames].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
       if (isMultipart) {
         buildBody = async () => {
@@ -347,9 +341,7 @@ export class OpenApiMcpClient {
         buildBody = async () => form;
       } else if (selectedBody.mediaType === "application/json") {
         headers.set("Content-Type", selectedBody.mediaType);
-        const serialized = JSON.stringify(
-          operation.bodyPropertyNames.has("requestBody") ? args.requestBody : values,
-        );
+        const serialized = JSON.stringify(operation.bodyPropertyNames.has("requestBody") ? args.requestBody : values);
         buildBody = async () => serialized;
       } else {
         headers.set("Content-Type", selectedBody.mediaType);
@@ -379,9 +371,8 @@ export class OpenApiMcpClient {
         }
         const reason = error instanceof Error ? error.message : String(error);
         throw new Error(
-          isMultipart
-            ? `Multipart upload for "${name}" failed after ${attempt} attempt(s): ${reason}`
-            : reason,
+          isMultipart ? `Multipart upload for "${name}" failed after ${attempt} attempt(s): ${reason}` : reason,
+          { cause: error },
         );
       }
     }
@@ -404,10 +395,12 @@ export class OpenApiMcpClient {
       );
     }
     return {
-      content: [{
-        type: "text" as const,
-        text: typeof value === "string" ? value : JSON.stringify(value),
-      }],
+      content: [
+        {
+          type: "text" as const,
+          text: typeof value === "string" ? value : JSON.stringify(value),
+        },
+      ],
     };
   }
 
@@ -454,7 +447,7 @@ export class OpenApiMcpClient {
     for (const [path, pathItemValue] of Object.entries(paths)) {
       if (!isObject(pathItemValue)) continue;
       const sharedParameters = Array.isArray(pathItemValue.parameters)
-        ? pathItemValue.parameters.filter(isObject) as OpenApiParameter[]
+        ? (pathItemValue.parameters.filter(isObject) as OpenApiParameter[])
         : [];
       for (const [method, operationValue] of Object.entries(pathItemValue)) {
         if (!HTTP_METHODS.has(method) || !isObject(operationValue)) continue;
@@ -467,7 +460,7 @@ export class OpenApiMcpClient {
           );
         }
         const ownParameters = Array.isArray(operation.parameters)
-          ? operation.parameters.filter(isObject) as OpenApiParameter[]
+          ? (operation.parameters.filter(isObject) as OpenApiParameter[])
           : [];
         const parameters = [...sharedParameters, ...ownParameters];
         const compiled = compileInputSchema(parameters, operation);

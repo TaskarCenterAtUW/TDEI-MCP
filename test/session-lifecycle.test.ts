@@ -59,7 +59,9 @@ test("SSO login loads API tools and supports calls and logout", async () => {
         return {
           loginUrl: "https://api-dev.tdei.us/api/v1/sso-redirect?test=1",
           callbackUrl: "http://127.0.0.1:8765/callback",
-          completion: completion.then(() => { authenticated = true; }),
+          completion: completion.then(() => {
+            authenticated = true;
+          }),
         };
       },
       async completeSsoLogin(callbackUrl: string) {
@@ -105,11 +107,11 @@ test("SSO login loads API tools and supports calls and logout", async () => {
 
     const login = await client.callTool({ name: "tdei_sso_login", arguments: {} });
     assert.match(login.content[0]?.type === "text" ? login.content[0].text : "", /loginUrl/);
-    const completion = await client.callTool({
+    const completionResult = await client.callTool({
       name: "tdei_sso_complete",
       arguments: { callbackUrl: "http://127.0.0.1:8765/callback?code=test&state=test" },
     });
-    assert.match(completion.content[0]?.type === "text" ? completion.content[0].text : "", /completed/);
+    assert.match(completionResult.content[0]?.type === "text" ? completionResult.content[0].text : "", /completed/);
 
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {
@@ -149,8 +151,12 @@ test("signed-out server remains available for SSO login", async () => {
           completion: neverCompletes,
         };
       },
-      async completeSsoLogin() { throw new Error("No TDEI SSO login is pending"); },
-      async getAccessToken() { throw new Error("TDEI_SSO_REQUIRED"); },
+      async completeSsoLogin() {
+        throw new Error("No TDEI SSO login is pending");
+      },
+      async getAccessToken() {
+        throw new Error("TDEI_SSO_REQUIRED");
+      },
       getStatus: signedOutStatus,
       getTokenVersion: () => 1,
       async logout() {
@@ -162,8 +168,12 @@ test("signed-out server remains available for SSO login", async () => {
       },
     },
     openApiMcpClient: {
-      async listTools() { throw new Error("TDEI_SSO_REQUIRED"); },
-      async callTool() { throw new Error("TDEI_SSO_REQUIRED"); },
+      async listTools() {
+        throw new Error("TDEI_SSO_REQUIRED");
+      },
+      async callTool() {
+        throw new Error("TDEI_SSO_REQUIRED");
+      },
       async close() {},
     },
     registerTdeiOpenApiTools,

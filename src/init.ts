@@ -15,7 +15,9 @@ function detectCheckout(): LocalCheckout | undefined {
   if (!existsSync(join(root, "src", "index.ts"))) return undefined;
   const indexPath = join(root, "dist", "index.js");
   if (!existsSync(indexPath)) {
-    throw new Error(`dist/index.js not found in ${root} — run "npm ci" and "npm run build" there first, then re-run init`);
+    throw new Error(
+      `dist/index.js not found in ${root} — run "npm ci" and "npm run build" there first, then re-run init`,
+    );
   }
   return { root, indexPath };
 }
@@ -36,9 +38,9 @@ function flag(args: string[], name: string): string | undefined {
 }
 
 const execFn = (cmd: string, args: string[]) =>
-  new Promise<{ stdout: string }>((resolve, reject) => {
+  new Promise<{ stdout: string }>((resolveExec, reject) => {
     execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 300_000 }, (error, stdout) =>
-      error ? reject(error) : resolve({ stdout: String(stdout) })
+      error ? reject(error) : resolveExec({ stdout: String(stdout) }),
     );
   });
 
@@ -47,7 +49,11 @@ async function interactivePrompter() {
   return {
     async chooseEnv() {
       for (;;) {
-        const answer = (await rl.question("TDEI base URL (e.g. https://api-dev.tdei.us — a portal page or endpoint path is fine, only the host is used): ")).trim();
+        const answer = (
+          await rl.question(
+            "TDEI base URL (e.g. https://api-dev.tdei.us — a portal page or endpoint path is fine, only the host is used): ",
+          )
+        ).trim();
         if (answer) return { url: answer };
         console.error("A base URL is required — there is no default.");
       }
@@ -61,7 +67,9 @@ async function interactivePrompter() {
       if (!process.stdin.isTTY) return false;
       return /^y(es)?$/i.test((await rl.question(question)).trim());
     },
-    close() { rl.close(); },
+    close() {
+      rl.close();
+    },
   };
 }
 
@@ -81,7 +89,12 @@ const depsBase = {
 try {
   if (sub === "init" || sub === "switch") {
     const flags = sub === "switch" ? rest.slice(1) : rest;
-    const valued = new Set(["--env", "--url", "--client", ...(sub === "init" ? ["--port", "--env-file", "--remote"] : [])]);
+    const valued = new Set([
+      "--env",
+      "--url",
+      "--client",
+      ...(sub === "init" ? ["--port", "--env-file", "--remote"] : []),
+    ]);
     for (let index = 0; index < flags.length; index += 1) {
       if (!valued.has(flags[index] as string)) throw new Error(`unknown option ${flags[index]}; run tdei-mcp --help`);
       if (!flags[index + 1] || flags[index + 1]?.startsWith("--")) {
@@ -103,7 +116,9 @@ try {
       let serverPath = fileURLToPath(new URL("./index.js", import.meta.url));
       if (serverPath.split(/[\\/]/).includes("_npx")) {
         const packageRoot = dirname(dirname(serverPath));
-        const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as { version: string };
+        const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
+          version: string;
+        };
         const runtimeRoot = process.env.CODEX_HOME || join(homedir(), ".codex");
         const runtime = join(runtimeRoot, "tdei-runtime", packageJson.version);
         await mkdir(runtime, { recursive: true });
@@ -112,16 +127,19 @@ try {
         await cp(join(packageRoot, "package.json"), join(runtime, "package.json"));
         serverPath = join(runtime, "dist", "index.js");
       }
-      await runInit({ ...depsBase, prompter }, {
-        serverPath,
-        ...(envFlag ? { env: envFlag } : {}),
-        ...(urlFlag ? { url: urlFlag } : {}),
-        ...(remoteFlag ? { remote: remoteFlag } : {}),
-        ...(envFileFlag ? { envFile: resolve(envFileFlag) } : {}),
-        ...(clientFlag ? { client: clientFlag as ClientName } : {}),
-        ...(portFlag === undefined ? {} : { port: assertPort(portFlag) }),
-        ...(local ? { local } : {}),
-      });
+      await runInit(
+        { ...depsBase, prompter },
+        {
+          serverPath,
+          ...(envFlag ? { env: envFlag } : {}),
+          ...(urlFlag ? { url: urlFlag } : {}),
+          ...(remoteFlag ? { remote: remoteFlag } : {}),
+          ...(envFileFlag ? { envFile: resolve(envFileFlag) } : {}),
+          ...(clientFlag ? { client: clientFlag as ClientName } : {}),
+          ...(portFlag === undefined ? {} : { port: assertPort(portFlag) }),
+          ...(local ? { local } : {}),
+        },
+      );
     } finally {
       prompter.close();
     }
@@ -131,11 +149,14 @@ try {
       const envFlag = flag(rest, "--env");
       const urlFlag = flag(rest, "--url");
       const clientFlag = flag(rest, "--client");
-      await runSwitch({ ...depsBase, prompter }, {
-        ...(envFlag ? { env: envFlag } : {}),
-        ...(urlFlag ? { url: urlFlag } : {}),
-        ...(clientFlag ? { client: clientFlag as ClientName } : {}),
-      });
+      await runSwitch(
+        { ...depsBase, prompter },
+        {
+          ...(envFlag ? { env: envFlag } : {}),
+          ...(urlFlag ? { url: urlFlag } : {}),
+          ...(clientFlag ? { client: clientFlag as ClientName } : {}),
+        },
+      );
     } finally {
       prompter.close();
     }

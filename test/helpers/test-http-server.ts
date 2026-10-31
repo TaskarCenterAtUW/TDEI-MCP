@@ -13,8 +13,5 @@ export function serveTestHttp(options: HttpServeOptions = {}): Promise<{
   close(): Promise<void>;
   url: string;
 }> {
-  return serveHttp(
-    { ...options, ssoCallbackListener: false },
-    { port: 0, host: "127.0.0.1" },
-  );
+  return serveHttp({ ...options, ssoCallbackListener: false }, { port: 0, host: "127.0.0.1" });
 }

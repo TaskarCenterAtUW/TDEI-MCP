@@ -18,10 +18,7 @@ import { getConfig } from "../config.js";
 type AuthSession = Pick<AuthManager, "logout" | "getTokenVersion"> & {
   getAccessToken?: () => Promise<string>;
 };
-type OpenApiSession = Pick<
-  OpenApiMcpClient,
-  "close" | "listTools" | "callTool"
->;
+type OpenApiSession = Pick<OpenApiMcpClient, "close" | "listTools" | "callTool">;
 type OpenApiToolRegistrar = typeof registerTdeiOpenApiTools;
 type RegistrarClient = Parameters<OpenApiToolRegistrar>[1];
 type DownloadHandler = Pick<BinaryTdeiDownloads, "download">;
@@ -34,18 +31,10 @@ interface UnknownFilterId {
   id: string;
 }
 
-function unknownFilterIds(
-  filter: EndpointFilter,
-  discoveredNames: string[],
-): UnknownFilterId[] {
+function unknownFilterIds(filter: EndpointFilter, discoveredNames: string[]): UnknownFilterId[] {
   const known = new Set(discoveredNames);
-  const check = (
-    section: "allow" | "deny",
-    ids: string[],
-  ): UnknownFilterId[] =>
-    ids.flatMap((id, index) =>
-      known.has(id) ? [] : [{ section, index, id }],
-    );
+  const check = (section: "allow" | "deny", ids: string[]): UnknownFilterId[] =>
+    ids.flatMap((id, index) => (known.has(id) ? [] : [{ section, index, id }]));
 
   if (filter.mode === "allow") {
     return check("allow", filter.allow);
@@ -62,7 +51,9 @@ type McpCallResult = Awaited<ReturnType<OpenApiSession["callTool"]>>;
 
 function toMcpResult(value: unknown): McpCallResult {
   if (
-    typeof value === "object" && value !== null && "content" in value &&
+    typeof value === "object" &&
+    value !== null &&
+    "content" in value &&
     Array.isArray((value as { content: unknown }).content)
   ) {
     return value as McpCallResult;
@@ -101,11 +92,7 @@ function deniedFor(
   if (filter.mode === "allow") {
     const allowed = new Set(filter.allow);
     for (const name of discoveredNames) {
-      if (
-        !allowed.has(name) &&
-        !CONNECTOR_AUTH_TOOLS.has(name) &&
-        !name.startsWith(BUILTIN_TOOL_PREFIX)
-      ) {
+      if (!allowed.has(name) && !CONNECTOR_AUTH_TOOLS.has(name) && !name.startsWith(BUILTIN_TOOL_PREFIX)) {
         denied.add(name);
       }
     }
@@ -117,8 +104,7 @@ function deniedFor(
 
 export class OpenApiToolsLifecycle {
   private state: "unloaded" | "loading" | "loaded" | "reloading" = "unloaded";
-  private operationQueue: Promise<void> =
-    Promise.resolve();
+  private operationQueue: Promise<void> = Promise.resolve();
   private allToolSchemas = new Map<
     string,
     { description?: string | undefined; inputSchema: unknown; tags?: string[] }
@@ -159,12 +145,12 @@ export class OpenApiToolsLifecycle {
       // Binary downloads return local paths, which are not representable by
       // the generic text-oriented OpenAPI executor. Route those locally.
       if (BinaryTdeiDownloads.isDownloadTool(tool)) {
-        const downloads = this.downloads ?? new BinaryTdeiDownloads({
-          baseUrl: getConfig().apiUrl,
-          ...(this.authSession.getAccessToken
-            ? { tokenProvider: () => this.authSession.getAccessToken!() }
-            : {}),
-        });
+        const downloads =
+          this.downloads ??
+          new BinaryTdeiDownloads({
+            baseUrl: getConfig().apiUrl,
+            ...(this.authSession.getAccessToken ? { tokenProvider: () => this.authSession.getAccessToken!() } : {}),
+          });
         return downloads.download(tool, input, {});
       }
       return this.openApiSession.callTool(tool, input);
@@ -187,9 +173,12 @@ export class OpenApiToolsLifecycle {
     const listed = await this.openApiSession.listTools();
     const discoveredNames = listed.tools.map((tool) => tool.name);
     const tagsByName = new Map<string, string[]>(
-      listed.tools.map((tool) => [tool.name, Array.isArray((tool as { tags?: unknown }).tags)
-        ? ((tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string"))
-        : []]),
+      listed.tools.map((tool) => [
+        tool.name,
+        Array.isArray((tool as { tags?: unknown }).tags)
+          ? (tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string")
+          : [],
+      ]),
     );
     const knownTags = new Set<string>([...tagsByName.values()].flat());
 
@@ -218,14 +207,10 @@ export class OpenApiToolsLifecycle {
 
     const discoveryClient: RegistrarClient = {
       listTools: async () => listed,
-      callTool: (name: string, args: Record<string, unknown>) =>
-        this.openApiSession.callTool(name, args),
+      callTool: (name: string, args: Record<string, unknown>) => this.openApiSession.callTool(name, args),
     };
-    const reg = await this.registrar(
-      this.server,
-      discoveryClient,
-      effectiveFilter,
-      async (tool, input) => toMcpResult(await this.callTool(tool, input)),
+    const reg = await this.registrar(this.server, discoveryClient, effectiveFilter, async (tool, input) =>
+      toMcpResult(await this.callTool(tool, input)),
     );
 
     // Per-call toolSchemas cover newly registered tools only,
@@ -249,20 +234,14 @@ export class OpenApiToolsLifecycle {
     // Offending workflows are skipped one by one; the rest register.
     for (const workflow of cfg.workflows) {
       try {
-        registerWorkflows(
-          this.server,
-          [workflow],
-          {
-            callTool,
-            toolSchemas: this.allToolSchemas,
-            denied,
-            configPath: cfg.path,
-          },
-        );
+        registerWorkflows(this.server, [workflow], {
+          callTool,
+          toolSchemas: this.allToolSchemas,
+          denied,
+          configPath: cfg.path,
+        });
       } catch (error) {
-        console.error(
-          error instanceof Error ? error.message : String(error),
-        );
+        console.error(error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -287,10 +266,7 @@ export class OpenApiToolsLifecycle {
   }
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.operationQueue.then(
-      operation,
-      operation,
-    );
+    const result = this.operationQueue.then(operation, operation);
 
     this.operationQueue = result.then(
       () => undefined,

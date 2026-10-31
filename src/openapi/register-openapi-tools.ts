@@ -1,7 +1,4 @@
-import {
-  fromJsonSchema,
-  type McpServer,
-} from "@modelcontextprotocol/server";
+import { fromJsonSchema, type McpServer } from "@modelcontextprotocol/server";
 
 import type { OpenApiToolDefinition } from "./openapi-mcp-client.js";
 
@@ -35,10 +32,7 @@ export interface OpenApiToolRegistrationResult {
 }
 
 const registeredToolsByServer = new WeakMap<McpServer, Set<string>>();
-const compiledInputSchemas = new WeakMap<
-  object,
-  ReturnType<typeof fromJsonSchema<Record<string, unknown>>>
->();
+const compiledInputSchemas = new WeakMap<object, ReturnType<typeof fromJsonSchema<Record<string, unknown>>>>();
 
 export function sanitizeJsonSchema(node: unknown): unknown {
   if (Array.isArray(node)) {
@@ -50,15 +44,11 @@ export function sanitizeJsonSchema(node: unknown): unknown {
   if (node !== null && typeof node === "object") {
     const record = node as Record<string, unknown>;
     if (record.exclusiveMinimum === true) {
-      record.exclusiveMinimum = typeof record.minimum === "number"
-        ? record.minimum
-        : undefined;
+      record.exclusiveMinimum = typeof record.minimum === "number" ? record.minimum : undefined;
       if (record.exclusiveMinimum === undefined) delete record.exclusiveMinimum;
     }
     if (record.exclusiveMaximum === true) {
-      record.exclusiveMaximum = typeof record.maximum === "number"
-        ? record.maximum
-        : undefined;
+      record.exclusiveMaximum = typeof record.maximum === "number" ? record.maximum : undefined;
       if (record.exclusiveMaximum === undefined) delete record.exclusiveMaximum;
     }
     for (const key of Object.keys(record)) {
@@ -72,13 +62,15 @@ export function sanitizeJsonSchema(node: unknown): unknown {
 function defaultError(error: unknown) {
   return {
     isError: true as const,
-    content: [{
-      type: "text" as const,
-      text: JSON.stringify({
-        code: "OPENAPI_TOOL_ERROR",
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    }],
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          code: "OPENAPI_TOOL_ERROR",
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      },
+    ],
   };
 }
 
@@ -97,14 +89,11 @@ export async function registerOpenApiTools(
     registeredToolsByServer.set(server, registered);
   }
 
-  const toolSchemas = new Map<
-    string,
-    { description?: string | undefined; inputSchema: unknown; tags?: string[] }
-  >();
+  const toolSchemas = new Map<string, { description?: string | undefined; inputSchema: unknown; tags?: string[] }>();
   let skipped = 0;
   for (const tool of listed.tools) {
     const toolTags = Array.isArray((tool as { tags?: unknown }).tags)
-      ? ((tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string"))
+      ? (tool as { tags: unknown[] }).tags.filter((t): t is string => typeof t === "string")
       : [];
     if (hidden.has(tool.name) || !isAllowed(tool.name, toolTags)) {
       skipped += 1;
@@ -145,9 +134,7 @@ export async function registerOpenApiTools(
       },
       async (args) => {
         try {
-          const result = await (options.onCall
-            ? options.onCall(tool.name, args)
-            : client.callTool(tool.name, args));
+          const result = await (options.onCall ? options.onCall(tool.name, args) : client.callTool(tool.name, args));
           return (options.mapResult ? options.mapResult(result) : result) as never;
         } catch (error) {
           return (options.mapError ? options.mapError(error) : defaultError(error)) as never;

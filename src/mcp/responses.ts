@@ -10,10 +10,7 @@ export function jsonResult(data: unknown) {
 }
 
 export function errorResult(error: unknown) {
-  const message =
-    error instanceof Error
-      ? error.message
-      : "Unexpected TDEI error.";
+  const message = error instanceof Error ? error.message : "Unexpected TDEI error.";
 
   return {
     isError: true,

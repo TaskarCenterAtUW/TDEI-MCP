@@ -3,7 +3,9 @@ import type { ResolvedConfig } from "../config.js";
 import type { PlaceResolver } from "../intents/place-resolver.js";
 
 const NO_GEOCODER: PlaceResolver = {
-  async forwardGeocode() { return []; },
+  async forwardGeocode() {
+    return [];
+  },
 };
 
 export function createConfiguredPlaceResolver(

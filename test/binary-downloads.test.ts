@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-  BinaryTdeiDownloads,
-} from "../src/adapters/binary-tdei-downloads.js";
+import { BinaryTdeiDownloads } from "../src/adapters/binary-tdei-downloads.js";
 
 // Byte 0x83 at position 50 reproduces the reported
 // "'utf-8' codec can't decode byte 0x83 in position 50" failure: any path
@@ -45,18 +43,11 @@ test("binary payload with byte 0x83 round-trips without UTF-8 decode", async () 
     outputDir: dir,
   });
 
-  const result = await downloads.download(
-    "getOswFile",
-    { tdei_dataset_id: "yakima-1" },
-    { accessToken: "bearer-A" },
-  );
+  const result = await downloads.download("getOswFile", { tdei_dataset_id: "yakima-1" }, { accessToken: "bearer-A" });
 
   assert.equal(requests.length, 1);
   const request = requests[0] as Request;
-  assert.equal(
-    request.url,
-    "https://api.example.test/api/v1/osw/yakima-1",
-  );
+  assert.equal(request.url, "https://api.example.test/api/v1/osw/yakima-1");
   assert.equal(request.headers.get("Authorization"), "Bearer bearer-A");
   assert.deepEqual(readFileSync(result.path), payload);
   assert.equal(result.bytes, payload.byteLength);
@@ -100,13 +91,11 @@ test("missing ids and HTTP errors surface without touching the child", async () 
     outputDir: dir,
   });
 
-  await assert.rejects(
-    downloads.download("getOswFile", {}, { accessToken: "t" }),
-    /tdei_dataset_id/,
+  await assert.rejects(downloads.download("getOswFile", {}, { accessToken: "t" }), /tdei_dataset_id/);
+  const error = await downloads.download("getOswFile", { tdei_dataset_id: "missing" }, { accessToken: "t" }).then(
+    () => assert.fail("should throw"),
+    (e) => e as Error & { status?: number },
   );
-  const error = await downloads
-    .download("getOswFile", { tdei_dataset_id: "missing" }, { accessToken: "t" })
-    .then(() => assert.fail("should throw"), (e) => e as Error & { status?: number });
   assert.equal(error.status, 404);
 });
 
@@ -165,11 +154,7 @@ test("streaming download resumes with HTTP Range after mid-stream interruption",
     outputDir: dir,
   });
 
-  const result = await downloads.download(
-    "getOswFile",
-    { tdei_dataset_id: "resume-ds" },
-    { accessToken: "tok" },
-  );
+  const result = await downloads.download("getOswFile", { tdei_dataset_id: "resume-ds" }, { accessToken: "tok" });
 
   assert.equal(result.status, "resumed");
   assert.equal(result.attempts, 2);
@@ -211,11 +196,7 @@ test("streaming download restarts from byte 0 when server returns 200 instead of
     outputDir: dir,
   });
 
-  const result = await downloads.download(
-    "getOswFile",
-    { tdei_dataset_id: "restart-ds" },
-    { accessToken: "tok" },
-  );
+  const result = await downloads.download("getOswFile", { tdei_dataset_id: "restart-ds" }, { accessToken: "tok" });
 
   assert.equal(result.status, "restarted");
   assert.equal(result.attempts, 2);

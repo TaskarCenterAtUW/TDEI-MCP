@@ -6,14 +6,8 @@ import { isAuthCallbackPath, publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI 
 
 test("Keycloak redirect is the loopback callback and the gateway receives the relay", () => {
   assert.equal(REGISTERED_SSO_REDIRECT_URI, "http://127.0.0.1:8765/callback");
-  assert.equal(
-    publicAuthCallbackUrl("https://tdei-mcp.example/"),
-    "https://tdei-mcp.example/auth/callback",
-  );
-  assert.equal(
-    publicAuthCallbackUrl("http://127.0.0.1:3000"),
-    "http://127.0.0.1:3000/auth/callback",
-  );
+  assert.equal(publicAuthCallbackUrl("https://tdei-mcp.example/"), "https://tdei-mcp.example/auth/callback");
+  assert.equal(publicAuthCallbackUrl("http://127.0.0.1:3000"), "http://127.0.0.1:3000/auth/callback");
   assert.equal(isAuthCallbackPath("/auth/callback", "tdei-core-dev"), true);
   assert.equal(isAuthCallbackPath("/tdei-core-dev/auth/callback", "tdei-core-dev"), true);
   assert.equal(isAuthCallbackPath("/other/auth/callback", "tdei-core-dev"), false);

@@ -2,10 +2,7 @@ import { createServer as createNodeServer, type IncomingMessage, type ServerResp
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 
-import {
-  createOpenApiMcpServer,
-  type OpenApiMcpServerOptions,
-} from "./create-openapi-mcp-server.js";
+import { createOpenApiMcpServer, type OpenApiMcpServerOptions } from "./create-openapi-mcp-server.js";
 import { loadOpenApiDocument } from "./openapi-mcp-client.js";
 
 export interface OpenApiHttpOptions {
@@ -32,9 +29,7 @@ export async function bearerHeadersForRequest(request: Request): Promise<Headers
   return { Authorization: authorization };
 }
 
-export async function serveOpenApiStdio(
-  options: OpenApiMcpServerOptions,
-): Promise<void> {
+export async function serveOpenApiStdio(options: OpenApiMcpServerOptions): Promise<void> {
   await serveStdio(async () => (await createOpenApiMcpServer(options)).server);
 }
 
@@ -59,11 +54,7 @@ function sendJson(
   response.end(body);
 }
 
-function applyCors(
-  request: IncomingMessage,
-  response: ServerResponse,
-  allowedOrigins: ReadonlySet<string>,
-): boolean {
+function applyCors(request: IncomingMessage, response: ServerResponse, allowedOrigins: ReadonlySet<string>): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
   if (!allowedOrigins.has(origin)) return false;
@@ -100,7 +91,9 @@ function toWebRequest(request: IncomingMessage, body: string, host: string): Req
 
 async function sendWebResponse(response: ServerResponse, webResponse: Response): Promise<void> {
   const headers: Record<string, string> = {};
-  webResponse.headers.forEach((value, key) => { headers[key] = value; });
+  webResponse.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
   response.writeHead(webResponse.status, headers);
   if (!webResponse.body) {
     response.end();
@@ -130,9 +123,7 @@ export async function serveOpenApiHttp(
   const maximum = httpOptions.maxRequestBytes ?? 1024 * 1024;
   let documentPromise: Promise<Record<string, unknown>> | undefined;
   const loadSpec = async (): Promise<Record<string, unknown>> => {
-    documentPromise ??= serverOptions.loadSpec
-      ? serverOptions.loadSpec()
-      : loadOpenApiDocument(serverOptions.specUrl!);
+    documentPromise ??= serverOptions.loadSpec ? serverOptions.loadSpec() : loadOpenApiDocument(serverOptions.specUrl!);
     return await documentPromise;
   };
 
@@ -154,7 +145,7 @@ export async function serveOpenApiHttp(
             "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Mcp-Session-Id",
             "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
             "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
-            "Vary": "Origin",
+            Vary: "Origin",
           });
           response.end();
           return;
@@ -164,9 +155,7 @@ export async function serveOpenApiHttp(
           return;
         }
 
-        const body = ["GET", "HEAD", "DELETE"].includes(request.method)
-          ? ""
-          : await readBody(request, maximum);
+        const body = ["GET", "HEAD", "DELETE"].includes(request.method) ? "" : await readBody(request, maximum);
         const webRequest = toWebRequest(request, body, request.headers.host ?? host);
         let requestHeaders: HeadersInit | undefined;
         if (httpOptions.headersForRequest) {
@@ -201,9 +190,7 @@ export async function serveOpenApiHttp(
         const context = await createOpenApiMcpServer({
           ...serverOptions,
           loadSpec,
-          ...(requestHeaders
-            ? { headersProvider: async () => requestHeaders }
-            : {}),
+          ...(requestHeaders ? { headersProvider: async () => requestHeaders } : {}),
         });
         const transport = new WebStandardStreamableHTTPServerTransport({
           sessionIdGenerator: undefined,

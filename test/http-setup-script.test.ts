@@ -130,12 +130,7 @@ test("claude-desktop program targets the Desktop config, not the CLI file", () =
     // Claude Desktop rejects remote ({type:"http",url}) entries outright, so the
     // installer must register a stdio mcp-remote bridge instead.
     assert.equal(doc.mcpServers.tdei.command, "npx");
-    assert.deepEqual(doc.mcpServers.tdei.args, [
-      "-y",
-      "mcp-remote",
-      "http://192.168.50.11:8080/mcp",
-      "--allow-http",
-    ]);
+    assert.deepEqual(doc.mcpServers.tdei.args, ["-y", "mcp-remote", "http://192.168.50.11:8080/mcp", "--allow-http"]);
     assert.equal(doc.mcpServers.tdei.type, undefined);
     assert.equal(doc.mcpServers.tdei.url, undefined);
   } finally {
@@ -405,7 +400,14 @@ test("one harness keeps dev, staging, production, and workspace side by side", (
       assert.equal(installedMcpUrl(client, home, "tdei-core-production"), "http://prod:3003/tdei-core-production/mcp");
       assert.equal(installedMcpUrl(client, home, "tdei-workspace"), "http://ws:3004/tdei-workspace/mcp");
 
-      const removed = run([client, "http://ws:3004/tdei-workspace/mcp", "http://127.0.0.1:8765/callback", "8765", "uninstall", "tdei-workspace"]);
+      const removed = run([
+        client,
+        "http://ws:3004/tdei-workspace/mcp",
+        "http://127.0.0.1:8765/callback",
+        "8765",
+        "uninstall",
+        "tdei-workspace",
+      ]);
       assert.match(removed, new RegExp(`Removed tdei-workspace entry \\(${client}\\)`));
       assert.equal(installedMcpUrl(client, home, "tdei-workspace"), undefined);
       assert.equal(installedMcpUrl(client, home, "tdei-core-dev"), updatedDev);
@@ -413,9 +415,23 @@ test("one harness keeps dev, staging, production, and workspace side by side", (
       assert.equal(installedMcpUrl(client, home, "tdei-core-production"), "http://prod:3003/tdei-core-production/mcp");
     }
 
-    const sh = renderClientSetupScript("cursor", "http://192.168.50.11:3001", 8765, "install", "/tdei-core-dev/mcp", "tdei-core-dev");
+    const sh = renderClientSetupScript(
+      "cursor",
+      "http://192.168.50.11:3001",
+      8765,
+      "install",
+      "/tdei-core-dev/mcp",
+      "tdei-core-dev",
+    );
     assert.match(sh, /SERVER_NAME="tdei-core-dev"/);
-    const ps = renderClientSetupPowershell("vscode", "http://192.168.50.11:3002", 8765, "install", "/tdei-core-staging/mcp", "tdei-core-staging");
+    const ps = renderClientSetupPowershell(
+      "vscode",
+      "http://192.168.50.11:3002",
+      8765,
+      "install",
+      "/tdei-core-staging/mcp",
+      "tdei-core-staging",
+    );
     assert.match(ps, /\$ServerName = 'tdei-core-staging'/);
     const overview = renderSetupOverview("http://192.168.50.11:3001", "/tdei-core-dev/mcp", "tdei-core-dev");
     assert.match(overview, /Client entry name: tdei-core-dev/);
@@ -480,14 +496,8 @@ test("update reinstalls and uninstall removes only the tdei entry", () => {
 });
 
 test("resolvePublicBaseUrl prefers env override, then X-Forwarded-Proto", () => {
-  assert.equal(
-    resolvePublicBaseUrl({ hostHeader: "h:1", fallbackHost: "f:2" }),
-    "http://h:1",
-  );
-  assert.equal(
-    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https", fallbackHost: "f:2" }),
-    "https://h",
-  );
+  assert.equal(resolvePublicBaseUrl({ hostHeader: "h:1", fallbackHost: "f:2" }), "http://h:1");
+  assert.equal(resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https", fallbackHost: "f:2" }), "https://h");
   assert.equal(
     resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: ["https", "http"], fallbackHost: "f:2" }),
     "https://h",
@@ -496,20 +506,24 @@ test("resolvePublicBaseUrl prefers env override, then X-Forwarded-Proto", () => 
     resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https, http", fallbackHost: "f:2" }),
     "https://h",
   );
+  assert.equal(resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "gopher", fallbackHost: "f:2" }), "http://h");
+  assert.equal(resolvePublicBaseUrl({ fallbackHost: "f:2" }), "http://f:2");
   assert.equal(
-    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "gopher", fallbackHost: "f:2" }),
-    "http://h",
-  );
-  assert.equal(
-    resolvePublicBaseUrl({ fallbackHost: "f:2" }),
-    "http://f:2",
-  );
-  assert.equal(
-    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "http", envOverride: "https://mcp.example.com/", fallbackHost: "f:2" }),
+    resolvePublicBaseUrl({
+      hostHeader: "h",
+      forwardedProto: "http",
+      envOverride: "https://mcp.example.com/",
+      fallbackHost: "f:2",
+    }),
     "https://mcp.example.com",
   );
   assert.equal(
-    resolvePublicBaseUrl({ hostHeader: "h", forwardedProto: "https", envOverride: "ftp://mcp.example.com", fallbackHost: "f:2" }),
+    resolvePublicBaseUrl({
+      hostHeader: "h",
+      forwardedProto: "https",
+      envOverride: "ftp://mcp.example.com",
+      fallbackHost: "f:2",
+    }),
     "https://h",
   );
 });

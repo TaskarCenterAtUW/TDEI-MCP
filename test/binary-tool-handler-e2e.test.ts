@@ -15,16 +15,18 @@ test("registered getOswFile tool routes locally, child never sees binary", async
   const openApiClient = {
     async listTools() {
       return {
-        tools: [{
-          name: "getOswFile",
-          description: "Streams the dataset zip file.",
-          inputSchema: {
-            type: "object" as const,
-            properties: { tdei_dataset_id: { type: "string" as const } },
-            required: ["tdei_dataset_id"],
-            additionalProperties: false,
+        tools: [
+          {
+            name: "getOswFile",
+            description: "Streams the dataset zip file.",
+            inputSchema: {
+              type: "object" as const,
+              properties: { tdei_dataset_id: { type: "string" as const } },
+              required: ["tdei_dataset_id"],
+              additionalProperties: false,
+            },
           },
-        }],
+        ],
       };
     },
     async callTool(name: string, args: Record<string, unknown>) {
@@ -48,10 +50,21 @@ test("registered getOswFile tool routes locally, child never sees binary", async
 
   const server = await createServer({
     authManager: {
-      async startSsoLogin() { throw new Error("not used"); },
-      async completeSsoLogin() { throw new Error("not used"); },
-      async getAccessToken() { return "test-token"; },
-      getStatus: () => ({ configured: true, authenticated: true, state: "authenticated" as const, loginMethod: "sso" as const }),
+      async startSsoLogin() {
+        throw new Error("not used");
+      },
+      async completeSsoLogin() {
+        throw new Error("not used");
+      },
+      async getAccessToken() {
+        return "test-token";
+      },
+      getStatus: () => ({
+        configured: true,
+        authenticated: true,
+        state: "authenticated" as const,
+        loginMethod: "sso" as const,
+      }),
       async logout() {
         return {
           logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
@@ -84,10 +97,12 @@ test("registered getOswFile tool routes locally, child never sees binary", async
       bytes: 12_345,
       contentType: "application/zip",
     });
-    assert.deepEqual(downloadCalls, [{
-      tool: "getOswFile",
-      input: { tdei_dataset_id: "288715e9-b17f-47b8-837a-eca897987061" },
-    }]);
+    assert.deepEqual(downloadCalls, [
+      {
+        tool: "getOswFile",
+        input: { tdei_dataset_id: "288715e9-b17f-47b8-837a-eca897987061" },
+      },
+    ]);
     assert.deepEqual(childCalls, []);
   } finally {
     await client.close();

@@ -4,7 +4,7 @@
 // so nginx forwards the full prefix: /<slug>/mcp -> 127.0.0.1:<port>/<slug>/mcp
 //
 // Usage (Docker/ACA single image — server{} snippet for conf.d):
-//   npm run build && node scripts/generate-nginx-conf.mjs \
+//   pnpm build && node scripts/generate-nginx-conf.mjs \
 //     --file mcps.json --out nginx/nginx.conf --direct
 // Host-local full config (deploy:node) — runnable via nginx -p <prefix>:
 //   node scripts/generate-nginx-conf.mjs --file mcps.json \
@@ -28,11 +28,7 @@ function flagValue(name) {
 }
 
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 const file = flagValue("--file") ?? process.env.TDEI_MCPS_FILE?.trim() ?? "mcps.json";
@@ -58,7 +54,7 @@ let multiConfig;
 try {
   multiConfig = await import("../dist/multi-config.js");
 } catch {
-  console.error("[nginx] dist/multi-config.js not found — run `npm run build` first.");
+  console.error("[nginx] dist/multi-config.js not found — run `pnpm build` first.");
   process.exit(1);
 }
 
@@ -166,7 +162,7 @@ const resolverBlock = direct
 
 const regenFlags = `--file ${file} --out ${out}${direct ? " --direct" : ""}${standalone ? " --standalone" : ""}${rootDir !== "/usr/share/nginx/html" ? ` --root ${rootDir}` : ""}${listen !== "3000" ? ` --listen ${listen}` : ""}`;
 const conf = `# Auto-generated from ${file} — do not edit by hand.
-# Regenerate: npm run build && node scripts/generate-nginx-conf.mjs ${regenFlags}
+# Regenerate: pnpm build && node scripts/generate-nginx-conf.mjs ${regenFlags}
 #
 # Path-based reverse proxy: each /<slug>/mcp prefix routes to exactly one
 # multi-serve child. The URI is forwarded unchanged because src/http.ts
@@ -220,7 +216,7 @@ ${callbackLocation}
 const serverBody = conf.slice(conf.indexOf("upstream tdei_sso_callback"));
 const output = standalone
   ? `# Auto-generated standalone nginx config — run with: nginx -p <prefix> -c ${out}
-# Regenerate: npm run build && node scripts/generate-nginx-conf.mjs ${regenFlags}
+# Regenerate: pnpm build && node scripts/generate-nginx-conf.mjs ${regenFlags}
 # Log/pid paths are relative so the -p prefix governs them.
 worker_processes 1;
 error_log logs/error.log;
@@ -246,10 +242,14 @@ const serversJson = JSON.stringify(
 
 const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-const serverOptions = servers.map((s) => `<option value="${escapeHtml(s.slug)}">${escapeHtml(s.name)}</option>`).join("\n");
+const serverOptions = servers
+  .map((s) => `<option value="${escapeHtml(s.slug)}">${escapeHtml(s.name)}</option>`)
+  .join("\n");
 const serverCards = servers
   .map(
-    (s) => `<section class="card" aria-label="Server status ${escapeHtml(s.name)}" data-server-card="${escapeHtml(s.slug)}">
+    (
+      s,
+    ) => `<section class="card" aria-label="Server status ${escapeHtml(s.name)}" data-server-card="${escapeHtml(s.slug)}">
 <h2><span class="dot pending" data-dot></span>${escapeHtml(s.name)} <span class="muted" data-state>checking&hellip;</span></h2>
 <p class="muted">MCP endpoint: <code data-mcp>${escapeHtml(s.basePath)}</code> &middot; API: <code>${escapeHtml(s.apiUrl)}</code></p>
 <table>

@@ -7,7 +7,9 @@ import { BinaryTdeiDownloads } from "../src/adapters/binary-tdei-downloads.js";
 function makeAuth() {
   return {
     getTokenVersion: () => 1,
-    async getAccessToken() { return "test-token"; },
+    async getAccessToken() {
+      return "test-token";
+    },
     async logout() {
       return {
         logoutUrl: "https://api-dev.tdei.us/api/v1/sso-logout?test=1",
@@ -28,11 +30,13 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
   const openapi = {
     async listTools() {
       return {
-        tools: [{
-          name: "getOswFile",
-          description: "Streams the dataset zip file.",
-          inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
-        }],
+        tools: [
+          {
+            name: "getOswFile",
+            description: "Streams the dataset zip file.",
+            inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+          },
+        ],
       };
     },
     async callTool(_name: string, _args: Record<string, unknown>) {
@@ -68,11 +72,13 @@ test("lifecycle routes JSON tools to the OpenAPI provider", async () => {
   const openapi = {
     async listTools() {
       return {
-        tools: [{
-          name: "listServices",
-          description: "List TDEI services.",
-          inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
-        }],
+        tools: [
+          {
+            name: "listServices",
+            description: "List TDEI services.",
+            inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+          },
+        ],
       };
     },
     async callTool(name: string, _args: Record<string, unknown>) {

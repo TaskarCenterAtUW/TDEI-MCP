@@ -23,7 +23,8 @@ function unwrapMcpTextJson(value: unknown): unknown {
   if (!Array.isArray(content)) return value;
   const text = content.find(
     (block): block is { type: "text"; text: string } =>
-      typeof block === "object" && block !== null &&
+      typeof block === "object" &&
+      block !== null &&
       (block as { type?: unknown }).type === "text" &&
       typeof (block as { text?: unknown }).text === "string",
   )?.text;
@@ -43,11 +44,7 @@ function declaresFileUpload(schema: unknown): boolean {
       const record = node as Record<string, unknown>;
       if (record["contentMediaType"] === "application/octet-stream") return true;
       const format = record["format"];
-      if (
-        format === "binary" ||
-        format === "binary/octet-stream" ||
-        format === "octet-stream"
-      ) {
+      if (format === "binary" || format === "binary/octet-stream" || format === "octet-stream") {
         return true;
       }
       return Object.values(record).some(visit);
@@ -92,26 +89,17 @@ export async function runWorkflow(
     }) as Record<string, unknown>;
 
     const schemaEntry = deps.toolSchemas.get(step.tool);
-    if (
-      schemaEntry?.inputSchema !== undefined &&
-      schemaEntry?.inputSchema !== null
-    ) {
+    if (schemaEntry?.inputSchema !== undefined && schemaEntry?.inputSchema !== null) {
       if (declaresFileUpload(schemaEntry.inputSchema)) {
         throw new Error(
           `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" uses file upload (multipart) which is not supported in v1`,
         );
       }
-      const validator = fromJsonSchema(
-        schemaEntry.inputSchema as Record<string, unknown>,
-      );
+      const validator = fromJsonSchema(schemaEntry.inputSchema as Record<string, unknown>);
       const validated = await validator["~standard"].validate(resolved);
       if ("issues" in validated && Array.isArray(validated.issues) && validated.issues.length > 0) {
-        const issues = validated.issues
-          .map((issue: { message: string }) => issue.message)
-          .join("; ");
-        throw new Error(
-          `[workflows.${def.name}] step ${step.id}: invalid input for tool "${step.tool}": ${issues}`,
-        );
+        const issues = validated.issues.map((issue: { message: string }) => issue.message).join("; ");
+        throw new Error(`[workflows.${def.name}] step ${step.id}: invalid input for tool "${step.tool}": ${issues}`);
       }
     }
 

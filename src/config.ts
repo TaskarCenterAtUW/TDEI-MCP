@@ -68,22 +68,31 @@ function checkSsoCallbackUrl(value: string, transport: Transport): ConfigError |
   try {
     url = new URL(value);
   } catch {
-    return { var: "TDEI_SSO_CALLBACK_URL", rule: "must be a valid absolute URL", example: "http://127.0.0.1:8765/callback" };
+    return {
+      var: "TDEI_SSO_CALLBACK_URL",
+      rule: "must be a valid absolute URL",
+      example: "http://127.0.0.1:8765/callback",
+    };
   }
   const isLoopback =
-    url.protocol === "http:" &&
-    url.hostname === "127.0.0.1" &&
-    Boolean(url.port) &&
-    url.pathname === "/callback";
+    url.protocol === "http:" && url.hostname === "127.0.0.1" && Boolean(url.port) && url.pathname === "/callback";
   if (transport === "stdio") {
     if (!isLoopback) {
-      return { var: "TDEI_SSO_CALLBACK_URL", rule: "must use http://127.0.0.1:<port>/callback", example: "http://127.0.0.1:8765/callback" };
+      return {
+        var: "TDEI_SSO_CALLBACK_URL",
+        rule: "must use http://127.0.0.1:<port>/callback",
+        example: "http://127.0.0.1:8765/callback",
+      };
     }
     return undefined;
   }
   const isHttps = url.protocol === "https:";
   if (!isHttps && !isLoopback) {
-    return { var: "TDEI_SSO_CALLBACK_URL", rule: "must use https:// in http mode (http://127.0.0.1:<port>/callback allowed for local dev)", example: "https://mcp.example.com/callback" };
+    return {
+      var: "TDEI_SSO_CALLBACK_URL",
+      rule: "must use https:// in http mode (http://127.0.0.1:<port>/callback allowed for local dev)",
+      example: "https://mcp.example.com/callback",
+    };
   }
   return undefined;
 }
@@ -128,11 +137,7 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   let geocoderUrl: string | undefined;
   const rawGeocoderUrl = process.env.TDEI_GEOCODER_URL?.trim();
   if (rawGeocoderUrl) {
-    const geocoder = readHttpsUrl(
-      "TDEI_GEOCODER_URL",
-      rawGeocoderUrl,
-      "https://nominatim.example.org/search",
-    );
+    const geocoder = readHttpsUrl("TDEI_GEOCODER_URL", rawGeocoderUrl, "https://nominatim.example.org/search");
     if ("error" in geocoder) errors.push(geocoder.error);
     else geocoderUrl = geocoder.value;
   }
@@ -167,8 +172,8 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
       tlsCert: process.env.TDEI_TLS_CERT?.trim() || undefined,
       tlsKey: process.env.TDEI_TLS_KEY?.trim() || undefined,
       geocoderUrl,
-      geocoderUserAgent: process.env.TDEI_GEOCODER_USER_AGENT?.trim() ||
-        "tdei-mcp/0.1 (https://github.com/TaskarCenterAtUW/TDEI-MCP)",
+      geocoderUserAgent:
+        process.env.TDEI_GEOCODER_USER_AGENT?.trim() || "tdei-mcp/0.1 (https://github.com/TaskarCenterAtUW/TDEI-MCP)",
     },
   };
 }

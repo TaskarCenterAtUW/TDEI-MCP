@@ -6,8 +6,14 @@ function memFs(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial));
   return {
     files,
-    readFile: async (p: string) => { const v = files.get(p); if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return v; },
-    writeFile: async (p: string, c: string) => { files.set(p, c); },
+    readFile: async (p: string) => {
+      const v = files.get(p);
+      if (v === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return v;
+    },
+    writeFile: async (p: string, c: string) => {
+      files.set(p, c);
+    },
     mkdir: async (_p: string) => {},
   };
 }
@@ -19,12 +25,17 @@ const deps = (fs: ReturnType<typeof memFs>, prompter: unknown) => ({
   isPortFree: async () => true,
   ...fs,
   prompter,
-  log: (m: string) => { logs.push(m); },
+  log: (m: string) => {
+    logs.push(m);
+  },
 });
 
 test("runInit writes codex entry end to end", async () => {
   const fs = memFs();
-  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node" });
+  const summary = await runInit(
+    deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never,
+    { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node" },
+  );
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.client, "codex");
   assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /api-dev\.tdei\.us/);
@@ -45,19 +56,26 @@ test("runInit configures Codex to launch with the selected environment file", as
   let verifiedEntry: { args: string[]; env: Record<string, string> } | undefined;
   const d = {
     ...deps(fs, {
-      chooseEnv: async () => { throw new Error("environment prompt should not run"); },
+      chooseEnv: async () => {
+        throw new Error("environment prompt should not run");
+      },
       chooseClient: async () => "codex" as const,
     }),
-    verify: async (entry: { args: string[]; env: Record<string, string> }) => { verifiedEntry = entry; },
+    verify: async (entry: { args: string[]; env: Record<string, string> }) => {
+      verifiedEntry = entry;
+    },
   };
 
-  const summary = await runInit(d as never, {
-    client: "codex",
-    envFile: "/repo/.env.dev",
-    home: "/h",
-    local: { root: "/repo", indexPath: "/repo/dist/index.js" },
-    nodePath: "/usr/bin/node",
-  } as never);
+  const summary = await runInit(
+    d as never,
+    {
+      client: "codex",
+      envFile: "/repo/.env.dev",
+      home: "/h",
+      local: { root: "/repo", indexPath: "/repo/dist/index.js" },
+      nodePath: "/usr/bin/node",
+    } as never,
+  );
 
   assert.equal(summary.apiUrl, "https://api-dev.tdei.us");
   assert.equal(summary.callbackUrl, "http://127.0.0.1:8765/callback");
@@ -66,23 +84,23 @@ test("runInit configures Codex to launch with the selected environment file", as
   const toml = fs.files.get("/h/.codex/config.toml") ?? "";
   assert.match(toml, /--env-file=\/repo\/\.env\.dev/);
   assert.doesNotMatch(toml, /TDEI_API_URL/);
-  await assert.rejects(
-    runSwitch(d as never, { client: "codex", env: "stage", home: "/h" }),
-    /uses --env-file/,
-  );
+  await assert.rejects(runSwitch(d as never, { client: "codex", env: "stage", home: "/h" }), /uses --env-file/);
 });
 
 test("runInit rejects conflicting env-file selection flags", async () => {
   const fs = memFs({ "/repo/.env.dev": "TDEI_API_URL=https://api-dev.tdei.us\n" });
   await assert.rejects(
-    runInit(deps(fs, {}) as never, {
-      client: "codex",
-      env: "dev",
-      envFile: "/repo/.env.dev",
-      home: "/h",
-      serverPath: "/repo/dist/index.js",
-      nodePath: "/usr/bin/node",
-    } as never),
+    runInit(
+      deps(fs, {}) as never,
+      {
+        client: "codex",
+        env: "dev",
+        envFile: "/repo/.env.dev",
+        home: "/h",
+        serverPath: "/repo/dist/index.js",
+        nodePath: "/usr/bin/node",
+      } as never,
+    ),
     /--env-file cannot be combined with --env, --url, or --port/,
   );
 });
@@ -90,7 +108,13 @@ test("runInit rejects conflicting env-file selection flags", async () => {
 test("runInit custom prints manual and writes nothing", async () => {
   logs.length = 0;
   const fs = memFs();
-  const summary = await runInit(deps(fs, { chooseEnv: async () => ({ url: "https://example.com/" }), chooseClient: async () => "custom" as const }) as never, { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 9999 });
+  const summary = await runInit(
+    deps(fs, {
+      chooseEnv: async () => ({ url: "https://example.com/" }),
+      chooseClient: async () => "custom" as const,
+    }) as never,
+    { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 9999 },
+  );
   assert.equal(summary.callbackUrl, "http://127.0.0.1:9999/callback");
   assert.deepEqual([...fs.files.keys()], ["/h/.tdei-mcp/tdei.config.json"]);
   assert.match(logs.join("\n"), /Manual MCP setup/);
@@ -101,10 +125,13 @@ test("runInit custom prints manual and writes nothing", async () => {
 test("runInit prints Claude Desktop config-drop recovery", async () => {
   logs.length = 0;
   const fs = memFs();
-  const summary = await runInit(deps(fs, {
-    chooseEnv: async () => ({ env: "dev" }),
-    chooseClient: async () => "claude" as const,
-  }) as never, { home: "/h", cwd: "/repo", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node" });
+  const summary = await runInit(
+    deps(fs, {
+      chooseEnv: async () => ({ env: "dev" }),
+      chooseClient: async () => "claude" as const,
+    }) as never,
+    { home: "/h", cwd: "/repo", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node" },
+  );
   assert.equal(summary.client, "claude");
   assert.match(logs.join("\n"), /may rewrite claude_desktop_config\.json/);
   assert.match(logs.join("\n"), /node dist\/index\.js init --client claude --env-file \.env\.dev/);
@@ -119,7 +146,10 @@ test("clientConfigDropHint covers vscode without claiming a Desktop rewrite", ()
 
 test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   const fs = memFs();
-  await runInit(deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never, { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 8765 });
+  await runInit(
+    deps(fs, { chooseEnv: async () => ({ env: "dev" }), chooseClient: async () => "codex" as const }) as never,
+    { home: "/h", serverPath: "/repo/dist/index.js", nodePath: "/usr/bin/node", port: 8765 },
+  );
   logs.length = 0;
   const summary = await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
   assert.equal(summary.apiUrl, "https://api-stage.tdei.us");
@@ -127,7 +157,10 @@ test("runSwitch rewrites API URL, keeps port, demands restart", async () => {
   assert.doesNotMatch(fs.files.get("/h/.codex/config.toml") ?? "", /TDEI_SPEC_URL/);
   assert.match(logs.join("\n"), /TDEI-MCP  ·  Codex Desktop  ·  environment updated/);
   assert.match(logs.join("\n"), /may rewrite ~\/\.codex\/config\.toml/);
-  await assert.rejects(runSwitch(deps(fs, {}) as never, { client: "claude", env: "prod", home: "/h" }), /no tdei entry found/);
+  await assert.rejects(
+    runSwitch(deps(fs, {}) as never, { client: "claude", env: "prod", home: "/h" }),
+    /no tdei entry found/,
+  );
 });
 
 test("runSwitch preserves Codex launch fields and unrelated settings", async () => {
@@ -178,12 +211,15 @@ test("checkout init writes absolute Node launch config and scaffolds tdei config
     verify: async () => {},
     isPortFree: async () => true,
   };
-  await runInit(d as never, {
-    home: "/h",
-    nodePath: "/usr/bin/node",
-    port: 8765,
-    local: { root: "/repo", indexPath: "/repo/dist/index.js" },
-  } as never);
+  await runInit(
+    d as never,
+    {
+      home: "/h",
+      nodePath: "/usr/bin/node",
+      port: 8765,
+      local: { root: "/repo", indexPath: "/repo/dist/index.js" },
+    } as never,
+  );
 
   const toml = fs.files.get("/h/.codex/config.toml") ?? "";
   assert.match(toml, /command = "\/usr\/bin\/node"/);
@@ -203,15 +239,20 @@ test("failed MCP verification leaves the existing Codex config unchanged", async
       chooseClient: async () => "codex" as const,
       confirm: async () => false,
     }),
-    verify: async () => { throw new Error("initialize failed"); },
+    verify: async () => {
+      throw new Error("initialize failed");
+    },
     isPortFree: async () => true,
   };
   await assert.rejects(
-    runInit(d as never, {
-      home: "/h",
-      serverPath: "/repo/dist/index.js",
-      port: 8765,
-    } as never),
+    runInit(
+      d as never,
+      {
+        home: "/h",
+        serverPath: "/repo/dist/index.js",
+        port: 8765,
+      } as never,
+    ),
     /initialize failed/,
   );
   assert.equal(fs.files.get("/h/.codex/config.toml"), existing);

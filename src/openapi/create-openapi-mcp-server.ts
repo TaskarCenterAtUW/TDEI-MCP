@@ -1,10 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 
-import {
-  defaultOperationName,
-  OpenApiMcpClient,
-  type OpenApiMcpClientOptions,
-} from "./openapi-mcp-client.js";
+import { defaultOperationName, OpenApiMcpClient, type OpenApiMcpClientOptions } from "./openapi-mcp-client.js";
 import {
   registerOpenApiTools,
   type OpenApiToolCall,
@@ -18,8 +14,7 @@ export interface OpenApiMcpServerContext {
   registration: OpenApiToolRegistrationResult;
 }
 
-export interface OpenApiMcpServerOptions
-  extends Omit<OpenApiMcpClientOptions, "operationName"> {
+export interface OpenApiMcpServerOptions extends Omit<OpenApiMcpClientOptions, "operationName"> {
   name: string;
   version: string;
   toolPrefix?: string;
@@ -36,12 +31,8 @@ export interface OpenApiMcpServerOptions
   configure?: (context: OpenApiMcpServerContext) => void | Promise<void>;
 }
 
-export async function createOpenApiMcpServer(
-  options: OpenApiMcpServerOptions,
-): Promise<OpenApiMcpServerContext> {
-  const prefix = options.toolPrefix
-    ? defaultOperationName(options.toolPrefix)
-    : "";
+export async function createOpenApiMcpServer(options: OpenApiMcpServerOptions): Promise<OpenApiMcpServerContext> {
+  const prefix = options.toolPrefix ? defaultOperationName(options.toolPrefix) : "";
   const provider = new OpenApiMcpClient({
     apiUrl: options.apiUrl,
     ...(options.specUrl ? { specUrl: options.specUrl } : {}),
@@ -49,9 +40,7 @@ export async function createOpenApiMcpServer(
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.loadSpec ? { loadSpec: options.loadSpec } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
-    ...(options.allowLocalFileUploads !== undefined
-      ? { allowLocalFileUploads: options.allowLocalFileUploads }
-      : {}),
+    ...(options.allowLocalFileUploads !== undefined ? { allowLocalFileUploads: options.allowLocalFileUploads } : {}),
     operationName: (operationId) => `${prefix}${defaultOperationName(operationId)}`,
   });
   const server = new McpServer({ name: options.name, version: options.version });

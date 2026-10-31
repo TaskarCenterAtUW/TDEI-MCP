@@ -53,7 +53,11 @@ export function setupActionPath(client: SetupClientTarget, action: SetupScriptAc
   return action === "install" ? client : `${action}/${client}`;
 }
 
-function setupUrls(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
+function setupUrls(
+  baseUrl: string,
+  basePath = "/mcp",
+  _gatewaySlug?: string,
+): { origin: string; mcpUrl: string; remoteCallbackUrl: string } {
   const origin = baseUrl.replace(/\/$/, "");
   const prefix = normalizeBasePath(basePath);
   return {

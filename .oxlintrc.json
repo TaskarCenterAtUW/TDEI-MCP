@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "off",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-explicit-any": "warn",
+    "no-unused-vars": "error",
+    "no-array-sort": "off",
+    "no-underscore-dangle": ["error", { "allow": ["__openApiInit"] }]
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**", "coverage/**"]
+}

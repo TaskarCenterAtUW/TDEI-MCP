@@ -37,13 +37,18 @@ function upsertTomlBlock(toml: string, header: string, body: string): string {
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
     const trimmed = (lines[i] ?? "").trim();
-    if (/^\[.*\]$/.test(trimmed) && trimmed !== "[mcp_servers.tdei.env]") { end = i; break; }
+    if (/^\[.*\]$/.test(trimmed) && trimmed !== "[mcp_servers.tdei.env]") {
+      end = i;
+      break;
+    }
   }
   return [...lines.slice(0, start + 1), ...body.split("\n"), ...lines.slice(end)].join("\n");
 }
 
 function envToToml(env: Record<string, string>): string {
-  return Object.entries(env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join("\n");
+  return Object.entries(env)
+    .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+    .join("\n");
 }
 
 export function codexConfigPath(home: string = homedir()): string {
@@ -65,11 +70,7 @@ export function writeCodexEntry(toml: string, entry: ServerEntry, env: Record<st
 }
 
 export function writeCodexRemoteEntry(toml: string, remoteUrl: string): string {
-  const body = [
-    `url = ${JSON.stringify(remoteUrl)}`,
-    "startup_timeout_sec = 120",
-    "tool_timeout_sec = 120",
-  ].join("\n");
+  const body = [`url = ${JSON.stringify(remoteUrl)}`, "startup_timeout_sec = 120", "tool_timeout_sec = 120"].join("\n");
   return upsertTomlBlock(toml, "[mcp_servers.tdei]", body);
 }
 
@@ -87,7 +88,10 @@ export function readCodexEntry(toml: string): {
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
     const trimmed = (lines[i] ?? "").trim();
-    if (/^\[.*\]$/.test(trimmed) && trimmed !== "[mcp_servers.tdei.env]") { end = i; break; }
+    if (/^\[.*\]$/.test(trimmed) && trimmed !== "[mcp_servers.tdei.env]") {
+      end = i;
+      break;
+    }
   }
   const env: Record<string, string> = {};
   let command: string | undefined;
@@ -123,12 +127,20 @@ export function readCodexEntry(toml: string): {
 }
 
 export function claudeConfigPath(platform: string = process.platform, home: string = homedir()): string {
-  if (platform === "darwin") return join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  if (platform === "win32") return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+  if (platform === "darwin")
+    return join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  if (platform === "win32")
+    return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
   return join(home, ".config", "Claude", "claude_desktop_config.json");
 }
 
-function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, value: unknown, pathForError: string): string {
+function upsertJsonEntry(
+  jsonText: string,
+  rootKey: string,
+  serverKey: string,
+  value: unknown,
+  pathForError: string,
+): string {
   let doc: Record<string, unknown>;
   if (!jsonText.trim()) {
     doc = {};
@@ -136,7 +148,10 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
     try {
       doc = JSON.parse(jsonText) as Record<string, unknown>;
     } catch (error) {
-      throw new Error(`existing Claude config is not valid JSON at ${pathForError}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `existing Claude config is not valid JSON at ${pathForError}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     }
   }
   const root = (doc[rootKey] as Record<string, unknown> | undefined) ?? {};
@@ -144,7 +159,11 @@ function upsertJsonEntry(jsonText: string, rootKey: string, serverKey: string, v
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
-function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): {
+function readJsonEntry(
+  jsonText: string,
+  rootKey: string,
+  serverKey: string,
+): {
   found: boolean;
   env: Record<string, string>;
   command?: string;
@@ -155,10 +174,15 @@ function readJsonEntry(jsonText: string, rootKey: string, serverKey: string): {
   const doc = JSON.parse(jsonText) as Record<string, unknown>;
   const entry = (doc[rootKey] as Record<string, unknown> | undefined)?.[serverKey] as ServerEntry | undefined;
   if (!entry) return { found: false, env: {} };
-  return { found: true, ...entry, env: { ...(entry.env ?? {}) } };
+  return { found: true, ...entry, env: { ...entry.env } };
 }
 
-export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Record<string, string>, pathForError = "claude_desktop_config.json"): string {
+export function writeClaudeEntry(
+  jsonText: string,
+  entry: ServerEntry,
+  env: Record<string, string>,
+  pathForError = "claude_desktop_config.json",
+): string {
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", { ...entry, env }, pathForError);
 }
 
@@ -168,13 +192,17 @@ export function writeClaudeEntry(jsonText: string, entry: ServerEntry, env: Reco
  * launch ("Skipped invalid MCP server config entries"). Bridge to the
  * Streamable HTTP endpoint through `mcp-remote` instead.
  */
-export function claudeDesktopStdioEntry(remoteUrl: string): { command: string; args: string[] } {
+function claudeDesktopStdioEntry(remoteUrl: string): { command: string; args: string[] } {
   const args = ["-y", "mcp-remote", remoteUrl];
   if (new URL(remoteUrl).protocol === "http:") args.push("--allow-http");
   return { command: "npx", args };
 }
 
-export function writeClaudeRemoteEntry(jsonText: string, remoteUrl: string, pathForError = "claude_desktop_config.json"): string {
+export function writeClaudeRemoteEntry(
+  jsonText: string,
+  remoteUrl: string,
+  pathForError = "claude_desktop_config.json",
+): string {
   return upsertJsonEntry(jsonText, "mcpServers", "tdei", claudeDesktopStdioEntry(remoteUrl), pathForError);
 }
 
@@ -186,7 +214,12 @@ export function vscodeConfigPath(cwd: string = process.cwd()): string {
   return join(cwd, ".vscode", "mcp.json");
 }
 
-export function writeVscodeEntry(jsonText: string, entry: ServerEntry, env: Record<string, string>, pathForError = "mcp.json"): string {
+export function writeVscodeEntry(
+  jsonText: string,
+  entry: ServerEntry,
+  env: Record<string, string>,
+  pathForError = "mcp.json",
+): string {
   return upsertJsonEntry(jsonText, "servers", "tdei", { ...entry, env }, pathForError);
 }
 

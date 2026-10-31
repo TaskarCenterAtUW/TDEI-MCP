@@ -9,11 +9,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
-      - run: npm run lint
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm knip
+      - run: pnpm audit
+      - name: Secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          # Action already passes --fail; git-source scans enable all
+          # detectors by default (unlike the filesystem workaround in
+          # scripts/secret-scan.sh). Verified-only keeps it low-noise.
+          extra_args: --results verified
+      - run: pnpm test:coverage
+      - run: pnpm test:mutation

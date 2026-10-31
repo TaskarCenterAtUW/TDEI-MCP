@@ -27,6 +27,7 @@ const CALLBACK_SECURITY_HEADERS = {
 
 export function sanitizeAuthErrorDetail(raw: string, maxLength = MAX_AUTH_ERROR_DETAIL_LENGTH): string {
   const withoutTags = raw.replace(/<[^>]*>/g, " ");
+  // oxlint-disable-next-line eslint/no-control-regex -- intentional: strips control chars from untrusted error detail.
   const withoutControl = withoutTags.replace(/[\u0000-\u001f\u007f]+/g, " ");
   const collapsed = withoutControl.replace(/\s+/g, " ").trim();
   if (!collapsed) return "No additional error details provided";
@@ -34,22 +35,79 @@ export function sanitizeAuthErrorDetail(raw: string, maxLength = MAX_AUTH_ERROR_
   return `${collapsed.slice(0, maxLength)}...`;
 }
 
-export function extractJwtExpirationMs(token: string): number | undefined {
+export interface AuthIdentity {
+  subject?: string;
+  username?: string;
+  email?: string;
+  name?: string;
+  roles: string[];
+  groups: string[];
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
   const parts = token.split(".");
   if (parts.length !== 3 || !parts[1]) return undefined;
   try {
     const decoded = Buffer.from(parts[1], "base64url").toString("utf-8");
     const payload = JSON.parse(decoded) as Record<string, unknown>;
-    if (typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > 0) {
-      return payload.exp * 1000;
-    }
+    if (payload && typeof payload === "object") return payload;
   } catch {
     return undefined;
   }
   return undefined;
 }
 
+/** Extract non-sensitive identity claims (email, username, roles) from the SSO JWT. Never returns the token itself. */
+export function extractAuthIdentity(token: string): AuthIdentity | undefined {
+  const payload = decodeJwtPayload(token);
+  if (!payload) return undefined;
+  const roles = new Set<string>();
+  const realmAccess = payload.realm_access as Record<string, unknown> | undefined;
+  for (const role of stringArray(realmAccess?.roles)) roles.add(role);
+  const resourceAccess = payload.resource_access as Record<string, unknown> | undefined;
+  if (resourceAccess && typeof resourceAccess === "object") {
+    for (const client of Object.values(resourceAccess)) {
+      const clientRoles = stringArray((client as Record<string, unknown>)?.roles);
+      for (const role of clientRoles) roles.add(role);
+    }
+  }
+  for (const role of stringArray((payload as Record<string, unknown>).roles)) roles.add(role);
+  const groups = [...stringArray(payload.groups), ...stringArray(payload.group_membership)];
+  const username =
+    typeof payload.preferred_username === "string"
+      ? payload.preferred_username
+      : typeof payload.username === "string"
+        ? payload.username
+        : undefined;
+  const email = typeof payload.email === "string" ? payload.email : undefined;
+  const name = typeof payload.name === "string" ? payload.name : undefined;
+  const subject = typeof payload.sub === "string" ? payload.sub : undefined;
+  if (!username && !email && !subject && roles.size === 0 && groups.length === 0) return undefined;
+  return {
+    ...(subject ? { subject } : {}),
+    ...(username ? { username } : {}),
+    ...(email ? { email } : {}),
+    ...(name ? { name } : {}),
+    roles: [...roles].sort(),
+    groups,
+  };
+}
+
+export function extractJwtExpirationMs(token: string): number | undefined {
+  const payload = decodeJwtPayload(token);
+  if (payload && typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > 0) {
+    return payload.exp * 1000;
+  }
+  return undefined;
+}
+
 function isValidCallbackParam(value: string): boolean {
+  // oxlint-disable-next-line eslint/no-control-regex -- intentional: rejects control chars in OAuth callback params.
   return value.length > 0 && value.length <= MAX_CALLBACK_PARAM_LENGTH && !/[\u0000-\u0020\u007f]/.test(value);
 }
 
@@ -109,6 +167,12 @@ export class AuthManager {
     return this.tokenVersion;
   }
 
+  /** Non-sensitive identity from the current JWT (email, username, roles). Never exposes the token. */
+  getIdentity(): AuthIdentity | undefined {
+    if (!this.accessToken) return undefined;
+    return extractAuthIdentity(this.accessToken);
+  }
+
   getStatus(): AuthStatus {
     const authenticated = this.hasUsableAccessToken();
     return {
@@ -120,7 +184,7 @@ export class AuthManager {
           ? "login_pending"
           : this.pendingLogout
             ? "logout_pending"
-          : "signed_out",
+            : "signed_out",
       loginMethod: "sso",
       expiresAt: this.expiresAt,
     };
@@ -155,32 +219,34 @@ export class AuthManager {
     let server: Server | undefined;
     if (options?.bindCallbackListener ?? true) {
       const listener = createServer(async (request, response) => {
-      const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
+        const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
-      if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
-        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end("Not found");
-        return;
-      }
+        if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
+          response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end("Not found");
+          return;
+        }
 
-      const secFetchSite = request.headers["sec-fetch-site"];
-      const secFetchMode = request.headers["sec-fetch-mode"];
-      if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
-        response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end("Forbidden cross-site callback request");
-        return;
-      }
+        const secFetchSite = request.headers["sec-fetch-site"];
+        const secFetchMode = request.headers["sec-fetch-mode"];
+        if (secFetchSite === "cross-site" && secFetchMode && secFetchMode !== "navigate") {
+          response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end("Forbidden cross-site callback request");
+          return;
+        }
 
-      try {
-        await this.completeSsoLogin(requestUrl.toString());
+        try {
+          await this.completeSsoLogin(requestUrl.toString());
 
-        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end("<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>");
-      } catch (error) {
-        const loginError = error instanceof Error ? error : new Error(String(error));
-        response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-        response.end(sanitizeAuthErrorDetail(loginError.message));
-      }
+          response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end(
+            "<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>",
+          );
+        } catch (error) {
+          const loginError = error instanceof Error ? error : new Error(String(error));
+          response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end(sanitizeAuthErrorDetail(loginError.message));
+        }
       });
 
       try {
@@ -198,7 +264,10 @@ export class AuthManager {
           listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
         });
       } catch (error) {
-        throw new Error(`Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(
+          `Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
       }
       server = listener;
     }
@@ -258,18 +327,21 @@ export class AuthManager {
       "/api/v1/sso-login",
       { code, state, clientId: TDEI_SSO_CLIENT_ID },
       "TDEI SSO login",
-    ).then((tokens) => {
-      this.storeTokens(tokens);
-      this.finishPendingLogin();
-      pending.resolve();
-    }).catch((error: unknown) => {
-      const loginError = error instanceof Error ? error : new Error(String(error));
-      this.finishPendingLogin();
-      pending.reject(loginError);
-      throw loginError;
-    }).finally(() => {
-      this.loginExchangePromise = undefined;
-    });
+    )
+      .then((tokens) => {
+        this.storeTokens(tokens);
+        this.finishPendingLogin();
+        pending.resolve();
+      })
+      .catch((error: unknown) => {
+        const loginError = error instanceof Error ? error : new Error(String(error));
+        this.finishPendingLogin();
+        pending.reject(loginError);
+        throw loginError;
+      })
+      .finally(() => {
+        this.loginExchangePromise = undefined;
+      });
     return this.loginExchangePromise;
   }
 
@@ -322,7 +394,7 @@ export class AuthManager {
       return;
     }
     const jwtExpirationMs = extractJwtExpirationMs(token);
-    this.expiresAt = jwtExpirationMs ?? (Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000);
+    this.expiresAt = jwtExpirationMs ?? Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000;
   }
 
   /**
@@ -340,9 +412,8 @@ export class AuthManager {
     const ttlMs = resolvedOptions.ttlMs ?? DEFAULT_TOKEN_VALIDATION_TTL_MS;
     const apiUrl = getConfig().apiUrl;
     const now = Date.now();
-    const cacheKey = resolvedOptions.cache && this.accessToken
-      ? hashTokenCacheKey(apiUrl, this.accessToken)
-      : undefined;
+    const cacheKey =
+      resolvedOptions.cache && this.accessToken ? hashTokenCacheKey(apiUrl, this.accessToken) : undefined;
 
     if (this.validatedUntil && now < this.validatedUntil) {
       return;
@@ -408,48 +479,53 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
-    const server: Server | undefined = (options?.bindCallbackListener ?? true)
-      ? await new Promise<Server>((resolve, reject) => {
-        const listener = createServer((request, response) => {
-          const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
+    const server: Server | undefined =
+      (options?.bindCallbackListener ?? true)
+        ? await new Promise<Server>((resolve, reject) => {
+            const listener = createServer((request, response) => {
+              const requestUrl = new URL(request.url ?? "/", callbackUrl.origin);
 
-          if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
-            response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-            response.end("Not found");
-            return;
-          }
+              if (request.method !== "GET" || requestUrl.pathname !== callbackUrl.pathname) {
+                response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+                response.end("Not found");
+                return;
+              }
 
-          const providerError = requestUrl.searchParams.get("error");
-          this.finishPendingLogout();
-          if (providerError) {
-            const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
-            rejectCompletion(error);
-            response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-            response.end(sanitizeAuthErrorDetail(error.message));
-            return;
-          }
+              const providerError = requestUrl.searchParams.get("error");
+              this.finishPendingLogout();
+              if (providerError) {
+                const error = new Error(`TDEI SSO logout failed: ${sanitizeAuthErrorDetail(providerError)}`);
+                rejectCompletion(error);
+                response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+                response.end(sanitizeAuthErrorDetail(error.message));
+                return;
+              }
 
-          resolveCompletion();
-          response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-          response.end("<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>");
-        });
+              resolveCompletion();
+              response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+              response.end(
+                "<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>",
+              );
+            });
 
-        const onError = (error: Error) => {
-          listener.off("listening", onListening);
-          listener.close();
-          reject(error);
-        };
-        const onListening = () => {
-          listener.off("error", onError);
-          resolve(listener);
-        };
-        listener.once("error", onError);
-        listener.once("listening", onListening);
-        listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
-      }).catch((error: unknown) => {
-        throw new Error(`Unable to start TDEI SSO logout callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`);
-      })
-      : undefined;
+            const onError = (error: Error) => {
+              listener.off("listening", onListening);
+              listener.close();
+              reject(error);
+            };
+            const onListening = () => {
+              listener.off("error", onError);
+              resolve(listener);
+            };
+            listener.once("error", onError);
+            listener.once("listening", onListening);
+            listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
+          }).catch((error: unknown) => {
+            throw new Error(
+              `Unable to start TDEI SSO logout callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          })
+        : undefined;
 
     const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
     logoutUrl.searchParams.set("redirect_uri", browserRedirectUri(options?.redirectUri, callbackUrl).toString());
@@ -483,12 +559,14 @@ export class AuthManager {
       "/api/v1/refresh-token",
       { refreshToken: this.refreshToken, clientId: TDEI_SSO_CLIENT_ID },
       "TDEI token refresh",
-    ).then((tokens) => {
-      this.storeTokens(tokens);
-      console.error("[auth] token refresh successful");
-    }).finally(() => {
-      this.refreshPromise = undefined;
-    });
+    )
+      .then((tokens) => {
+        this.storeTokens(tokens);
+        console.error("[auth] token refresh successful");
+      })
+      .finally(() => {
+        this.refreshPromise = undefined;
+      });
     return this.refreshPromise;
   }
 
@@ -497,15 +575,12 @@ export class AuthManager {
     if (!isValidCallbackParam(code) || !isValidCallbackParam(state)) {
       throw new Error("TDEI SSO callback contains invalid code or state parameter");
     }
-    return this.requestTokens(
-      "/api/v1/sso-login",
-      { code, state, clientId: TDEI_SSO_CLIENT_ID },
-      "TDEI SSO login",
-    );
+    return this.requestTokens("/api/v1/sso-login", { code, state, clientId: TDEI_SSO_CLIENT_ID }, "TDEI SSO login");
   }
 
   /** Refresh a TDEI token the client presented, without using this process's session. */
   async refreshExternalToken(refreshToken: string): Promise<TokenResponse> {
+    // oxlint-disable-next-line eslint/no-control-regex -- intentional: rejects control chars in presented tokens.
     if (!refreshToken || refreshToken.length > 8192 || /[\u0000-\u0020\u007f]/.test(refreshToken)) {
       throw new Error("TDEI refresh token is invalid");
     }
@@ -525,9 +600,11 @@ export class AuthManager {
     if (!response.ok) {
       const details = sanitizeAuthErrorDetail(await response.text());
       console.error(`[auth] ${action} failed with status ${response.status}`);
-      throw new Error(response.status === 401
-        ? `${action} failed: invalid or expired authorization response`
-        : `${action} failed with status ${response.status}: ${details}`);
+      throw new Error(
+        response.status === 401
+          ? `${action} failed: invalid or expired authorization response`
+          : `${action} failed with status ${response.status}: ${details}`,
+      );
     }
     const tokens = (await response.json()) as TokenResponse;
     if (!tokens?.access_token) throw new Error(`${action} did not return an access token`);
@@ -544,7 +621,7 @@ export class AuthManager {
       return;
     }
     const jwtExpirationMs = extractJwtExpirationMs(tokens.access_token);
-    this.expiresAt = jwtExpirationMs ?? (Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000);
+    this.expiresAt = jwtExpirationMs ?? Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000;
   }
 
   private hasUsableAccessToken(): boolean {

@@ -1,19 +1,11 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import {
-  Client,
-  InMemoryTransport,
-  StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
+import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import * as z from "zod/v4";
 
-import {
-  bearerHeadersForRequest,
-  createOpenApiMcpServer,
-  serveOpenApiHttp,
-} from "../src/openapi/index.js";
+import { bearerHeadersForRequest, createOpenApiMcpServer, serveOpenApiHttp } from "../src/openapi/index.js";
 
 const petSpec = {
   openapi: "3.0.1",
@@ -58,19 +50,14 @@ test("generic factory prefixes, filters, and configures a second API", async () 
     toolPrefix: "pet_",
     excludeOperations: new Set(["pet_purge_all_pets"]),
     configure: ({ server }) => {
-      server.registerTool(
-        "pet_health",
-        { description: "Health", inputSchema: z.object({}) },
-        async () => ({ content: [{ type: "text", text: "ok" }] }),
-      );
+      server.registerTool("pet_health", { description: "Health", inputSchema: z.object({}) }, async () => ({
+        content: [{ type: "text", text: "ok" }],
+      }));
     },
   });
   const client = new Client({ name: "pet-factory-test", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await Promise.all([
-    context.server.connect(serverTransport),
-    client.connect(clientTransport),
-  ]);
+  await Promise.all([context.server.connect(serverTransport), client.connect(clientTransport)]);
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, ["pet_create_pet", "pet_health", "pet_list_pets"]);
@@ -117,7 +104,10 @@ test("generic Streamable HTTP forwards an isolated request bearer", async () => 
     assert.equal(unauthorized.status, 401);
     assert.equal(specificationLoads, 0);
     await client.connect(transport);
-    assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ["list_pets"]);
+    assert.deepEqual(
+      (await client.listTools()).tools.map((tool) => tool.name),
+      ["list_pets"],
+    );
     const result = await client.callTool({ name: "list_pets", arguments: {} });
     assert.equal(result.isError, undefined);
     assert.equal(upstreamRequests.length, 1);
@@ -139,17 +129,20 @@ test("generic stdio serves and executes a second API specification", async () =>
   const client = new Client({ name: "pet-stdio-test", version: "1.0.0" });
   try {
     await client.connect(transport);
-    assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name), ["get_pet"]);
+    assert.deepEqual(
+      (await client.listTools()).tools.map((tool) => tool.name),
+      ["get_pet"],
+    );
     const result = await client.callTool({
       name: "get_pet",
       arguments: { pet_id: "pet/1" },
     });
     const content = result.content[0];
     assert.equal(content?.type, "text");
-    assert.deepEqual(
-      JSON.parse(content?.type === "text" ? content.text : "{}"),
-      { path: "/pets/pet%2F1", apiKey: "stdio-secret" },
-    );
+    assert.deepEqual(JSON.parse(content?.type === "text" ? content.text : "{}"), {
+      path: "/pets/pet%2F1",
+      apiKey: "stdio-secret",
+    });
   } finally {
     await client.close().catch(() => undefined);
   }

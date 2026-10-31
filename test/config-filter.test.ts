@@ -35,8 +35,11 @@ async function listRegisteredTools(server: McpServer): Promise<Array<{ name: str
   const client = new Client({ name: "filter-test", version: "1.0.0" });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(st), client.connect(ct)]);
-  try { return (await client.listTools()).tools; }
-  finally { await client.close(); }
+  try {
+    return (await client.listTools()).tools;
+  } finally {
+    await client.close();
+  }
 }
 
 async function toolNames(server: McpServer): Promise<string[]> {
@@ -45,7 +48,11 @@ async function toolNames(server: McpServer): Promise<string[]> {
 
 test("mode:deny hides cloneDataset but keeps built-ins", async () => {
   const server = new McpServer({ name: "t", version: "1.0.0" });
-  const result = await registerTdeiOpenApiTools(server as never, fakeClient(["listServices", "cloneDataset"]) as never, { mode: "deny", allow: [], deny: ["cloneDataset"] });
+  const result = await registerTdeiOpenApiTools(
+    server as never,
+    fakeClient(["listServices", "cloneDataset"]) as never,
+    { mode: "deny", allow: [], deny: ["cloneDataset"] },
+  );
   assert.equal(result.skipped, 1);
   const names = await toolNames(server);
   assert.ok(names.includes("listServices"));
@@ -54,7 +61,11 @@ test("mode:deny hides cloneDataset but keeps built-ins", async () => {
 
 test("mode:allow shows only listed plus immune auth tools", async () => {
   const server = new McpServer({ name: "t", version: "1.0.0" });
-  await registerTdeiOpenApiTools(server as never, fakeClient(["listServices", "cloneDataset", "authenticate"]) as never, { mode: "allow", allow: ["listServices"], deny: [] });
+  await registerTdeiOpenApiTools(
+    server as never,
+    fakeClient(["listServices", "cloneDataset", "authenticate"]) as never,
+    { mode: "allow", allow: ["listServices"], deny: [] },
+  );
   const names = await toolNames(server);
   assert.ok(names.includes("listServices"));
   assert.ok(!names.includes("cloneDataset"));
@@ -63,7 +74,11 @@ test("mode:allow shows only listed plus immune auth tools", async () => {
 
 test("mode:all registers everything except connector-managed auth", async () => {
   const server = new McpServer({ name: "t", version: "1.0.0" });
-  const result = await registerTdeiOpenApiTools(server as never, fakeClient(["listServices", "ssoLogin"]) as never, { mode: "all", allow: [], deny: [] });
+  const result = await registerTdeiOpenApiTools(server as never, fakeClient(["listServices", "ssoLogin"]) as never, {
+    mode: "all",
+    allow: [],
+    deny: [],
+  });
   assert.equal(result.registered, 1);
   assert.equal(result.skipped, 1);
 });
@@ -75,15 +90,20 @@ test("allowTags registers only tools matching allowed tags and prefixes descript
     { name: "uploadFlex", tags: ["GTFS Flex"], description: "[Deprecated] Upload Flex" },
     { name: "listServices", tags: ["Common APIs", "OSW"], description: "[Common APIs, OSW] List services" },
   ]);
-  const result = await registerTdeiOpenApiTools(
-    server as never,
-    client as never,
-    { mode: "all", allow: [], deny: [], allowTags: ["OSW"], denyTags: [] },
-  );
+  const result = await registerTdeiOpenApiTools(server as never, client as never, {
+    mode: "all",
+    allow: [],
+    deny: [],
+    allowTags: ["OSW"],
+    denyTags: [],
+  });
   assert.equal(result.registered, 2);
   assert.equal(result.skipped, 1);
   const tools = await listRegisteredTools(server);
-  assert.deepEqual(tools.map((t) => t.name), ["uploadOsw", "listServices"]);
+  assert.deepEqual(
+    tools.map((t) => t.name),
+    ["uploadOsw", "listServices"],
+  );
   assert.equal(tools.find((t) => t.name === "uploadOsw")?.description, "[OSW] Upload OSW dataset");
   assert.equal(tools.find((t) => t.name === "listServices")?.description, "[Common APIs, OSW] List services");
 });
@@ -139,7 +159,11 @@ test("loadConfigFile parses allowTags and denyTags and lifecycle enforces tag de
   const auth = {
     getTokenVersion: () => 1,
     async logout() {
-      return { logoutUrl: "https://example.com", callbackUrl: "http://127.0.0.1:8765/cb", completion: Promise.resolve() };
+      return {
+        logoutUrl: "https://example.com",
+        callbackUrl: "http://127.0.0.1:8765/cb",
+        completion: Promise.resolve(),
+      };
     },
   };
   const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);
@@ -182,7 +206,11 @@ test("lifecycle falls back to allow-all when config contains unknown tags", asyn
   const auth = {
     getTokenVersion: () => 1,
     async logout() {
-      return { logoutUrl: "https://example.com", callbackUrl: "http://127.0.0.1:8765/cb", completion: Promise.resolve() };
+      return {
+        logoutUrl: "https://example.com",
+        callbackUrl: "http://127.0.0.1:8765/cb",
+        completion: Promise.resolve(),
+      };
     },
   };
   const lifecycle = new OpenApiToolsLifecycle(server, auth, openapi, registerTdeiOpenApiTools);

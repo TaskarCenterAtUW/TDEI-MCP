@@ -3,26 +3,29 @@ import { stat } from "node:fs/promises";
 import { basename, extname, isAbsolute } from "node:path";
 
 import type { TdeiOperations } from "../intents/operations.js";
-import type {
-  AcceptedJob,
-  DatasetAsset,
-  RequestContext,
-} from "../intents/types.js";
+import type { AcceptedJob, DatasetAsset, RequestContext } from "../intents/types.js";
 import { TdeiHttpError } from "./tdei-http-error.js";
 
-type DatasetMutations = Required<Pick<
-  TdeiOperations,
-  "validateDataset" | "uploadDataset"
->>;
+type DatasetMutations = Required<Pick<TdeiOperations, "validateDataset" | "uploadDataset">>;
 
-export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
-  ".zip",
-  ".json",
-  ".geojson",
-  ".osm",
-  ".osc",
-  ".xml",
-]);
+export const ALLOWED_UPLOAD_EXTENSIONS = new Set([".zip", ".json", ".geojson", ".osm", ".osc", ".xml"]);
+
+export type MultipartFieldValue = string | DatasetAsset | { json: unknown; filename: string };
+
+async function fieldToFormValue(
+  value: MultipartFieldValue,
+  fileFromAsset: (asset: DatasetAsset) => Promise<{ file: Blob; name: string }>,
+): Promise<{ value: string | Blob; filename?: string }> {
+  if (typeof value === "string") return { value };
+  if ("json" in value) {
+    return {
+      value: new Blob([JSON.stringify(value.json)], { type: "application/json" }),
+      filename: value.filename,
+    };
+  }
+  const file = await fileFromAsset(value);
+  return { value: file.file, filename: file.name };
+}
 
 export interface DirectMultipartOptions {
   baseUrl: string;
@@ -42,9 +45,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
   private readonly maxRetries: number;
 
   constructor(private readonly options: DirectMultipartOptions) {
-    this.baseUrl = options.baseUrl.endsWith("/")
-      ? options.baseUrl
-      : `${options.baseUrl}/`;
+    this.baseUrl = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.maxRetries = Math.max(0, options.maxRetries ?? 1);
@@ -97,10 +98,53 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     );
   }
 
+  /** Generic multipart POST for job/file ops beyond validate+upload. Returns parsed JSON or raw text. */
+  async postForm(
+    path: string,
+    fields: Record<string, MultipartFieldValue>,
+    context: RequestContext,
+    params = new URLSearchParams(),
+  ): Promise<unknown> {
+    const url = new URL(path, this.baseUrl);
+    url.search = params.toString();
+    const form = new FormData();
+    for (const [name, fieldValue] of Object.entries(fields)) {
+      const { value, filename } = await fieldToFormValue(fieldValue, (asset) => this.fileFromAsset(asset));
+      if (typeof value === "string") form.set(name, value);
+      else form.set(name, value, filename ?? name);
+    }
+    const bearer = await this.token(context);
+    const response = await this.fetchImpl(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/plain, application/text",
+        Authorization: `Bearer ${bearer}`,
+      },
+      body: form,
+      redirect: "error",
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let body: unknown = text;
+      try {
+        body = JSON.parse(text) as unknown;
+      } catch {}
+      throw new TdeiHttpError(`TDEI request failed with status ${response.status} for ${path}.`, response.status, body);
+    }
+    if (!text) return {};
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  }
+
   private async fileFromAsset(asset: DatasetAsset): Promise<{ file: Blob; name: string }> {
     if (!this.options.allowedAssetKinds.has(asset.kind)) {
-      const accepted = [...this.options.allowedAssetKinds].join(" or ");
-      throw new Error(`This transport accepts only ${accepted} dataset assets.`);
+      throw new Error(
+        `Hosted MCP never accepts file bytes. Run the bytes via curl from the client machine (single hop, any size): curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip". Then poll with tdei_list_jobs. Do not ask for local stdio and do not retry bytes through MCP.`,
+      );
     }
     if (asset.kind === "local_path") {
       if (!isAbsolute(asset.path)) {
@@ -124,21 +168,9 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
         name: resolvedName,
       };
     }
-    if (asset.kind === "inline_base64") {
-      assertAllowedExtension(asset.name);
-      const bytes = Buffer.from(asset.data, "base64");
-      if (bytes.byteLength === 0) {
-        throw new Error(`Inline dataset asset "${asset.name}" is empty (0 bytes).`);
-      }
-      if (bytes.byteLength > 10 * 1024 * 1024) {
-        throw new Error("Inline dataset assets are limited to 10MB.");
-      }
-      return {
-        file: new Blob([bytes], { type: asset.mediaType }),
-        name: asset.name,
-      };
-    }
-    throw new Error("Object-reference dataset assets require an object-store adapter.");
+    throw new Error(
+      "Object-reference dataset assets require an object-store adapter. For any file size, run bytes via curl from the client machine, then poll with tdei_list_jobs.",
+    );
   }
 
   private async token(context: RequestContext): Promise<string> {
@@ -179,15 +211,17 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
           continue;
         }
         const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `TDEI multipart upload failed after ${attempt} attempt(s) for ${path}: ${reason}`,
-        );
+        throw new Error(`TDEI multipart upload failed after ${attempt} attempt(s) for ${path}: ${reason}`, {
+          cause: error,
+        });
       }
 
       const text = await response.text();
       if (!response.ok) {
         let body: unknown = text;
-        try { body = JSON.parse(text) as unknown; } catch {}
+        try {
+          body = JSON.parse(text) as unknown;
+        } catch {}
         const httpError = new TdeiHttpError(
           `TDEI request failed with status ${response.status} (attempt ${attempt}/${totalAttempts}).`,
           response.status,
@@ -204,9 +238,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
       return { jobId, ...(location ? { location } : {}) };
     }
 
-    throw lastError instanceof Error
-      ? lastError
-      : new Error(`TDEI multipart upload failed for ${path}.`);
+    throw lastError instanceof Error ? lastError : new Error(`TDEI multipart upload failed for ${path}.`);
   }
 
   private dataTypePath(dataType: "osw" | "flex" | "pathways"): string {
@@ -228,20 +260,23 @@ function assertAllowedExtension(filePathOrName: string): void {
 function isRetryableNetworkError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   if (error.name === "AbortError" || error.name === "TimeoutError") return true;
-  return /ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|fetch failed|network|socket|stream/i.test(
-    error.message,
-  );
+  return /ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|fetch failed|network|socket|stream/i.test(error.message);
 }
 
 function mimeType(path: string): string {
   switch (extname(path).toLowerCase()) {
-    case ".zip": return "application/zip";
-    case ".json": return "application/json";
-    case ".geojson": return "application/geo+json";
+    case ".zip":
+      return "application/zip";
+    case ".json":
+      return "application/json";
+    case ".geojson":
+      return "application/geo+json";
     case ".osm":
     case ".osc":
-    case ".xml": return "application/xml";
-    default: return "application/octet-stream";
+    case ".xml":
+      return "application/xml";
+    default:
+      return "application/octet-stream";
   }
 }
 

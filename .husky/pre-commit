@@ -1,1 +1,1 @@
-npm run lint && npm test
+pnpm lint && pnpm knip && pnpm audit && pnpm secret-scan && pnpm test:coverage
