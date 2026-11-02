@@ -268,7 +268,7 @@ const html = `<!doctype html>
 <style>
 :root { color-scheme: light dark; }
 body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; line-height: 1.5; }
-main { max-width: 860px; margin: 0 auto; }
+main { max-width: 880px; margin: 0 auto; }
 .card { border: 1px solid #8884; border-radius: 12px; padding: 16px 20px; margin: 16px 0; }
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: baseline; }
 .ok { background: #22a06b; } .bad { background: #d64545; } .pending { background: #c9a227; }
@@ -296,14 +296,29 @@ button { cursor: pointer; }
 .builder { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
 .builder label { display: block; font-size: 13px; font-weight: 600; }
 .builder select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font-size: 14px; border-radius: 8px; border: 1px solid #8886; background: inherit; color: inherit; }
+/* Samples */
+.samples-intro { margin: 8px 0 14px }
+.samples { display: grid; gap: 22px; margin-top: 12px }
+.sample-category h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.9 }
+.sample-category h3 span { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 12px; opacity: 0.6; margin-left: 6px }
+.sample-list { display: grid; gap: 8px }
+.sample-item { position: relative; border: 1px solid #8883; border-radius: 10px; padding: 10px 44px 10px 12px; background: #8881; transition: background 0.15s, border-color 0.15s; cursor: text }
+.sample-item:hover { background: #8882; border-color: #8885 }
+.sample-item code { display: block; font-size: 13px; white-space: normal; word-break: break-word; line-height: 1.45 }
+.sample-item .copy-btn { opacity: 0; top: 6px; right: 6px }
+.sample-item:hover .copy-btn, .sample-item:focus-within .copy-btn, .sample-item .copy-btn:focus-visible { opacity: 1 }
+@media (hover: none) { .sample-item .copy-btn { opacity: 1 } }
+.sample-tag { font-size: 10px; padding: 2px 6px; border-radius: 999px; margin-left: 8px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; display: inline-block }
+.tag-yes { background: #22a06b22; border: 1px solid #22a06b44; color: #22a06b }
+.tag-partial { background: #c9a22722; border: 1px solid #c9a22744; color: #c9a227 }
+@media (prefers-color-scheme: dark) { .tag-yes { color: #6bdcab } .tag-partial { color: #e8c85a } }
+.sample-item code .placeholder { opacity: 0.6; font-style: italic }
 </style>
 </head>
 <body>
 <main>
 <h1>TDEI-MCP gateway</h1>
-<p class="muted">One page for every MCP server behind this gateway. Pick a server below for install commands, or open a server card for its live status.</p>
-
-${serverCards}
+<p class="muted">Install the MCP server on your client first, copy a starter question to test your setup, then check live status for each server at the bottom.</p>
 
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
@@ -357,6 +372,46 @@ ${serverOptions}
 <tbody id="tdei-details"></tbody>
 </table>
 </section>
+
+<section class="card" aria-label="Sample questions">
+<h2>Try these example questions</h2>
+<p class="muted samples-intro">Once installed and logged in via <code>tdei_sso_login</code>, ask your agent any of these. Replace placeholders like <code>[dataset-id]</code> with real values. Top 10 tested use cases only.</p>
+<div class="samples">
+
+<div class="sample-category">
+<h3>Find datasets <span>fully tested – city / bbox / project group</span></h3>
+<div class="sample-list">
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Find all sidewalk (OSW) datasets in Seattle, WA</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Find flex datasets in Seattle, WA</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Find datasets in a bounding box around Seattle, WA</code></div>
+</div>
+</div>
+
+<div class="sample-category">
+<h3>Recent uploads & status <span>tested – uploadedAfter + released / pre-release</span></h3>
+<div class="sample-list">
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Show me datasets uploaded in the last 7 days in Seattle, WA</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Is dataset <span class="placeholder">[dataset-id]</span> released or still pre-released?</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Get full metadata and status table for dataset <span class="placeholder">[dataset-id]</span></code></div>
+</div>
+</div>
+
+<div class="sample-category">
+<h3>Validate & Jobs <span>tested – ZIP validation, job polling</span></h3>
+<div class="sample-list">
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Validate this OSW ZIP: ./my-sidewalk-dataset.zip</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Show all my still-running jobs</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>What's the status of job <span class="placeholder">[job-id]</span>?</code></div>
+<div class="sample-item" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy question">${copyIcons}</button><code>Show my last 5 jobs across all accessible project groups</code></div>
+</div>
+</div>
+
+</div>
+<p class="muted" style="margin-top:16px">Tip: Combine filters – e.g. "Find recent pre-released OSW datasets in Seattle uploaded in last 7 days".</p>
+</section>
+
+${serverCards}
+
 </main>
 <script>
 const TDEI_SERVERS = ${serversJson};
