@@ -142,6 +142,7 @@ if (isEntryPoint()) {
         "mcps.json:",
         '  {"host":"127.0.0.1","basePort":3000,"servers":[{"name":"tdei-core","apiUrl":"https://api-dev.tdei.us"}]}',
         "Ports auto-increment from basePort; specUrl defaults via specUrlForApiUrl; basePath defaults to /<slug>/mcp.",
+        "All servers share one SSO callback (ssoCallbackPort, default 8765); Keycloak registers one redirect URI.",
       ].join("\n"),
     );
     process.exit(0);
