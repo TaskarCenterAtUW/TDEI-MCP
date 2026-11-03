@@ -36,6 +36,36 @@ export function assertHttpsUrl(value: string, name: string): string {
   return url.toString().replace(/\/+$/, "");
 }
 
+/**
+ * Validates TDEI_AUTH_API_URL and reduces it to its https origin, exactly like
+ * TDEI_API_URL. The auth host is a separate variable because a workspace-style
+ * backend (data on ws-backend-*) signs in against a TDEI core host.
+ */
+export function normalizeAuthApiUrl(value: string): string {
+  return normalizeToOrigin(value, "TDEI_AUTH_API_URL");
+}
+
+/** True when the URL points at one of the three TDEI core API hosts. */
+export function isCoreApiOrigin(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  try {
+    const origin = new URL(value.trim()).origin;
+    return Object.values(ENVS).some((entry) => entry.apiUrl === origin);
+  } catch {
+    return false;
+  }
+}
+
+/** https origin of a URL, or undefined when it cannot be parsed. */
+export function originOf(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildCallbackUrl(port: number): string {
   return `http://127.0.0.1:${port}/callback`;
 }
