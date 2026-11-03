@@ -24,6 +24,10 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "apiUrl": { "type": "string" },
+          "authApiUrl": {
+            "type": "string",
+            "description": "SSO/token issuer. Defaults to apiUrl. Backends that do not serve /api/v1/sso-* (e.g. workspace) point this at the TDEI core that issues the bearer."
+          },
           "specUrl": { "type": "string" },
           "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
           "basePath": { "type": "string" },

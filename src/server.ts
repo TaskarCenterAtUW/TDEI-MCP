@@ -113,7 +113,8 @@ export interface ServerDependencies {
   authManager: Pick<
     AuthManager,
     "completeSsoLogin" | "getAccessToken" | "getIdentity" | "getStatus" | "logout" | "startSsoLogin" | "getTokenVersion"
-  >;
+  > &
+    Partial<Pick<AuthManager, "restoreSharedSession" | "exportSessionTokens">>;
   openApiMcpClient: Pick<OpenApiMcpClient, "callTool" | "close" | "listTools" | "isConnected">;
   registerTdeiOpenApiTools: typeof registerTdeiOpenApiTools;
   binaryDownloads?: Pick<BinaryTdeiDownloads, "download">;
@@ -187,6 +188,23 @@ export async function createServer(
               },
             ],
           };
+        }
+
+        // Validity-first shared login: another MCP on the same auth server may
+        // already hold a live session. Reuse it instead of opening a browser.
+        if (typeof auth.restoreSharedSession === "function") {
+          const restored = await auth.restoreSharedSession().catch(() => false);
+          if (restored && auth.getStatus().authenticated) {
+            await openApiToolsLifecycle.load().catch(() => undefined);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "TDEI SSO session is already authenticated (reused shared login).",
+                },
+              ],
+            };
+          }
         }
 
         const login = await auth.startSsoLogin({ preflight: true });

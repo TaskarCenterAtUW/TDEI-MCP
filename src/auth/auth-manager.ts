@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { getConfig, TDEI_SSO_CLIENT_ID } from "../config.js";
+import { clearSharedSession, expiresAtForTokens, loadSharedSession, saveSharedSession } from "./shared-session.js";
 import { preflightSsoLogin } from "./sso-preflight.js";
 import type {
   AuthStatus,
@@ -216,7 +217,7 @@ export class AuthManager {
     // Build and preflight the browser URL before binding a loopback port, so a
     // rejected redirect_uri fails without leaving a listener behind.
     const redirectUri = browserRedirectUri(options?.redirectUri, callbackUrl);
-    const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
+    const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().authApiUrl}/`);
     loginUrl.searchParams.set("redirect_uri", redirectUri.toString());
     loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
     if (expectedState) {
@@ -411,6 +412,48 @@ export class AuthManager {
   }
 
   /**
+   * Export the current session tokens when the login is still usable.
+   * Lets a sibling MCP server sharing the same Keycloak auth server reuse
+   * this login instead of forcing another browser SSO roundtrip.
+   */
+  exportSessionTokens(): TokenResponse | undefined {
+    if (!this.hasUsableAccessToken()) return undefined;
+    const tokens: TokenResponse = { access_token: this.accessToken! };
+    if (this.refreshToken) tokens.refresh_token = this.refreshToken;
+    if (this.expiresAt) {
+      const seconds = Math.floor((this.expiresAt - Date.now()) / 1000);
+      if (seconds > 0) tokens.expires_in = seconds;
+    }
+    return tokens;
+  }
+
+  /**
+   * Adopt the shared persisted login for this auth server when it still
+   * validates server-side. Returns true when this session is authenticated
+   * afterwards (either it already was, or the shared tokens were adopted).
+   * Never throws: any failure means "fall back to the SSO redirect".
+   */
+  async restoreSharedSession(fetchImpl?: typeof fetch): Promise<boolean> {
+    if (this.hasUsableAccessToken()) return true;
+    const apiUrl = getConfig().authApiUrl;
+    const shared = loadSharedSession(apiUrl);
+    if (!shared) return false;
+    this.accessToken = shared.access_token;
+    this.refreshToken = shared.refresh_token ?? this.refreshToken;
+    this.validatedUntil = undefined;
+    this.expiresAt = expiresAtForTokens(shared);
+    try {
+      await this.validateToken(fetchImpl ? { fetchImpl } : undefined);
+      this.tokenVersion += 1;
+      return true;
+    } catch {
+      this.clearTokens();
+      clearSharedSession(apiUrl);
+      return false;
+    }
+  }
+
+  /**
    * Stateless validation for an injected Bearer: local expiry check first
    * (never attempts refresh — the server holds no refresh_token), then one
    * lightweight TDEI probe (cached for up to ttlMs). Throws TDEI_TOKEN_EXPIRED / TDEI_TOKEN_INVALID.
@@ -423,7 +466,7 @@ export class AuthManager {
       typeof options === "function" ? { fetchImpl: options } : (options ?? {});
     const fetchImpl = resolvedOptions.fetchImpl ?? fetch;
     const ttlMs = resolvedOptions.ttlMs ?? DEFAULT_TOKEN_VALIDATION_TTL_MS;
-    const apiUrl = getConfig().apiUrl;
+    const apiUrl = getConfig().authApiUrl;
     const now = Date.now();
     const cacheKey =
       resolvedOptions.cache && this.accessToken ? hashTokenCacheKey(apiUrl, this.accessToken) : undefined;
@@ -482,6 +525,7 @@ export class AuthManager {
       reject(new Error("TDEI SSO login cancelled"));
     }
     this.clearTokens();
+    clearSharedSession(getConfig().authApiUrl);
 
     const callbackUrl = new URL(getConfig().ssoCallbackUrl);
     let resolveCompletion!: () => void;
@@ -540,7 +584,7 @@ export class AuthManager {
           })
         : undefined;
 
-    const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().apiUrl}/`);
+    const logoutUrl = new URL("/api/v1/sso-logout", `${getConfig().authApiUrl}/`);
     logoutUrl.searchParams.set("redirect_uri", browserRedirectUri(options?.redirectUri, callbackUrl).toString());
     logoutUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
 
@@ -605,7 +649,7 @@ export class AuthManager {
   }
 
   private async requestTokens(path: string, body: unknown, action: string): Promise<TokenResponse> {
-    const response = await fetch(new URL(path, `${getConfig().apiUrl}/`), {
+    const response = await fetch(new URL(path, `${getConfig().authApiUrl}/`), {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -631,10 +675,13 @@ export class AuthManager {
     this.tokenVersion += 1;
     if (typeof tokens.expires_in === "number" && tokens.expires_in > 0) {
       this.expiresAt = Date.now() + tokens.expires_in * 1000;
-      return;
+    } else {
+      const jwtExpirationMs = extractJwtExpirationMs(tokens.access_token);
+      this.expiresAt = jwtExpirationMs ?? Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000;
     }
-    const jwtExpirationMs = extractJwtExpirationMs(tokens.access_token);
-    this.expiresAt = jwtExpirationMs ?? Date.now() + DEFAULT_TOKEN_LIFETIME_SECONDS * 1000;
+    // Persist so sibling MCP servers on the same Keycloak auth server can
+    // adopt this login instead of forcing another browser SSO roundtrip.
+    saveSharedSession(getConfig().authApiUrl, tokens, this.expiresAt);
   }
 
   private hasUsableAccessToken(): boolean {

@@ -17,6 +17,8 @@ export interface ConfigError {
 
 export interface ResolvedConfig {
   apiUrl: string;
+  /** Base URL used for SSO + token validation. Defaults to apiUrl; workspace backends that do not serve SSO point this at TDEI core. */
+  authApiUrl: string;
   specUrl: string;
   ssoClientId: string;
   ssoCallbackUrl: string;
@@ -128,6 +130,10 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   const specUrl = readHttpsUrl("TDEI_SPEC_URL", derivedSpec, derivedSpec);
   if ("error" in specUrl) errors.push(specUrl.error);
 
+  const rawAuthApiUrl = process.env.TDEI_AUTH_API_URL?.trim();
+  const authApiUrl = rawAuthApiUrl ? readHttpsUrl("TDEI_AUTH_API_URL", rawAuthApiUrl, DEFAULT_API_URL) : apiUrl;
+  if ("error" in authApiUrl) errors.push(authApiUrl.error);
+
   const transport = resolveTransport();
   if ("error" in transport) errors.push(transport.error);
 
@@ -158,6 +164,7 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
     ok: true,
     config: {
       apiUrl: (apiUrl as { value: string }).value,
+      authApiUrl: (authApiUrl as { value: string }).value,
       specUrl: (specUrl as { value: string }).value,
       ssoClientId: TDEI_SSO_CLIENT_ID,
       ssoCallbackUrl: new URL(process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL).toString(),

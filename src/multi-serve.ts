@@ -43,6 +43,7 @@ function startChild(server: ResolvedMultiMcpServer, extraEnv: NodeJS.ProcessEnv)
         ...process.env,
         ...extraEnv,
         TDEI_API_URL: server.apiUrl,
+        TDEI_AUTH_API_URL: server.authApiUrl,
         TDEI_SPEC_URL: server.specUrl,
         TDEI_HTTP_HOST: server.host,
         TDEI_HTTP_PORT: String(server.port),

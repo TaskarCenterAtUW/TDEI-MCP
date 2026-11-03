@@ -2,7 +2,16 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { DEFAULT_CONFIG_JSON } from "../config-file.js";
-import { specUrlForApiUrl, assertCallbackUrl, assertHttpsUrl, buildCallbackUrl, resolveApiUrl } from "./envs.js";
+import {
+  specUrlForApiUrl,
+  assertCallbackUrl,
+  assertHttpsUrl,
+  buildCallbackUrl,
+  isCoreApiOrigin,
+  normalizeAuthApiUrl,
+  originOf,
+  resolveApiUrl,
+} from "./envs.js";
 import { checkPreflight, type ExecFn } from "./preflight.js";
 import { assertPort, defaultTryPort, portInUseHint } from "./ports.js";
 import { verifyServer } from "./verify.js";
@@ -80,7 +89,13 @@ async function scaffoldConfig(deps: Deps, path: string, local: LocalCheckout | u
 async function loadEnvironmentFile(
   deps: Deps,
   path: string,
-): Promise<{ values: Record<string, string>; apiUrl: string; callbackUrl: string; port: number }> {
+): Promise<{
+  values: Record<string, string>;
+  apiUrl: string;
+  authApiUrl: string | undefined;
+  callbackUrl: string;
+  port: number;
+}> {
   if (!isAbsolute(path)) {
     throw new Error(`--env-file must resolve to an absolute path (received ${path})`);
   }
@@ -110,8 +125,11 @@ async function loadEnvironmentFile(
   }
   const apiUrl = resolveApiUrl({ url: values["TDEI_API_URL"] });
   if (values["TDEI_SPEC_URL"]) assertHttpsUrl(values["TDEI_SPEC_URL"], "TDEI_SPEC_URL");
+  // Validate the auth host up front too: a bad or plain-http TDEI_AUTH_API_URL
+  // would otherwise only fail at the client's first login.
+  const authApiUrl = values["TDEI_AUTH_API_URL"]?.trim() ? normalizeAuthApiUrl(values["TDEI_AUTH_API_URL"]) : undefined;
   const callbackUrl = assertCallbackUrl(values["TDEI_SSO_CALLBACK_URL"] ?? buildCallbackUrl(8765));
-  return { values, apiUrl, callbackUrl, port: Number(new URL(callbackUrl).port) };
+  return { values, apiUrl, authApiUrl, callbackUrl, port: Number(new URL(callbackUrl).port) };
 }
 
 const RULE = "─".repeat(58);
@@ -406,11 +424,30 @@ export async function runSwitch(
     existing.env["TDEI_SPEC_URL"] && existing.env["TDEI_SPEC_URL"] !== derivedSpec
       ? existing.env["TDEI_SPEC_URL"]
       : undefined;
+  const previousApiUrl = existing.env["TDEI_API_URL"];
+  const pinnedAuth = existing.env["TDEI_AUTH_API_URL"]?.trim();
   const env: Record<string, string> = {
     ...existing.env,
     TDEI_API_URL: apiUrl,
     TDEI_CONFIG_PATH: existing.env["TDEI_CONFIG_PATH"] ?? configPath(undefined, home),
   };
+  // TDEI_AUTH_API_URL has to move with TDEI_API_URL. Leaving a stale value
+  // behind would send login to the previous realm and file the shared session
+  // under the wrong auth server.
+  delete env.TDEI_AUTH_API_URL;
+  if (pinnedAuth) {
+    const pinnedOrigin = originOf(pinnedAuth);
+    const followsApi = pinnedOrigin !== undefined && pinnedOrigin === originOf(previousApiUrl);
+    // Dropping the variable makes auth track TDEI_API_URL, which is correct
+    // whenever the pin followed the API or the target is a core host. Only an
+    // explicit pin to a host we cannot map survives.
+    if (!followsApi && !(isCoreApiOrigin(pinnedOrigin) && isCoreApiOrigin(apiUrl))) {
+      env.TDEI_AUTH_API_URL = pinnedAuth;
+      deps.log(
+        `[tdei-mcp] kept TDEI_AUTH_API_URL=${pinnedAuth}: no mapping for ${apiUrl}. Update it if the auth server moved.`,
+      );
+    }
+  }
   delete env.TDEI_SSO_CLIENT_ID;
   if (customSpec) env.TDEI_SPEC_URL = customSpec;
   else delete env.TDEI_SPEC_URL;

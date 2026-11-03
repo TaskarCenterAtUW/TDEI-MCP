@@ -87,6 +87,30 @@ test("runInit configures Codex to launch with the selected environment file", as
   await assert.rejects(runSwitch(d as never, { client: "codex", env: "stage", home: "/h" }), /uses --env-file/);
 });
 
+test("env-file setup validates TDEI_AUTH_API_URL up front", async () => {
+  const fs = memFs({
+    "/repo/.env.bad": "TDEI_API_URL=https://api-dev.tdei.us\nTDEI_AUTH_API_URL=http://api-dev.tdei.us\n",
+    "/repo/.env.good":
+      "TDEI_API_URL=https://ws-backend-dev.azurewebsites.net\nTDEI_AUTH_API_URL=https://api-dev.tdei.us/api/v1\n",
+  });
+  const opts = {
+    client: "codex" as const,
+    home: "/h",
+    local: { root: "/repo", indexPath: "/repo/dist/index.js" },
+    nodePath: "/usr/bin/node",
+  };
+
+  await assert.rejects(
+    runInit(deps(fs, {}) as never, { ...opts, envFile: "/repo/.env.bad" } as never),
+    /TDEI_AUTH_API_URL must use HTTPS/,
+  );
+
+  // A valid auth host is accepted and left in the runtime-loaded env file.
+  const summary = await runInit(deps(fs, {}) as never, { ...opts, envFile: "/repo/.env.good" } as never);
+  assert.equal(summary.apiUrl, "https://ws-backend-dev.azurewebsites.net");
+  assert.match(fs.files.get("/h/.codex/config.toml") ?? "", /--env-file=\/repo\/\.env\.good/);
+});
+
 test("runInit rejects conflicting env-file selection flags", async () => {
   const fs = memFs({ "/repo/.env.dev": "TDEI_API_URL=https://api-dev.tdei.us\n" });
   await assert.rejects(
@@ -198,6 +222,51 @@ test("runSwitch preserves Codex launch fields and unrelated settings", async () 
   assert.match(updated, /\[mcp_servers\.other\]/);
   assert.match(updated, /TDEI_API_URL = "https:\/\/api\.tdei\.us"/);
   assert.equal(fs.files.get("/h/.codex/config.toml.tdei.bak"), original);
+});
+
+test("runSwitch moves the auth host with the API host instead of leaving a stale realm", async () => {
+  // Workspace-style install: data on the ws backend, login pinned to core dev.
+  const original = [
+    "[mcp_servers.tdei]",
+    'command = "node"',
+    'args = ["/x/dist/index.js"]',
+    "",
+    "[mcp_servers.tdei.env]",
+    'TDEI_API_URL = "https://ws-backend-dev.azurewebsites.net"',
+    'TDEI_AUTH_API_URL = "https://api-dev.tdei.us"',
+    'TDEI_SSO_CALLBACK_URL = "http://127.0.0.1:8765/callback"',
+    "",
+  ].join("\n");
+  const fs = memFs({ "/h/.codex/config.toml": original });
+
+  await runSwitch(deps(fs, {}) as never, { client: "codex", env: "stage", home: "/h" });
+
+  const updated = fs.files.get("/h/.codex/config.toml") ?? "";
+  assert.match(updated, /TDEI_API_URL = "https:\/\/api-stage\.tdei\.us"/);
+  // A core pin tracks the target core host, so the variable becomes redundant.
+  assert.doesNotMatch(updated, /TDEI_AUTH_API_URL/);
+});
+
+test("runSwitch keeps an unmappable custom auth host and says so", async () => {
+  const original = [
+    "[mcp_servers.tdei]",
+    'command = "node"',
+    'args = ["/x/dist/index.js"]',
+    "",
+    "[mcp_servers.tdei.env]",
+    'TDEI_API_URL = "https://data.internal.example"',
+    'TDEI_AUTH_API_URL = "https://auth.internal.example"',
+    "",
+  ].join("\n");
+  const fs = memFs({ "/h/.codex/config.toml": original });
+  logs.length = 0;
+
+  await runSwitch(deps(fs, {}) as never, { client: "codex", env: "prod", home: "/h" });
+
+  const updated = fs.files.get("/h/.codex/config.toml") ?? "";
+  assert.match(updated, /TDEI_API_URL = "https:\/\/api\.tdei\.us"/);
+  assert.match(updated, /TDEI_AUTH_API_URL = "https:\/\/auth\.internal\.example"/);
+  assert.match(logs.join("\n"), /kept TDEI_AUTH_API_URL=https:\/\/auth\.internal\.example/);
 });
 
 test("checkout init writes absolute Node launch config and scaffolds tdei config", async () => {

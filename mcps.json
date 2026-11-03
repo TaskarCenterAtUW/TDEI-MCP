@@ -21,6 +21,7 @@
     {
       "name": "tdei-workspace",
       "apiUrl": "https://ws-backend-dev.azurewebsites.net/",
+      "authApiUrl": "https://api-dev.tdei.us",
       "specUrl": "https://ws-backend-dev.azurewebsites.net/openapi.json"
     }
   ]

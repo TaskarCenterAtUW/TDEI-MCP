@@ -133,6 +133,23 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
             };
           }
 
+          // Validity-first shared login: another MCP on the same auth server may
+          // already hold a live session. Reuse it instead of opening a browser.
+          const restoredShared = await auth.restoreSharedSession(options.fetchImpl).catch(() => false);
+          if (restoredShared && auth.getStatus().authenticated) {
+            if (openApiLifecycle && !openApiLifecycle.isLoaded()) {
+              await openApiLifecycle.load().catch(() => undefined);
+            }
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "TDEI SSO session is already authenticated (reused shared login).",
+                },
+              ],
+            };
+          }
+
           const login = await auth.startSsoLogin({
             ...ssoBrowserOptions,
             preflight: true,
