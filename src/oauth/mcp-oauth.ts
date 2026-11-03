@@ -62,6 +62,22 @@ export function oauthChallengeHeader(endpoints: OAuthEndpoints): string {
   return `Bearer realm="tdei-mcp", resource_metadata="${endpoints.protectedResourceMetadata}"`;
 }
 
+/**
+ * Native MCP clients finish OAuth on a custom scheme or a vendor-hosted
+ * callback instead of a loopback listener. Entries are exact about protocol
+ * and host (and optionally a path prefix) so an attacker-chosen host is never
+ * accepted; PKCE plus the sealed, redirect-bound code keep the rest safe.
+ */
+const NATIVE_CLIENT_CALLBACKS: ReadonlyArray<{ protocol: string; host?: string; pathPrefix?: string }> = [
+  // Cursor and VS Code hand any path on their own scheme to the extension.
+  { protocol: "cursor:" },
+  { protocol: "vscode:" },
+  // Claude Desktop: claude://claude.ai/mcp-auth-callback/<client>
+  { protocol: "claude:", host: "claude.ai", pathPrefix: "/mcp-auth-callback" },
+  // Claude web/hosted connectors: https://claude.ai/api/mcp/auth_callback
+  { protocol: "https:", host: "claude.ai", pathPrefix: "/api/mcp/auth_callback" },
+];
+
 export function isAllowedClientRedirect(value: string): boolean {
   let url: URL;
   try {
@@ -70,9 +86,13 @@ export function isAllowedClientRedirect(value: string): boolean {
     return false;
   }
   if (url.username || url.password) return false;
-  if (url.protocol === "cursor:" || url.protocol === "vscode:") return true;
-  if (url.protocol !== "http:") return false;
-  return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  if (url.protocol === "http:") return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  return NATIVE_CLIENT_CALLBACKS.some(
+    (entry) =>
+      entry.protocol === url.protocol &&
+      (entry.host === undefined || entry.host === url.hostname) &&
+      (entry.pathPrefix === undefined || url.pathname.startsWith(entry.pathPrefix)),
+  );
 }
 
 export function codeChallengeS256(verifier: string): string {
@@ -307,7 +327,7 @@ async function authorize(input: OAuthDispatchInput, secure: boolean): Promise<OA
     return textResult(400, "Authorization requests must use response_type=code and S256 PKCE.");
   }
   if (!isAllowedClientRedirect(redirectUri)) {
-    return textResult(400, "redirect_uri must be a localhost or Cursor callback.");
+    return textResult(400, "redirect_uri must be a localhost, Cursor, VS Code, or Claude callback.");
   }
   // Validity-first: when this auth server already holds a validated login
   // (e.g. a sibling dev/staging/prod entry signed in first), seal a
