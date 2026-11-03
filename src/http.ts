@@ -16,6 +16,7 @@ import {
   type SetupScriptAction,
 } from "./http-setup-script.js";
 import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { expiresAtForTokens, saveSharedSession } from "./auth/shared-session.js";
 import {
   dispatchOAuth,
   matchesOAuthPath,
@@ -64,7 +65,7 @@ interface ResolvedHttpOptions {
 }
 
 function buildLoginUrl(): string {
-  const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
+  const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().authApiUrl}/`);
   loginUrl.searchParams.set("redirect_uri", getConfig().ssoCallbackUrl);
   loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
   return loginUrl.toString();
@@ -463,11 +464,35 @@ export async function serveHttp(
             origin: publicBaseUrl,
             slug: gatewaySlug,
             mcpPath: basePath,
-            apiUrl: httpConfig.apiUrl,
+            apiUrl: httpConfig.authApiUrl,
             cookieHeader: request.headers.cookie,
             body,
-            exchangeCode: (code, state) => sessionAuth.exchangeSsoCode(code, state),
+            exchangeCode: async (code, state) => {
+              const tokens = await sessionAuth.exchangeSsoCode(code, state);
+              saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
+              return tokens;
+            },
             refreshToken: (refreshToken) => sessionAuth.refreshExternalToken(refreshToken),
+            // Validity-first: reuse this auth server's validated login
+            // (own session or a sibling MCP's shared session) instead of
+            // forcing another explicit browser SSO roundtrip per MCP.
+            getValidSessionTokens: async () => {
+              try {
+                await sessionAuth.getAccessToken();
+              } catch {
+                const restored = await sessionAuth.restoreSharedSession(options.fetchImpl).catch(() => false);
+                if (!restored) return undefined;
+              }
+              try {
+                await sessionAuth.validateToken({
+                  ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+                  cache: resolved.tokenValidationCache,
+                });
+              } catch {
+                return undefined;
+              }
+              return sessionAuth.exportSessionTokens();
+            },
           });
           if (result) {
             sendOAuth(response, result);
@@ -481,9 +506,13 @@ export async function serveHttp(
               url,
               origin: publicBaseUrl,
               slug: gatewaySlug,
-              apiUrl: httpConfig.apiUrl,
+              apiUrl: httpConfig.authApiUrl,
               cookieHeader: request.headers.cookie,
-              exchangeCode: (code, state) => sessionAuth.exchangeSsoCode(code, state),
+              exchangeCode: async (code, state) => {
+                const tokens = await sessionAuth.exchangeSsoCode(code, state);
+                saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
+                return tokens;
+              },
             });
             if (oauthResult) {
               sendOAuth(response, oauthResult);

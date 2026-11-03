@@ -6,6 +6,8 @@ import { specUrlForApiUrl } from "./init/envs.js";
 export interface MultiMcpServerEntry {
   name: string;
   apiUrl: string;
+  /** SSO/token issuer. Defaults to apiUrl; workspace-style backends that do not serve SSO point this at TDEI core. */
+  authApiUrl?: string;
   specUrl?: string;
   port?: number;
   basePath?: string;
@@ -24,6 +26,7 @@ export interface ResolvedMultiMcpServer {
   name: string;
   slug: string;
   apiUrl: string;
+  authApiUrl: string;
   specUrl: string;
   host: string;
   port: number;
@@ -145,6 +148,10 @@ export function resolveMultiMcp(
       throw new Error(`servers[${index}] (${name}): apiUrl is required`);
     }
     const apiUrl = assertHttpsUrl(entry.apiUrl, `servers[${index}].apiUrl`);
+    const authApiUrl =
+      typeof entry.authApiUrl === "string" && entry.authApiUrl.trim()
+        ? assertHttpsUrl(entry.authApiUrl, `servers[${index}].authApiUrl`)
+        : apiUrl;
     const specUrl =
       typeof entry.specUrl === "string" && entry.specUrl.trim()
         ? assertHttpsUrl(entry.specUrl, `servers[${index}].specUrl`)
@@ -186,6 +193,7 @@ export function resolveMultiMcp(
       name,
       slug,
       apiUrl,
+      authApiUrl,
       specUrl,
       host,
       port,

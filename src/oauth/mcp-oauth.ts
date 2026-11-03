@@ -206,6 +206,13 @@ export interface OAuthDispatchInput {
   body?: string | undefined;
   exchangeCode: (code: string, state: string) => Promise<TokenResponse>;
   refreshToken: (refreshToken: string) => Promise<TokenResponse>;
+  /**
+   * Already-validated session tokens for this auth server, when a sibling
+   * MCP login can be reused. authorize() seals a PKCE-bound code for them
+   * and redirects straight back to the client, skipping the browser SSO
+   * roundtrip. Return undefined to fall back to the normal SSO redirect.
+   */
+  getValidSessionTokens?: (() => Promise<TokenResponse | undefined>) | undefined;
 }
 
 function jsonResult(status: number, body: unknown, extraHeaders?: Record<string, string>): OAuthHttpResult {
@@ -290,7 +297,7 @@ export async function dispatchOAuth(input: OAuthDispatchInput): Promise<OAuthHtt
   return textResult(405, "Method not allowed");
 }
 
-function authorize(input: OAuthDispatchInput, secure: boolean): OAuthHttpResult {
+async function authorize(input: OAuthDispatchInput, secure: boolean): Promise<OAuthHttpResult> {
   const redirectUri = input.url.searchParams.get("redirect_uri")?.trim() ?? "";
   const state = input.url.searchParams.get("state")?.trim() ?? "";
   const challenge = input.url.searchParams.get("code_challenge")?.trim() ?? "";
@@ -301,6 +308,29 @@ function authorize(input: OAuthDispatchInput, secure: boolean): OAuthHttpResult 
   }
   if (!isAllowedClientRedirect(redirectUri)) {
     return textResult(400, "redirect_uri must be a localhost or Cursor callback.");
+  }
+  // Validity-first: when this auth server already holds a validated login
+  // (e.g. a sibling dev/staging/prod entry signed in first), seal a
+  // PKCE-bound code for it and return straight to the client. No browser
+  // SSO roundtrip, no extra explicit login per MCP.
+  if (input.getValidSessionTokens) {
+    let sessionTokens: TokenResponse | undefined;
+    try {
+      sessionTokens = await input.getValidSessionTokens();
+    } catch {
+      sessionTokens = undefined;
+    }
+    if (sessionTokens?.access_token) {
+      const code = sealAuthorizationCode(sessionTokens, redirectUri, challenge);
+      const destination = new URL(redirectUri);
+      destination.searchParams.set("code", code);
+      destination.searchParams.set("state", state);
+      return {
+        status: 302,
+        headers: { Location: destination.toString(), "Cache-Control": "no-store" },
+        body: "",
+      };
+    }
   }
   const pending: OAuthPendingLogin = {
     slug: input.slug,
