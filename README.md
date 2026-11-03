@@ -291,6 +291,13 @@ curl -i -X POST http://127.0.0.1:3000/tdei-core-dev/mcp -H "Content-Type: applic
 One `mcps.json` declares N servers; each gets its own port and `/<slug>/mcp`
 base path. The repo ships a dev default — copy the example to customize:
 
+Every server shares one browser SSO callback,
+`http://127.0.0.1:8765/callback` (`ssoCallbackPort`), because Keycloak registers
+a single redirect URI for the `tdei-mcp` client. Per-server `ssoCallbackUrl`
+overrides are accepted only when they match; the loader rejects files that would
+split the callback across ports, since those URIs are not registered and fail
+with `Invalid parameter: redirect_uri`.
+
 ```bash
 cp mcps.example.json mcps.json   # then edit names/apiUrls
 ```
@@ -329,9 +336,9 @@ in the child process that receives the browser callback.
 Gateway sign-in uses MCP OAuth. Cursor (and any other client that follows
 the remote MCP login challenge) stores the TDEI access token and sends it
 on every tool call, so a different gateway process can still serve the call.
-Keycloak only accepts `http://127.0.0.1:8765/callback`, so the client
-installer starts a relay that forwards the browser to
-`https://<host>/auth/callback`. Reconnect the MCP server after deploy and
+Keycloak must have `http://127.0.0.1:8765/callback` registered as a valid
+redirect URI for the `tdei-mcp` client, so the client installer starts a relay
+that forwards the browser to `https://<host>/auth/callback`. Reconnect the MCP server after deploy and
 approve the browser login. The in-memory `tdei_sso_login` session is still
 only on the process that received it.
 
@@ -485,7 +492,7 @@ getOswFile → listJobs → job-download).
 | `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `pnpm build`. For clients without `cwd`, use absolute argument paths. |
 | SSO login is required | Call `tdei_sso_login` and open the returned `loginUrl`. |
 | Callback port is already in use | Stop the process using port 8765, then retry login. |
-| SSO redirect returns 400 | Confirm the client ID and callback URL exactly match the backend registration. |
+| SSO redirect returns 400 (`Invalid parameter: redirect_uri`) | `tdei_sso_login` preflights the login URL and returns this diagnosis instead of a dead-end browser page. The URI must be registered on the Keycloak client: admin console → realm `tdei` → Clients → `tdei-mcp` → Settings → add `http://127.0.0.1:8765/callback` to **Valid redirect URIs** (and **Valid post logout redirect URIs**) in each environment (dev, stage, prod). |
 | Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, network access, and the specification URL, then restart the MCP client. |
 | First load times out | Check network access to the specification URL. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
 | An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |

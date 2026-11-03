@@ -189,7 +189,7 @@ export async function createServer(
           };
         }
 
-        const login = await auth.startSsoLogin();
+        const login = await auth.startSsoLogin({ preflight: true });
 
         void login.completion
           .then(async () => {

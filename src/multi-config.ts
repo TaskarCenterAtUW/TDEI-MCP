@@ -118,8 +118,8 @@ export function resolveMultiMcp(
   const host = (overrides.host ?? file.host ?? process.env.TDEI_HTTP_HOST?.trim() ?? "127.0.0.1").trim() || "127.0.0.1";
   const basePortRaw = overrides.basePort ?? file.basePort ?? Number(process.env.TDEI_HTTP_PORT?.trim() || "3000");
   const basePort = assertPort(basePortRaw, "basePort");
-  const baseSsoPortRaw = file.ssoCallbackPort ?? 8765;
-  const baseSsoPort = assertPort(baseSsoPortRaw, "ssoCallbackPort");
+  const ssoCallbackPortRaw = file.ssoCallbackPort ?? 8765;
+  const ssoCallbackPort = assertPort(ssoCallbackPortRaw, "ssoCallbackPort");
   const sharedBasePath = typeof file.basePath === "string" && file.basePath.trim() ? file.basePath.trim() : undefined;
   if (sharedBasePath !== undefined) normalizeBasePath(sharedBasePath, "basePath");
 
@@ -169,7 +169,18 @@ export function resolveMultiMcp(
     const ssoCallbackUrl =
       typeof entry.ssoCallbackUrl === "string" && entry.ssoCallbackUrl.trim()
         ? entry.ssoCallbackUrl.trim()
-        : `http://127.0.0.1:${baseSsoPort + index}/callback`;
+        : `http://127.0.0.1:${ssoCallbackPort}/callback`;
+    // Keycloak registers exactly one redirect URI for the tdei-mcp client, so
+    // every server in the file must share it. Distinct ports would only produce
+    // URIs Keycloak rejects ("Invalid parameter: redirect_uri").
+    const sharedCallback = resolved[0]?.ssoCallbackUrl;
+    if (sharedCallback !== undefined && ssoCallbackUrl !== sharedCallback) {
+      throw new Error(
+        `servers[${index}] (${name}): ssoCallbackUrl ${JSON.stringify(ssoCallbackUrl)} must match ` +
+          `${JSON.stringify(sharedCallback)} used by "${resolved[0]?.name}". Keycloak registers one redirect ` +
+          `URI for client tdei-mcp, so every MCP in this file must share it.`,
+      );
+    }
 
     resolved.push({
       name,

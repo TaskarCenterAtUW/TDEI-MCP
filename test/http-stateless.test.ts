@@ -126,6 +126,13 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    if (url.includes("/api/v1/sso-redirect")) {
+      // Preflight sees Keycloak's login form: the redirect_uri is registered.
+      return new Response('<html><form id="kc-form-login"></form></html>', {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+    }
     if (url.includes("/api/v1/project-groups")) {
       const req = input instanceof Request ? input : new Request(String(input), init);
       return new Response(

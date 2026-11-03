@@ -36,6 +36,15 @@ export interface SsoLoginOptions {
    * this process.
    */
   redirectUri?: string | undefined;
+  /**
+   * Fetch the login URL once before returning it so a Keycloak
+   * "Invalid parameter: redirect_uri" rejection is reported as an
+   * actionable error instead of a browser dead end. Off by default so
+   * unit tests and offline runs stay offline; the MCP tools enable it.
+   */
+  preflight?: boolean | undefined;
+  /** Fetch implementation for the preflight request. Defaults to global fetch. */
+  fetchImpl?: typeof fetch | undefined;
 }
 
 export interface ValidateTokenOptions {

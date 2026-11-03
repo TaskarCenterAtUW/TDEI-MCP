@@ -133,7 +133,11 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
             };
           }
 
-          const login = await auth.startSsoLogin(ssoBrowserOptions);
+          const login = await auth.startSsoLogin({
+            ...ssoBrowserOptions,
+            preflight: true,
+            ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+          });
           void login.completion
             .then(async () => {
               if (openApiLifecycle) {

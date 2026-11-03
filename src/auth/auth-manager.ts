@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { getConfig, TDEI_SSO_CLIENT_ID } from "../config.js";
+import { preflightSsoLogin } from "./sso-preflight.js";
 import type {
   AuthStatus,
   SsoLoginOptions,
@@ -212,6 +213,25 @@ export class AuthManager {
     });
     void completion.catch(() => undefined);
 
+    // Build and preflight the browser URL before binding a loopback port, so a
+    // rejected redirect_uri fails without leaving a listener behind.
+    const redirectUri = browserRedirectUri(options?.redirectUri, callbackUrl);
+    const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
+    loginUrl.searchParams.set("redirect_uri", redirectUri.toString());
+    loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
+    if (expectedState) {
+      loginUrl.searchParams.set("state", expectedState);
+    }
+
+    if (options?.preflight) {
+      const rejection = await preflightSsoLogin(loginUrl.toString(), {
+        redirectUri: redirectUri.toString(),
+        clientId: TDEI_SSO_CLIENT_ID,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      if (rejection) throw new Error(rejection);
+    }
+
     // The stdio transport needs its own loopback listener; an HTTP server
     // that already serves /auth/callback on its own port opts out so SSO
     // login never holds a second port (and can never EADDRINUSE against a
@@ -270,13 +290,6 @@ export class AuthManager {
         );
       }
       server = listener;
-    }
-
-    const loginUrl = new URL("/api/v1/sso-redirect", `${getConfig().apiUrl}/`);
-    loginUrl.searchParams.set("redirect_uri", browserRedirectUri(options?.redirectUri, callbackUrl).toString());
-    loginUrl.searchParams.set("client_id", TDEI_SSO_CLIENT_ID);
-    if (expectedState) {
-      loginUrl.searchParams.set("state", expectedState);
     }
 
     const timeout = setTimeout(() => {

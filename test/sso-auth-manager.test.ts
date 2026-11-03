@@ -208,3 +208,30 @@ test("public redirect URI is what the browser follows while completion uses the 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("preflight rejects an unregistered redirect_uri before binding the callback port", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response('<html><p class="instruction">Invalid parameter: redirect_uri</p></html>', {
+      status: 400,
+      headers: { "Content-Type": "text/html" },
+    })) as typeof fetch;
+
+  const auth = new AuthManager();
+  try {
+    await assert.rejects(
+      () => auth.startSsoLogin({ preflight: true }),
+      /Keycloak rejected the SSO redirect_uri "http:\/\/127\.0\.0\.1:18765\/callback"/,
+    );
+    assert.equal(auth.getStatus().state, "signed_out");
+
+    // A failed preflight must leave no pending login behind, so a retry
+    // re-runs the check instead of handing back the rejected URL.
+    await assert.rejects(
+      () => auth.startSsoLogin({ preflight: true }),
+      /Invalid parameter: redirect_uri|Keycloak rejected/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
