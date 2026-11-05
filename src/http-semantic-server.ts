@@ -5,7 +5,7 @@ import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { BUILD } from "./build-info.js";
 import type { AuthManager } from "./auth/auth-manager.js";
 import { getConfig } from "./config.js";
-import { TDEI_SERVER_INSTRUCTIONS } from "./intents/descriptions.js";
+import { tdeiServerInstructions, type TdeiServerProfile } from "./intents/server-instructions.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
@@ -25,6 +25,10 @@ export interface HttpSemanticServerOptions {
   fetchImpl?: typeof fetch;
   places?: PlaceResolver;
   publicBaseUrl?: string;
+  /** Server profile used to select core or workspace instructions (default core). */
+  profile?: TdeiServerProfile;
+  /** Explicit instructions override; takes precedence over profile. */
+  instructions?: string;
   /**
    * Gateway child slug. When set, SSO redirects the browser to the
    * Keycloak-registered loopback callback and does not bind a listener
@@ -71,7 +75,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       version: BUILD.serverVersion,
     },
     {
-      instructions: TDEI_SERVER_INSTRUCTIONS,
+      instructions: options.instructions ?? tdeiServerInstructions(options.profile ?? "core"),
     },
   );
   const auth = options.authManager;

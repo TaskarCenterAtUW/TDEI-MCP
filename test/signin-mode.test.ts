@@ -57,10 +57,21 @@ test("bearer-path tools/list and every description omit tdei_sso_login", async (
 test("gateway 401 body does not name tdei_sso_login", async () => {
   const handle = await serveTestHttp({ gatewaySlug: "tdei-core-dev" });
   try {
-    const response = await fetch(`${handle.url}/mcp`, {
+    const list = await fetch(`${handle.url}/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    assert.equal(list.status, 200);
+    const response = await fetch(`${handle.url}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "tdei_list_my_project_groups", arguments: {} },
+      }),
     });
     assert.equal(response.status, 401);
     const body = (await response.json()) as Record<string, unknown>;

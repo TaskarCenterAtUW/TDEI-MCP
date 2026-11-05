@@ -26,6 +26,7 @@ import {
   type OAuthHttpResult,
 } from "./oauth/mcp-oauth.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
+import { resolveTdeiServerProfile, tdeiServerInstructions } from "./intents/server-instructions.js";
 import { BUILD } from "./build-info.js";
 import { setSignInMode, signInText, tokenExpiredText } from "./mcp/errors.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
@@ -62,6 +63,7 @@ interface ResolvedHttpOptions {
   gatewaySlug: string | undefined;
   sessionAuth: AuthManager;
   sessionOpenApiClient: OpenApiMcpClient;
+  serverInstructions: string;
 }
 
 function buildLoginUrl(): string {
@@ -195,6 +197,48 @@ function sendOAuth(response: ServerResponse, result: OAuthHttpResult): void {
   response.end(result.body);
 }
 
+/**
+ * Tools that never trigger an OAuth/Bearer challenge. They bootstrap or
+ * report auth state (login, status, health) or load local specs, so the
+ * client can discover tools and sign in without already holding a token.
+ * Every other `tools/call` requires auth and gets a 401 challenge when
+ * signed out — handshake methods (`initialize`, `tools/list`, notifications,
+ * GET/DELETE) never do, so merely adding the MCP never pops a login.
+ */
+export const AUTH_FREE_TOOL_NAMES = new Set([
+  "tdei_sso_login",
+  "tdei_sso_complete",
+  "tdei_auth_status",
+  "tdei_health",
+  "tdei_test_authentication",
+  "tdei_logout",
+  "tdei_load_api_tools",
+  "tdei_reload_config",
+]);
+
+function isProtectedToolCallEntry(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null) return false;
+  const record = entry as Record<string, unknown>;
+  if (record.method !== "tools/call") return false;
+  const params = record.params as Record<string, unknown> | undefined;
+  const name = params?.name;
+  if (typeof name === "string" && AUTH_FREE_TOOL_NAMES.has(name)) return false;
+  return true;
+}
+
+/**
+ * True only when the MCP payload contains at least one protected
+ * `tools/call` (any real tool execution outside the auth-bootstrap allowlist).
+ * All other traffic — initialize, tools/list, notifications, GET/DELETE —
+ * must not authenticate, so clients can set up silently and only sign in
+ * when a tool is actually invoked.
+ */
+export function mcpRequestNeedsAuth(parsed: unknown): boolean {
+  if (parsed === undefined || parsed === null) return false;
+  if (Array.isArray(parsed)) return parsed.some(isProtectedToolCallEntry);
+  return isProtectedToolCallEntry(parsed);
+}
+
 async function handleMcpRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -221,8 +265,38 @@ async function handleMcpRequest(
   }
 
   const authHeader = (request.headers.authorization ?? "").trim();
+
+  // Lazy auth: read + parse the JSON-RPC payload first so handshake traffic
+  // (initialize, tools/list, notifications, GET/DELETE) never authenticates.
+  // Only a protected tools/call (any tool outside AUTH_FREE_TOOL_NAMES)
+  // triggers bearer validation or a 401 OAuth/Bearer challenge.
+  const bodyText =
+    request.method === "GET" || request.method === "HEAD" || request.method === "DELETE" ? "" : await readBody(request);
+  let parsed: unknown;
+  if (bodyText) {
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      sendJson(response, 400, { code: "TDEI_BAD_REQUEST", message: "Request body must be JSON." });
+      return;
+    }
+  }
+  const needsAuth = mcpRequestNeedsAuth(parsed);
+
   let server;
-  if (authHeader.length > 0) {
+  if (!needsAuth) {
+    server = await createReadyHttpSemanticServer({
+      authManager: options.sessionAuth,
+      openApiMcpClient: options.sessionOpenApiClient,
+      apiUrl: getConfig().apiUrl,
+      instructions: options.serverInstructions,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      places: options.places,
+      publicBaseUrl,
+      ssoCallbackListener: options.ssoCallbackListener,
+      ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
+    });
+  } else if (authHeader.length > 0) {
     const match = /^Bearer (.+)$/.exec(authHeader);
     if (!match || !match[1]?.trim()) {
       unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
@@ -255,6 +329,7 @@ async function handleMcpRequest(
     server = createHttpSemanticServer({
       accessToken: bearer,
       apiUrl: getConfig().apiUrl,
+      instructions: options.serverInstructions,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       ssoCallbackListener: options.ssoCallbackListener,
@@ -284,6 +359,7 @@ async function handleMcpRequest(
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
       apiUrl: getConfig().apiUrl,
+      instructions: options.serverInstructions,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       publicBaseUrl,
@@ -295,19 +371,6 @@ async function handleMcpRequest(
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
     await server.connect(transport);
-    const bodyText =
-      request.method === "GET" || request.method === "HEAD" || request.method === "DELETE"
-        ? ""
-        : await readBody(request);
-    let parsed: unknown;
-    if (bodyText) {
-      try {
-        parsed = JSON.parse(bodyText);
-      } catch {
-        sendJson(response, 400, { code: "TDEI_BAD_REQUEST", message: "Request body must be JSON." });
-        return;
-      }
-    }
     const webResponse = await transport.handleRequest(
       toWebRequest(request, bodyText, host),
       parsed === undefined ? undefined : { parsedBody: parsed },
@@ -357,6 +420,13 @@ export async function serveHttp(
     gatewaySlug,
     sessionAuth,
     sessionOpenApiClient,
+    serverInstructions: tdeiServerInstructions(
+      resolveTdeiServerProfile({
+        name: process.env.TDEI_MCP_NAME || gatewaySlug,
+        explicit: process.env.TDEI_MCP_PROFILE,
+        apiUrl: httpConfig.apiUrl,
+      }),
+    ),
   };
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;

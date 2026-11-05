@@ -97,7 +97,15 @@ test("http.ts import has no side effects on singletons", async () => {
 test("POST /mcp without token when requireBearerAuth=true returns 401 with bearer wording", async () => {
   const handle = await serveTestHttp({ requireBearerAuth: true });
   try {
-    const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    // Lazy auth: handshake/discovery never challenges; only a protected
+    // tools/call does.
+    const listRes = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    assert.equal(listRes.status, 200);
+
+    const response = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(2, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+    );
     assert.equal(response.status, 401);
     const wwwAuth = response.headers.get("www-authenticate") ?? "";
     assert.match(wwwAuth, /^Bearer realm="tdei-mcp"/);
@@ -215,7 +223,13 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
     const notThisChild = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(notThisChild.status, 404);
 
-    const anonymous = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    const anonymousList = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
+    assert.equal(anonymousList.status, 200);
+
+    const anonymous = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(9, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+    );
     assert.equal(anonymous.status, 401);
     const challenge = anonymous.headers.get("www-authenticate") ?? "";
     assert.match(challenge, /resource_metadata=/);
@@ -291,7 +305,13 @@ test("POST /mcp with bad bearer returns 401 before creating an MCP server", asyn
   try {
     const handle = await serveTestHttp({});
     try {
-      const response = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
+      const list = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "bad-token");
+      assert.equal(list.status, 200);
+      const response = await postMcp(
+        `${handle.url}/mcp`,
+        mcpBody(2, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+        "bad-token",
+      );
       assert.equal(response.status, 401);
       const body = (await response.json()) as Record<string, unknown>;
       assert.equal(body.code, "TDEI_TOKEN_INVALID");
@@ -323,7 +343,20 @@ test("good bearer serves semantic tools and request bearers stay isolated", asyn
       const second = await postMcp(`${handle.url}/mcp`, mcpBody(2, "tools/list"), "good-B");
       assert.equal(second.status, 200);
       assert.match(await second.text(), /tdei_list_services/);
-      assert.deepEqual(seenTokens, ["Bearer good-A", "Bearer good-B"]);
+      assert.deepEqual(seenTokens, []);
+      const callA = await postMcp(
+        `${handle.url}/mcp`,
+        mcpBody(3, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+        "good-A",
+      );
+      assert.equal(callA.status, 200);
+      const callB = await postMcp(
+        `${handle.url}/mcp`,
+        mcpBody(4, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+        "good-B",
+      );
+      assert.equal(callB.status, 200);
+      assert.deepEqual(seenTokens, ["Bearer good-A", "Bearer good-A", "Bearer good-B", "Bearer good-B"]);
     } finally {
       await handle.close();
     }
@@ -414,11 +447,27 @@ test("HTTP server caches token validation probes across repeated requests, suppo
 
   const handle = await serveTestHttp({ fetchImpl: customFetch });
   try {
-    const first = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "cached-bearer");
+    const firstList = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"), "cached-bearer");
+    assert.equal(firstList.status, 200);
+    assert.equal(probeCalls, 0, "tools/list must not trigger token validation");
+    const first = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(2, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+      "cached-bearer",
+    );
     assert.equal(first.status, 200);
-    const second = await postMcp(`${handle.url}/mcp`, mcpBody(2, "tools/list"), "cached-bearer");
+    const afterFirst = probeCalls;
+    const second = await postMcp(
+      `${handle.url}/mcp`,
+      mcpBody(3, "tools/call", { name: "tdei_list_my_project_groups", arguments: {} }),
+      "cached-bearer",
+    );
     assert.equal(second.status, 200);
-    assert.equal(probeCalls, 1, "second request with same bearer should use cached validation");
+    assert.equal(
+      probeCalls - afterFirst,
+      1,
+      "second tool call must reuse cached validation (only the tool fetch, no second probe)",
+    );
     assert.equal(globalFetchMutated, false, "globalThis.fetch must not be mutated");
 
     const delResponse = await fetch(`${handle.url}/mcp`, {

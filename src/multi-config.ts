@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { specUrlForApiUrl } from "./init/envs.js";
+import { resolveTdeiServerProfile, type TdeiServerProfile } from "./intents/server-instructions.js";
 
 export interface MultiMcpServerEntry {
   name: string;
@@ -12,6 +13,8 @@ export interface MultiMcpServerEntry {
   port?: number;
   basePath?: string;
   ssoCallbackUrl?: string;
+  /** Instruction profile. Defaults to workspace for workspace-looking names/hosts, otherwise core. */
+  profile?: TdeiServerProfile;
 }
 
 export interface MultiMcpFile {
@@ -33,6 +36,7 @@ export interface ResolvedMultiMcpServer {
   basePath: string;
   ssoCallbackUrl: string;
   url: string;
+  profile: TdeiServerProfile;
 }
 
 export function slugifyName(name: string): string {
@@ -200,6 +204,10 @@ export function resolveMultiMcp(
       basePath,
       ssoCallbackUrl,
       url: `http://${host}:${port}${basePath}`,
+      profile:
+        entry.profile === "core" || entry.profile === "workspace"
+          ? entry.profile
+          : resolveTdeiServerProfile({ name, apiUrl }),
     });
   });
 

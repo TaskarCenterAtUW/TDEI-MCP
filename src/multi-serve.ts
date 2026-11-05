@@ -51,6 +51,7 @@ function startChild(server: ResolvedMultiMcpServer, extraEnv: NodeJS.ProcessEnv)
         TDEI_SSO_CALLBACK_URL: server.ssoCallbackUrl,
         TDEI_GATEWAY_SLUG: server.slug,
         TDEI_MCP_NAME: server.name,
+        TDEI_MCP_PROFILE: server.profile,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

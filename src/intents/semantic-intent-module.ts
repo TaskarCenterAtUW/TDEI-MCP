@@ -948,9 +948,26 @@ export class SemanticIntentModule {
   }
 
   private jobFollowUp(operation: string, job: JobRecord): JobRecord {
+    const rawJobId = job.job_id;
+    const jobId = typeof rawJobId === "string" && rawJobId.trim() ? rawJobId.trim() : undefined;
+    const resultPath = `/api/v1/job/download/${jobId ?? "<job_id>"}`;
     return {
       ...job,
-      followUp: `Track progress with tdei_list_jobs, then download outputs with the job-download raw tool. Launched via ${operation}.`,
+      followUp:
+        `Track progress with tdei_list_jobs${jobId ? ` (jobId: ${jobId})` : ""}. ` +
+        `Once status is COMPLETED, get the result with the job_download raw tool: GET ${resultPath} ` +
+        `(argument job_id="${jobId ?? "<job_id>"}"). ` +
+        `Launched via ${operation}.`,
+      ...(jobId
+        ? {
+            resultDownload: {
+              tool: "job_download",
+              method: "GET",
+              path: resultPath,
+              requires: "status COMPLETED",
+            },
+          }
+        : {}),
     };
   }
 
