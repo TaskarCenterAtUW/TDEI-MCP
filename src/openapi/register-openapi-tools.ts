@@ -18,6 +18,8 @@ export type OpenApiToolCall = (
 export interface RegisterOpenApiToolsOptions {
   hiddenOperations?: ReadonlySet<string>;
   isAllowed?: (operationName: string, tags?: string[]) => boolean;
+  /** Append deployment-specific usage guidance to a discovered tool description. */
+  augmentDescription?: (operationName: string, description: string | undefined) => string | undefined;
   onCall?: OpenApiToolCall;
   mapResult?: (result: Awaited<ReturnType<OpenApiToolCall>>) => unknown;
   mapError?: (error: unknown) => unknown;
@@ -125,6 +127,9 @@ export async function registerOpenApiTools(
       } else if (!description.startsWith(prefix)) {
         description = `${prefix} ${description}`;
       }
+    }
+    if (options.augmentDescription) {
+      description = options.augmentDescription(tool.name, description);
     }
     server.registerTool(
       tool.name,

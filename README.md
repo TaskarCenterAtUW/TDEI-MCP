@@ -298,6 +298,13 @@ overrides are accepted only when they match; the loader rejects files that would
 split the callback across ports, since those URIs are not registered and fail
 with `Invalid parameter: redirect_uri`.
 
+Server instructions are profile-specific. `tdei-core-*` servers (dev, staging,
+and production) advertise the same core data instructions, while
+`tdei-workspace` advertises workspace/tasking instructions. Login, client-side
+file upload/download, caching, and presentation rules are shared by every
+profile. The profile is derived from the server name (or API host) and can be
+forced with `"profile": "core" | "workspace"` per server in `mcps.json`.
+
 ```bash
 cp mcps.example.json mcps.json   # then edit names/apiUrls
 ```
@@ -403,6 +410,8 @@ Both transports expose the common semantic tools:
 | `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
 
 File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
+
+Raw operation descriptions are augmented with connector runbooks in `src/tdei/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 

@@ -171,6 +171,14 @@ const qualityTagSchema = z.object({
   tagQualityAsset: assetSchema.optional(),
 });
 
+// Optional on purpose: a missing id must reach the module so it can ask
+// "Which TDEI dataset id should get a quality report?" instead of failing
+// protocol validation before the tool can respond.
+const qualityReportSchema = z.object({
+  tdeiDatasetId: z.string().trim().min(1).optional(),
+  dataType: z.enum(["osw", "flex", "pathways"]).optional(),
+});
+
 const sanitizeSchema = z.object({
   asset: assetSchema.optional(),
 });
@@ -512,7 +520,7 @@ export function registerSemanticTools(
   registerIntent(
     "tdei_generate_quality_report",
     SEMANTIC_TOOL_DESCRIPTIONS.generateQualityReport,
-    getDatasetDetailsSchema.shape,
+    qualityReportSchema.shape,
     (args, ctx) => module.generateQualityReport(args as never, ctx),
   );
   registerIntent(

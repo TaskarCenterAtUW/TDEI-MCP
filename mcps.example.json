@@ -9,7 +9,8 @@
     },
     {
       "name": "tdei-workspace",
-      "apiUrl": "https://api-stage.tdei.us"
+      "apiUrl": "https://api-stage.tdei.us",
+      "profile": "workspace"
     }
   ]
 }

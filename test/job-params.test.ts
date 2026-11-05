@@ -149,3 +149,28 @@ test("optional job fields are omitted when not provided", async () => {
   assert.deepEqual(launches[2]?.assets, { dataset: URL_ASSET });
   assert.ok(!("fields" in (launches[2] as LaunchInput)));
 });
+
+test("quality report asks for a dataset id when it is missing", async () => {
+  const { module, launches } = createHarness();
+  const result = await module.generateQualityReport({});
+  assert.equal(result.status, "needs_input");
+  if (result.status !== "needs_input") return;
+  assert.equal(result.missing[0]?.field, "tdeiDatasetId");
+  assert.match(result.missing[0]?.question ?? "", /quality report/i);
+  assert.equal(launches.length, 0);
+});
+
+test("job follow-up points at the job result download endpoint", async () => {
+  const { module } = createHarness();
+  const result = await module.generateQualityReport({ tdeiDatasetId: "abc" });
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  assert.match(String(result.data.followUp), /\/api\/v1\/job\/download\/job-1/);
+  assert.match(String(result.data.followUp), /COMPLETED/);
+  assert.deepEqual(result.data.resultDownload, {
+    tool: "job_download",
+    method: "GET",
+    path: "/api/v1/job/download/job-1",
+    requires: "status COMPLETED",
+  });
+});

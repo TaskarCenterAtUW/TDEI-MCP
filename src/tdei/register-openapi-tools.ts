@@ -11,6 +11,7 @@ import {
   type OpenApiToolClient,
   type OpenApiToolRegistrationResult,
 } from "../openapi/register-openapi-tools.js";
+import { augmentTdeiToolDescription } from "./tool-instructions.js";
 
 export type TdeiOpenApiToolClient = OpenApiToolClient;
 export type TdeiOpenApiToolCall = OpenApiToolCall;
@@ -48,6 +49,7 @@ export async function registerTdeiOpenApiTools(
   const result = await registerOpenApiTools(server, client, {
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
     isAllowed: (name, tags) => isToolAllowed(name, filter, tags ?? []),
+    augmentDescription: augmentTdeiToolDescription,
     ...(onCall ? { onCall } : {}),
     mapResult: (toolResult) => truncateResult(normalizeOpenApiToolResult(toolResult)),
     mapError: formatError,

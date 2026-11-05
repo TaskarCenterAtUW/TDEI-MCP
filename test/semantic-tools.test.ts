@@ -118,6 +118,15 @@ test("common semantic tools are discoverable and callable", async () => {
     const uploadBody = JSON.parse(uploadFirst?.type === "text" ? uploadFirst.text : "{}");
     assert.equal(uploadBody.status, "needs_input");
     assert.ok(uploadBody.missing.some((item: { field: string }) => item.field === "metadata.dataset_detail.name"));
+
+    const report = await client.callTool({
+      name: "tdei_generate_quality_report",
+      arguments: {},
+    });
+    const reportFirst = report.content[0];
+    const reportBody = JSON.parse(reportFirst?.type === "text" ? reportFirst.text : "{}");
+    assert.equal(reportBody.status, "needs_input");
+    assert.ok(reportBody.missing.some((item: { field: string }) => item.field === "tdeiDatasetId"));
   } finally {
     await client.close();
   }
