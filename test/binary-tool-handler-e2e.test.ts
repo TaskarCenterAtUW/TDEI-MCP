@@ -6,6 +6,9 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
+// Registration mechanics tests: expose the full raw catalog.
+process.env.TDEI_EXPOSE_ALL_RAW_TOOLS = "1";
+
 // Drives the reported getOswFile call through the public MCP handler. A valid
 // regression test must prove both sides of the routing decision: the local
 // binary adapter is called and the generic OpenAPI executor is never called.

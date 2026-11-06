@@ -1,3 +1,4 @@
+import { renderToolRoutingGuide } from "../routing-guide.js";
 import { TDEI_SHARED_SERVER_INSTRUCTIONS } from "./tdei-shared-instructions.js";
 
 /** Instructions for tdei-core-dev, tdei-core-staging, and tdei-core-production. */
@@ -13,5 +14,8 @@ This server talks to the TDEI core API: project groups, services, datasets, jobs
 - When user asks for the latest datasets for a project group - Get the latest unique published datasets. No duplicate items on the list return. 
 - For OSW Tag definition, use the osw-tag-definition schema (inclines, surface, width, length,description, name) then use tdei_get_dataset_details to generate the request payload based on the json at https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-osw-datasvc-ts/dev/schema/tag-quality.json.
 - For Tags, use the tag-quality schema to generate the request payload.
+- Jobs: before tdei_list_jobs, ask the user which project group (by name) unless they named one; list project groups with tdei_list_my_project_groups if they need options. Pass projectGroupName (or projectGroupId). Only when the user says "all" pass allGroups:true. For "running jobs" use status IN-PROGRESS; for one job's status use jobId. Fetching a job's result (job_download) is the last step and only for COMPLETED jobs.
 - Do not use workspace-only paths (workspace_id, tasking projects, teams, fixmes) on this server. Those belong to the tdei-workspace server.
+
+${renderToolRoutingGuide()}
 `;

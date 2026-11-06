@@ -693,7 +693,20 @@ export async function serveHttp(
 
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
+  // Pick up API changes without a restart. Each request re-registers tools from
+  // this client, so a refreshed spec reaches clients on their next connection.
+  const refreshMinutes = Number(process.env.TDEI_SPEC_REFRESH_MINUTES ?? 15);
+  const specRefreshTimer =
+    Number.isFinite(refreshMinutes) && refreshMinutes > 0
+      ? setInterval(() => {
+          sessionOpenApiClient.refresh().catch((error: unknown) => {
+            console.error("[openapi] spec refresh failed:", error instanceof Error ? error.message : String(error));
+          });
+        }, refreshMinutes * 60_000)
+      : undefined;
+  specRefreshTimer?.unref();
   const close = async (): Promise<void> => {
+    if (specRefreshTimer) clearInterval(specRefreshTimer);
     await sessionOpenApiClient.close().catch(() => undefined);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };

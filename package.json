@@ -47,6 +47,8 @@
     "deploy:docker": "bash scripts/deploy-docker.sh up",
     "deploy:docker:down": "bash scripts/deploy-docker.sh down",
     "prepublishOnly": "pnpm build",
+    "gen:tool-fields": "tsx scripts/generate-tool-fields.ts",
+    "check:tool-fields": "tsx scripts/generate-tool-fields.ts --check",
     "test": "node --import tsx --test test/**/*.test.ts",
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",

@@ -26,7 +26,9 @@ if [ "$cmd" != "up" ]; then
   exit 1
 fi
 
-docker build -t "$IMAGE" .
+# The commit sha becomes part of the MCP serverInfo.version (x.y.z+sha), which
+# is how clients notice a new deploy.
+docker build --build-arg GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)" -t "$IMAGE" .
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 

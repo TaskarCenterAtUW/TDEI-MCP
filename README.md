@@ -367,7 +367,6 @@ Both transports expose the common semantic tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
 | `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook. |
 | `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded. |
@@ -466,6 +465,7 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
 | `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
 | `TDEI_DOWNLOAD_MODE` | No | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback) |
+| `TDEI_EXPOSE_ALL_RAW_TOOLS` | No | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it) |
 | `TDEI_DOWNLOAD_DIR` | No | `~/Downloads` (absolute folder for server-mode downloads) |
 | `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
@@ -547,3 +547,14 @@ node --env-file=.env --import tsx src/index.ts
 ```
 
 The source entry point uses the same stdio protocol and still needs an MCP client for initialization and tool calls.
+
+## Tool field lists
+
+Each tool description ends with a `Fields - required: ... optional: ...` line. Raw OpenAPI tools get it from the spec at load time. For `tdei_*` tools, mandatory fields are generated from the spec by `scripts/generate-tool-fields.ts` using the bindings in `src/intents/tool-spec-map.ts`:
+
+```bash
+pnpm gen:tool-fields     # regenerate src/intents/generated/tool-fields.generated.ts
+pnpm check:tool-fields   # fail if the committed file no longer matches the spec
+```
+
+Tool selection is guided by the routing guide in the server instructions (`src/intents/routing-guide.ts`); a test fails if a tool is added without a routing line.

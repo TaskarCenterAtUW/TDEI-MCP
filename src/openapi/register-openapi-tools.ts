@@ -18,6 +18,11 @@ export type OpenApiToolCall = (
 export interface RegisterOpenApiToolsOptions {
   hiddenOperations?: ReadonlySet<string>;
   isAllowed?: (operationName: string, tags?: string[]) => boolean;
+  /**
+   * Operations kept out of the tool catalog (not registered) but still
+   * reported in `toolSchemas`, so workflow steps can call and validate them.
+   */
+  catalogHidden?: (operationName: string) => boolean;
   /** Append deployment-specific usage guidance to a discovered tool description. */
   augmentDescription?: (operationName: string, description: string | undefined) => string | undefined;
   onCall?: OpenApiToolCall;
@@ -102,6 +107,14 @@ export async function registerOpenApiTools(
       continue;
     }
     if (registered.has(tool.name)) continue;
+    if (options.catalogHidden?.(tool.name)) {
+      toolSchemas.set(tool.name, {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        ...(toolTags.length > 0 ? { tags: toolTags } : {}),
+      });
+      continue;
+    }
 
     let inputSchema: ReturnType<typeof fromJsonSchema<Record<string, unknown>>> | undefined;
     if (tool.inputSchema !== null && typeof tool.inputSchema === "object") {

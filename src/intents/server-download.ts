@@ -25,6 +25,8 @@ export interface DownloadSettingsResult {
   warnings: string[];
 }
 
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 /**
@@ -87,6 +89,8 @@ export async function saveDatasetToDisk(options: SaveDatasetOptions): Promise<Sa
   const res = await fetchImpl(options.url, {
     headers: { Authorization: `Bearer ${options.bearer}` },
     redirect: "follow",
+    // A stalled transfer must not hold the tool call open forever.
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

@@ -5,7 +5,8 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 
 import { SEMANTIC_TOOL_DESCRIPTIONS } from "../src/intents/descriptions.js";
-import { resolveUserIntent } from "../src/intents/intent-resolver.js";
+import { TOOL_ROUTING, renderToolRoutingGuide } from "../src/intents/routing-guide.js";
+import { TDEI_CORE_SERVER_INSTRUCTIONS } from "../src/intents/server-instructions.js";
 import { registerSemanticTools } from "../src/intents/register-tools.js";
 import { SemanticIntentModule } from "../src/intents/semantic-intent-module.js";
 
@@ -59,7 +60,7 @@ test("registered tools match the description registry one-to-one", async () => {
   }
 });
 
-test("every intent route resolves to a registered tool", async () => {
+test("the routing guide and the registered semantic tools stay in sync", async () => {
   const server = new McpServer({ name: "registry-routes", version: "1.0.0" });
   registerSemanticTools(server, createModule());
   const client = new Client({ name: "registry-routes-client", version: "1.0.0" });
@@ -69,42 +70,18 @@ test("every intent route resolves to a registered tool", async () => {
   try {
     const listed = await client.listTools();
     const registered = new Set(listed.tools.map((tool) => tool.name));
-    const probes = [
-      "Which projects can I access?",
-      "find the latest OSW dataset",
-      "list services for my project",
-      "validate this GTFS pathways zip",
-      "upload this sidewalk dataset",
-      "what are my roles?",
-      "show my recent uploads",
-      "what is the release status of dataset abc-123?",
-      "publish this dataset",
-      "delete dataset abc-123",
-      "clone this dataset",
-      "edit the metadata of this dataset",
-      "list viewer feedbacks",
-      "show data metrics",
-      "which osw versions are supported",
-      "show system capabilities",
-      "verify my email",
-      "help me recover my password",
-      "regenerate my api key",
-      "Validate and upload this dataset",
-    ];
-    for (const probe of probes) {
-      const result = resolveUserIntent(probe);
-      const tools =
-        result.status === "complete"
-          ? [result.data.tool]
-          : result.status === "ambiguous"
-            ? result.candidates.map((candidate) => candidate.tool)
-            : [];
-      assert.ok(tools.length > 0, `${probe} should resolve to at least one tool`);
-      for (const tool of tools) {
-        assert.ok(registered.has(tool), `${probe} routes to unregistered tool ${tool}`);
-      }
-    }
+    const guided = TOOL_ROUTING.map((route) => route.tool);
+    assert.equal(new Set(guided).size, guided.length, "a tool has two routing lines");
+    for (const tool of guided) assert.ok(registered.has(tool), `routing guide names unregistered tool ${tool}`);
+    for (const tool of registered) assert.ok(guided.includes(tool), `registered tool ${tool} has no routing line`);
+    assert.ok(!registered.has("tdei_resolve_intent"), "the regex intent resolver tool is gone");
   } finally {
     await client.close();
   }
+});
+
+test("server instructions carry the routing guide", () => {
+  assert.ok(TDEI_CORE_SERVER_INSTRUCTIONS.includes(renderToolRoutingGuide()));
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /organizations\/orgs/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /tdei_list_jobs/);
 });

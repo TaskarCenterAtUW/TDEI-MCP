@@ -1,4 +1,4 @@
-import type { TdeiOperations } from "./operations.js";
+import type { DatasetSearch, TdeiOperations } from "./operations.js";
 import type { PlaceResolver } from "./place-resolver.js";
 import { extractAuthIdentity } from "../auth/auth-manager.js";
 import {
@@ -38,6 +38,7 @@ import type {
   ListProjectGroupsData,
   ListProjectGroupsInput,
   ListVersionsData,
+  ProjectGroup,
   MyIdentity,
   PublishDatasetInput,
   QualityIntersectionInput,
@@ -179,7 +180,28 @@ function clientUploadPath(asset: DatasetAsset | undefined): string | undefined {
   return asset.path.trim() ? asset.path.trim() : undefined;
 }
 
+const JOB_FANOUT_CONCURRENCY = 5;
+const PROJECT_GROUP_CACHE_TTL_MS = 60_000;
+/** Data standards and server capabilities change on deploys, not per request. */
+const STATIC_REFERENCE_TTL_MS = 5 * 60_000;
+
+/** Runs `fn` over `items` with at most `limit` in flight; result order matches input. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export class SemanticIntentModule {
+  private readonly readCache = new Map<string, { expires: number; value: Promise<unknown> }>();
+
   constructor(private readonly dependencies: SemanticIntentDependencies) {}
 
   private async resolveCurlToken(context: RequestContext = {}): Promise<string | undefined> {
@@ -193,6 +215,32 @@ export class SemanticIntentModule {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Short-lived, in-flight-deduplicated cache for slow-changing reads (project
+   * groups, versions, capabilities). Keyed by access token so one caller never
+   * sees another's data, and a failed lookup is never cached.
+   */
+  private async cached<T>(name: string, ttlMs: number, context: RequestContext, load: () => Promise<T>): Promise<T> {
+    const key = `${(await this.resolveCurlToken(context)) ?? ""}\u0000${name}`;
+    const now = Date.now();
+    const hit = this.readCache.get(key);
+    if (hit && hit.expires > now) return hit.value as Promise<T>;
+    for (const [k, v] of this.readCache) if (v.expires <= now) this.readCache.delete(k);
+    const value = load();
+    this.readCache.set(key, { expires: now + ttlMs, value });
+    value.catch(() => {
+      if (this.readCache.get(key)?.value === value) this.readCache.delete(key);
+    });
+    return value;
+  }
+
+  /** Project groups visible to the caller (cached briefly; names and ids are what jobs lookups need). */
+  private accessibleProjectGroups(context: RequestContext): Promise<ProjectGroup[]> {
+    return this.cached("projectGroups", PROJECT_GROUP_CACHE_TTL_MS, context, () =>
+      this.dependencies.operations.listProjectGroups({ page: 1, pageSize: 50 }, context),
+    );
   }
 
   async findDatasets(input: FindDatasetsInput, context: RequestContext = {}): Promise<IntentResult<FindDatasetsData>> {
@@ -214,69 +262,40 @@ export class SemanticIntentModule {
       pageSize,
     };
 
+    const complete = (
+      datasets: Array<Record<string, unknown>>,
+      matchedBy: DatasetMatch["matchedBy"],
+      evidence: string,
+    ): IntentResult<FindDatasetsData> => {
+      const matches: DatasetMatch[] = datasets.map((dataset) => ({ dataset, matchedBy, evidence }));
+      return {
+        status: "complete",
+        data: {
+          matches,
+          ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
+          effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+          table: renderDatasetTable(matches),
+        },
+      };
+    };
+    const search = async (extra: Partial<DatasetSearch>) =>
+      applyCutoff(await this.dependencies.operations.searchDatasets({ ...common, ...extra }, context));
+
     // Exact id lookup (release-status / incline follow-ups). The API
     // supports tdei_dataset_id directly; date filtering is client-side.
     if (input.tdeiDatasetId?.trim()) {
-      const datasets = applyCutoff(
-        await this.dependencies.operations.searchDatasets(
-          { ...common, tdeiDatasetId: input.tdeiDatasetId.trim() },
-          context,
-        ),
-      );
-      const matches: DatasetMatch[] = datasets.map((dataset) => ({
-        dataset,
-        matchedBy: "dataset_id",
-        evidence: `tdei_dataset_id = ${input.tdeiDatasetId?.trim()}`,
-      }));
-      return {
-        status: "complete",
-        data: {
-          matches,
-          ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
-          effectiveSort: { field: "uploaded_timestamp", order: "desc" },
-          table: renderDatasetTable(matches),
-        },
-      };
+      const id = input.tdeiDatasetId.trim();
+      return complete(await search({ tdeiDatasetId: id }), "dataset_id", `tdei_dataset_id = ${id}`);
     }
-
     if (input.bbox) {
-      const datasets = applyCutoff(
-        await this.dependencies.operations.searchDatasets({ ...common, bbox: input.bbox }, context),
-      );
-      const matches: DatasetMatch[] = datasets.map((dataset) => ({
-        dataset,
-        matchedBy: "bbox",
-        evidence: `explicit bbox ${input.bbox?.join(",")}`,
-      }));
-      return {
-        status: "complete",
-        data: {
-          matches,
-          ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
-          effectiveSort: { field: "uploaded_timestamp", order: "desc" },
-          table: renderDatasetTable(matches),
-        },
-      };
+      return complete(await search({ bbox: input.bbox }), "bbox", `explicit bbox ${input.bbox.join(",")}`);
     }
-
     if (input.projectGroupId) {
-      const datasets = applyCutoff(
-        await this.dependencies.operations.searchDatasets({ ...common, projectGroupId: input.projectGroupId }, context),
+      return complete(
+        await search({ projectGroupId: input.projectGroupId }),
+        "project_group",
+        `project group ${input.projectGroupId}`,
       );
-      const matches: DatasetMatch[] = datasets.map((dataset) => ({
-        dataset,
-        matchedBy: "project_group",
-        evidence: `project group ${input.projectGroupId}`,
-      }));
-      return {
-        status: "complete",
-        data: {
-          matches,
-          ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
-          effectiveSort: { field: "uploaded_timestamp", order: "desc" },
-          table: renderDatasetTable(matches),
-        },
-      };
     }
 
     if (!input.place) {
@@ -287,56 +306,30 @@ export class SemanticIntentModule {
       };
     }
 
-    let datasets = applyCutoff(
-      await this.dependencies.operations.searchDatasets({ ...common, name: input.place }, context),
-    );
-    let matchedBy: "name" | "city" | "bbox" = "name";
-    let evidence = `name contains ${input.place}`;
-    if (datasets.length === 0) {
-      datasets = applyCutoff(
-        await this.dependencies.operations.searchDatasets({ ...common, city: input.place }, context),
-      );
-      matchedBy = "city";
-      evidence = `city contains ${input.place}`;
-    }
-    if (datasets.length === 0) {
-      const placeCandidates = await this.dependencies.places.forwardGeocode(input.place);
-      if (placeCandidates.length > 1) {
-        return {
-          status: "ambiguous",
-          candidates: placeCandidates.map((candidate) => ({
-            label: candidate.label,
-            bbox: candidate.bbox,
-            ...(candidate.confidence !== undefined ? { confidence: candidate.confidence } : {}),
-            ...(candidate.providerId !== undefined ? { providerId: candidate.providerId } : {}),
-          })),
-          accepted: { ...input },
-        };
-      }
-      const resolved = placeCandidates[0];
-      if (resolved) {
-        datasets = applyCutoff(
-          await this.dependencies.operations.searchDatasets({ ...common, bbox: resolved.bbox }, context),
-        );
-        matchedBy = "bbox";
-        evidence = `bbox for ${resolved.label}`;
-      }
-    }
-    const matches: DatasetMatch[] = datasets.map((dataset) => ({
-      dataset,
-      matchedBy,
-      evidence,
-    }));
+    let datasets = await search({ name: input.place });
+    if (datasets.length > 0) return complete(datasets, "name", `name contains ${input.place}`);
+    datasets = await search({ city: input.place });
+    if (datasets.length > 0) return complete(datasets, "city", `city contains ${input.place}`);
 
-    return {
-      status: "complete",
-      data: {
-        matches,
-        ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
-        effectiveSort: { field: "uploaded_timestamp", order: "desc" },
-        table: renderDatasetTable(matches),
-      },
-    };
+    const placeCandidates = await this.dependencies.places.forwardGeocode(input.place);
+    if (placeCandidates.length > 1) {
+      return {
+        status: "ambiguous",
+        candidates: placeCandidates.map((candidate) => ({
+          label: candidate.label,
+          bbox: candidate.bbox,
+          ...(candidate.confidence !== undefined ? { confidence: candidate.confidence } : {}),
+          ...(candidate.providerId !== undefined ? { providerId: candidate.providerId } : {}),
+        })),
+        accepted: { ...input },
+      };
+    }
+    const resolved = placeCandidates[0];
+    if (resolved) {
+      return complete(await search({ bbox: resolved.bbox }), "bbox", `bbox for ${resolved.label}`);
+    }
+    // Nothing matched by name, city or geocode: report the (empty) name-search outcome.
+    return complete(datasets, "city", `city contains ${input.place}`);
   }
 
   async listServices(
@@ -566,27 +559,84 @@ export class SemanticIntentModule {
   }
 
   /**
-   * Jobs across project groups. The API requires tdei_project_group_id, so
-   * without one this fans out across the caller's groups. Date filtering is
-   * client-side on created_at (the API has no date param).
+   * Jobs for one project group. The API requires tdei_project_group_id, so the
+   * group is resolved first: by id, or by name against the (cached) list of
+   * groups the caller can see. Without either, the tool asks which group,
+   * because most questions ("what is running?", "status of job X") concern one
+   * group. Only an explicit `allGroups` fans out across every group.
+   * Date filtering is client-side on created_at (the API has no date param).
    */
   async listJobs(input: ListJobsInput = {}, context: RequestContext = {}): Promise<IntentResult<ListJobsData>> {
     const pageSize = Math.min(Math.max(input.limit ?? 20, 1), 50);
     const cutoffMs = resolveCutoffMs(input.createdAfter, input.createdWithinDays);
-    let groupIds: string[] = [];
-    if (input.projectGroupId?.trim()) {
-      groupIds = [input.projectGroupId.trim()];
+
+    let groupIds: string[];
+    const explicitId = input.projectGroupId?.trim();
+    const explicitName = input.projectGroupName?.trim();
+    if (explicitId) {
+      groupIds = [explicitId];
     } else {
-      const groups = await this.dependencies.operations.listProjectGroups({ page: 1, pageSize: 50 }, context);
-      groupIds = groups
-        .map((group) => group.tdei_project_group_id ?? group.id ?? group.project_group_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      const groups = await this.accessibleProjectGroups(context);
+      const entries = groups.flatMap((group) => {
+        const id = group.tdei_project_group_id ?? group.id ?? group.project_group_id;
+        const name = group.project_group_name ?? group.name;
+        return typeof id === "string" && id.length > 0 ? [{ id, name: typeof name === "string" ? name : id }] : [];
+      });
+      if (explicitName) {
+        const wanted = explicitName.toLowerCase();
+        const exact = entries.filter((entry) => entry.name.toLowerCase() === wanted);
+        const partial = entries.filter((entry) => entry.name.toLowerCase().includes(wanted));
+        const found = exact.length > 0 ? exact : partial;
+        if (found.length === 0) {
+          return {
+            status: "needs_input",
+            missing: [
+              {
+                field: "projectGroupName",
+                question: `No project group matches "${explicitName}". Which project group should I list jobs for?`,
+                allowedValues: entries.map((entry) => entry.name),
+              },
+            ],
+            accepted: { ...input },
+          };
+        }
+        if (found.length > 1) {
+          return {
+            status: "needs_input",
+            missing: [
+              {
+                field: "projectGroupName",
+                question: `"${explicitName}" matches ${found.length} project groups. Which one?`,
+                allowedValues: found.map((entry) => entry.name),
+              },
+            ],
+            accepted: { ...input },
+          };
+        }
+        groupIds = [found[0]!.id];
+      } else if (input.allGroups === true) {
+        groupIds = entries.map((entry) => entry.id);
+      } else {
+        return {
+          status: "needs_input",
+          missing: [
+            {
+              field: "projectGroupName",
+              question:
+                'Which project group should I list jobs for? Reply with its name, or say "all" to search every project group (slower).',
+              allowedValues: entries.map((entry) => entry.name),
+            },
+          ],
+          accepted: { ...input },
+        };
+      }
     }
     const searchedProjectGroups = groupIds;
-    const collected: Array<Record<string, unknown>> = [];
-    for (const groupId of groupIds) {
+    // Bounded-concurrency fan-out; results keep project-group order so output
+    // stays deterministic. One inaccessible group must not fail the whole call.
+    const perGroup = await mapWithConcurrency(groupIds, JOB_FANOUT_CONCURRENCY, async (groupId) => {
       try {
-        const jobs = await this.dependencies.operations.listJobs(
+        return await this.dependencies.operations.listJobs(
           {
             ...(input.jobId?.trim() ? { jobId: input.jobId.trim() } : {}),
             projectGroupId: groupId,
@@ -598,16 +648,26 @@ export class SemanticIntentModule {
           },
           context,
         );
-        collected.push(...jobs);
       } catch {
-        // One inaccessible group must not fail the whole fan-out.
+        return [] as Array<Record<string, unknown>>;
       }
-      if (collected.length >= pageSize * Math.max(groupIds.length, 1)) break;
-    }
+    });
+    const collected: Array<Record<string, unknown>> = perGroup.flat();
+    // Newest first across all groups, so the page holds the most recent jobs
+    // rather than whatever the first groups happened to return. Jobs without
+    // a timestamp sort last; the sort is stable so ties keep group order.
+    const newestFirst = [...collected].sort((a, b) => {
+      const ta = createdTimestampMs(a);
+      const tb = createdTimestampMs(b);
+      if (ta === tb) return 0;
+      if (ta === undefined) return 1;
+      if (tb === undefined) return -1;
+      return tb - ta;
+    });
     const filtered = (
       cutoffMs === undefined
-        ? collected
-        : collected.filter((job) => {
+        ? newestFirst
+        : newestFirst.filter((job) => {
             const ts = createdTimestampMs(job);
             return ts !== undefined && ts >= cutoffMs;
           })
@@ -620,9 +680,10 @@ export class SemanticIntentModule {
         apiOperation: "listJobs",
         method: "GET",
         path: "/api/v1/jobs",
-        scopeNote: input.projectGroupId
-          ? "Jobs for the requested project group."
-          : "The jobs API requires a project group, so this fanned out across your accessible groups.",
+        scopeNote:
+          groupIds.length === 1
+            ? "Jobs for the requested project group."
+            : "Jobs searched across all of your accessible project groups, as requested.",
       },
     };
   }
@@ -1466,9 +1527,10 @@ export class SemanticIntentModule {
         accepted: {},
       };
     }
-    const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
+    // The lookup only refines the reported data type; a failed search must not block the runbook.
+    const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context).catch(() => undefined);
     let dataType: DataType = "osw";
-    if (lookup.status === "complete" && lookup.data.matches[0]) {
+    if (lookup?.status === "complete" && lookup.data.matches[0]) {
       const raw = (lookup.data.matches[0].dataset.data_type as string | undefined)?.toLowerCase();
       if (raw === "flex" || raw === "pathways" || raw === "osw") dataType = raw;
     }
@@ -1730,10 +1792,16 @@ export class SemanticIntentModule {
   ): Promise<IntentResult<ListVersionsData>> {
     if (!this.dependencies.operations.listVersions) return this.unsupported("listVersions");
     const types: DataType[] = input.dataType ? [input.dataType] : ["osw", "flex", "pathways"];
-    const versions: Record<string, unknown> = {};
-    for (const dataType of types) {
-      versions[dataType] = await this.dependencies.operations.listVersions({ dataType }, context);
-    }
+    // Call through `operations` so implementations keep their `this`.
+    const operations = this.dependencies.operations;
+    const results = await Promise.all(
+      types.map((dataType) =>
+        this.cached(`versions:${dataType}`, STATIC_REFERENCE_TTL_MS, context, () =>
+          operations.listVersions!({ dataType }, context),
+        ),
+      ),
+    );
+    const versions: Record<string, unknown> = Object.fromEntries(types.map((dataType, i) => [dataType, results[i]]));
     return {
       status: "complete",
       data: {
@@ -1749,9 +1817,10 @@ export class SemanticIntentModule {
     if (!this.dependencies.operations.getCapabilities || !this.dependencies.operations.listApiVersions) {
       return this.unsupported("getSystemInfo");
     }
+    const operations = this.dependencies.operations;
     const [capabilities, apiVersions] = await Promise.all([
-      this.dependencies.operations.getCapabilities(context),
-      this.dependencies.operations.listApiVersions(context),
+      this.cached("capabilities", STATIC_REFERENCE_TTL_MS, context, () => operations.getCapabilities!(context)),
+      this.cached("apiVersions", STATIC_REFERENCE_TTL_MS, context, () => operations.listApiVersions!(context)),
     ]);
     return { status: "complete", data: { capabilities, apiVersions } };
   }

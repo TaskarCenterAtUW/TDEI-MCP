@@ -56,10 +56,7 @@ export async function checkHealth(
   let spec: HealthReport["spec"];
   const specStart = Date.now();
   try {
-    const response = await Promise.race([
-      fetchImpl(getConfig().specUrl, { method: "GET" }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
-    ]);
+    const response = await fetchImpl(getConfig().specUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
     await response.body?.cancel().catch(() => undefined);
     spec = { url: getConfig().specUrl, reachable: response.ok, latencyMs: Date.now() - specStart };
   } catch {

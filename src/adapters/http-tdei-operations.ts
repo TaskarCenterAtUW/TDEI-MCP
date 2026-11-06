@@ -39,6 +39,14 @@ function queryParams(query?: ApiQuery): URLSearchParams {
   return params;
 }
 
+function parseJsonOrText(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
 function toJobRecord(result: unknown): JobRecord {
   if (result && typeof result === "object" && !Array.isArray(result)) {
     return result as JobRecord;
@@ -202,30 +210,19 @@ export class HttpTdeiOperations implements TdeiOperations {
     input: { tdeiDatasetId: string; metadata: DatasetMetadata },
     context: RequestContext,
   ): Promise<unknown> {
-    const accessToken = await this.resolveAccessToken(context);
-    const url = new URL(`api/v1/metadata/${encodeURIComponent(input.tdeiDatasetId)}`, this.baseUrl);
     const form = new FormData();
     form.set("file", new Blob([JSON.stringify(input.metadata)], { type: "application/json" }), "metadata.json");
-    const response = await this.fetchImpl(url, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body: form,
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new TdeiHttpError(
-        `TDEI request failed with status ${response.status} for editMetadata.`,
-        response.status,
-        text,
-      );
+    const { status, text } = await this.send(
+      "PUT",
+      `api/v1/metadata/${encodeURIComponent(input.tdeiDatasetId)}`,
+      undefined,
+      context,
+      { body: form },
+    );
+    if (status < 200 || status >= 300) {
+      throw new TdeiHttpError(`TDEI request failed with status ${status} for editMetadata.`, status, text);
     }
-    if (!text) return { updated: true };
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
+    return text ? parseJsonOrText(text) : { updated: true };
   }
 
   async launchJob(
@@ -339,35 +336,17 @@ export class HttpTdeiOperations implements TdeiOperations {
     },
     context: RequestContext,
   ): Promise<unknown> {
-    const accessToken = await this.resolveAccessToken(context);
-    const url = new URL(
+    const { status, text } = await this.send(
+      "PUT",
       `api/v1/osw/dataset-viewer/feedbacks/${encodeURIComponent(input.projectId)}/${encodeURIComponent(input.tdeiDatasetId)}`,
-      this.baseUrl,
+      undefined,
+      context,
+      { body: JSON.stringify(input.updates), contentType: "application/json", accept: "application/json" },
     );
-    const response = await this.fetchImpl(url, {
-      method: "PUT",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(input.updates),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new TdeiHttpError(
-        `TDEI request failed with status ${response.status} for updateFeedbackStatus.`,
-        response.status,
-        text,
-      );
+    if (status < 200 || status >= 300) {
+      throw new TdeiHttpError(`TDEI request failed with status ${status} for updateFeedbackStatus.`, status, text);
     }
-    if (!text) return {};
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
+    return text ? parseJsonOrText(text) : {};
   }
 
   async getPmTilesUrl(input: { tdeiDatasetId: string }, context: RequestContext): Promise<string> {
@@ -427,12 +406,13 @@ export class HttpTdeiOperations implements TdeiOperations {
     return typeof result === "string" ? result : JSON.stringify(result);
   }
 
-  private async requestText(
+  /** Single place that resolves the token, builds the URL and applies the timeout. */
+  private async send(
     method: string,
     path: string,
     params: URLSearchParams | undefined,
     context: RequestContext,
-    body?: { text: string; contentType: string },
+    options: { body?: BodyInit; contentType?: string; accept?: string } = {},
   ): Promise<{ status: number; text: string }> {
     const accessToken = await this.resolveAccessToken(context);
     const url = new URL(path, this.baseUrl);
@@ -440,14 +420,27 @@ export class HttpTdeiOperations implements TdeiOperations {
     const response = await this.fetchImpl(url, {
       method,
       headers: {
-        Accept: "application/json, text/plain, application/text, text/csv, application/geo+json",
+        ...(options.accept ? { Accept: options.accept } : {}),
         Authorization: `Bearer ${accessToken}`,
-        ...(body ? { "Content-Type": body.contentType } : {}),
+        ...(options.contentType ? { "Content-Type": options.contentType } : {}),
       },
-      ...(body ? { body: body.text } : {}),
+      ...(options.body !== undefined ? { body: options.body } : {}),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     return { status: response.status, text: await response.text() };
+  }
+
+  private requestText(
+    method: string,
+    path: string,
+    params: URLSearchParams | undefined,
+    context: RequestContext,
+    body?: { text: string; contentType: string },
+  ): Promise<{ status: number; text: string }> {
+    return this.send(method, path, params, context, {
+      accept: "application/json, text/plain, application/text, text/csv, application/geo+json",
+      ...(body ? { body: body.text, contentType: body.contentType } : {}),
+    });
   }
 
   private async getJson(path: string, params: URLSearchParams | undefined, context: RequestContext): Promise<unknown> {
@@ -455,12 +448,7 @@ export class HttpTdeiOperations implements TdeiOperations {
     if (status < 200 || status >= 300) {
       throw new TdeiHttpError(`TDEI request failed with status ${status} for ${path}.`, status, text);
     }
-    if (!text) return {};
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
+    return text ? parseJsonOrText(text) : {};
   }
 
   private async getText(path: string, params: URLSearchParams | undefined, context: RequestContext): Promise<string> {
@@ -485,20 +473,9 @@ export class HttpTdeiOperations implements TdeiOperations {
       body === undefined ? undefined : { text: JSON.stringify(body), contentType: "application/json" },
     );
     if (status < 200 || status >= 300) {
-      let parsed: unknown = text;
-      try {
-        parsed = JSON.parse(text) as unknown;
-      } catch {
-        /* keep text */
-      }
-      throw new TdeiHttpError(`TDEI request failed with status ${status} for ${path}.`, status, parsed);
+      throw new TdeiHttpError(`TDEI request failed with status ${status} for ${path}.`, status, parseJsonOrText(text));
     }
-    if (!text) return {};
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
+    return text ? parseJsonOrText(text) : {};
   }
 
   private async postText(path: string, textBody: string, context: RequestContext): Promise<unknown> {
@@ -509,12 +486,7 @@ export class HttpTdeiOperations implements TdeiOperations {
     if (status < 200 || status >= 300) {
       throw new TdeiHttpError(`TDEI request failed with status ${status} for ${path}.`, status, text);
     }
-    if (!text) return {};
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return text;
-    }
+    return text ? parseJsonOrText(text) : {};
   }
 
   private async deleteText(
@@ -534,21 +506,10 @@ export class HttpTdeiOperations implements TdeiOperations {
     params: URLSearchParams,
     context: RequestContext,
   ): Promise<Array<Record<string, unknown>>> {
-    const accessToken = await this.resolveAccessToken(context);
-    const url = new URL(path, this.baseUrl);
-    url.search = params.toString();
-    const response = await this.fetchImpl(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const text = await response.text();
+    const { status, text } = await this.send("GET", path, params, context, { accept: "application/json" });
     const body: unknown = text ? tryParseTdeiJson(text) : text;
-    if (!response.ok) {
-      throw new TdeiHttpError(`TDEI request failed with status ${response.status}.`, response.status, body);
+    if (status < 200 || status >= 300) {
+      throw new TdeiHttpError(`TDEI request failed with status ${status}.`, status, body);
     }
     const parsed = parseTdeiGetResponse(body);
     if (parsed.kind === "text") {

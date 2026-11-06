@@ -1,14 +1,27 @@
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { basename } from "node:path";
 
+import { summarizeFields } from "../mcp/field-summary.js";
+import { readCachedSpec, writeCachedSpec } from "./spec-disk-cache.js";
+
 type JsonObject = Record<string, unknown>;
 
 export async function loadOpenApiDocument(specUrl: string): Promise<JsonObject> {
   const isRemote = /^https?:\/\//i.test(specUrl);
-  const doc = isRemote
-    ? await SwaggerParser.dereference(specUrl, { resolve: { file: false } })
-    : await SwaggerParser.dereference(specUrl);
-  return doc as unknown as JsonObject;
+  if (!isRemote) return (await SwaggerParser.dereference(specUrl)) as unknown as JsonObject;
+  try {
+    const doc = (await SwaggerParser.dereference(specUrl, { resolve: { file: false } })) as unknown as JsonObject;
+    writeCachedSpec(specUrl, doc);
+    return doc;
+  } catch (error) {
+    // Spec host unreachable: fall back to the last spec this server loaded successfully.
+    const cached = readCachedSpec(specUrl);
+    if (!cached) throw error;
+    console.error(
+      `[openapi] could not load ${specUrl} (${error instanceof Error ? error.message : String(error)}); using the last cached copy`,
+    );
+    return (await SwaggerParser.dereference(cached as never)) as unknown as JsonObject;
+  }
 }
 
 export interface OpenApiToolDefinition {
@@ -65,6 +78,15 @@ export interface OpenApiMcpClientOptions {
   loadSpec?: () => Promise<JsonObject>;
   operationName?: (operationId: string) => string;
   logger?: (message: string) => void;
+  /** Per-request timeout for ordinary calls (default 30s). */
+  timeoutMs?: number;
+  /** Per-request timeout for multipart calls (default 5 min). */
+  uploadTimeoutMs?: number;
+}
+
+function retryDelay(attempt: number): Promise<void> {
+  const ms = Math.min(250 * 2 ** (attempt - 1), 2000) * (0.5 + Math.random() / 2);
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class OpenApiHttpError extends Error {
@@ -77,6 +99,8 @@ export class OpenApiHttpError extends Error {
     this.name = "OpenApiHttpError";
   }
 }
+
+const FAILED_LOAD_BACKOFF_MS = 15_000;
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "options", "head"]);
 
@@ -211,8 +235,12 @@ export class OpenApiMcpClient {
   private readonly apiUrl: string;
   private readonly operationName: (operationId: string) => string;
   private readonly logger: (message: string) => void;
+  private readonly timeoutMs: number;
+  private readonly uploadTimeoutMs: number;
   private tools: OpenApiToolDefinition[] | undefined;
   private operations = new Map<string, CompiledOperation>();
+  private loading: Promise<void> | undefined;
+  private lastFailure: { at: number; error: unknown } | undefined;
 
   constructor(options: OpenApiMcpClientOptions) {
     if (!options.specUrl && !options.loadSpec) {
@@ -223,6 +251,8 @@ export class OpenApiMcpClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.operationName = options.operationName ?? defaultOperationName;
     this.logger = options.logger ?? ((message) => console.error(message));
+    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.uploadTimeoutMs = options.uploadTimeoutMs ?? 300_000;
     const specUrl = options.specUrl;
     this.loadSpecImpl = options.loadSpec ?? (() => loadOpenApiDocument(specUrl!));
   }
@@ -238,7 +268,8 @@ export class OpenApiMcpClient {
     if (!operation) throw new Error(`Unknown OpenAPI operation: ${name}`);
 
     let path = operation.path;
-    const url = new URL(path.replace(/^\/+/, ""), `${this.apiUrl.replace(/\/+$/, "")}/`);
+    const base = `${this.apiUrl.replace(/\/+$/, "")}/`;
+    const url = new URL(base);
     const headers = new Headers(await this.headersProvider());
     if (!headers.has("Accept")) {
       headers.set("Accept", "application/json, text/plain, */*");
@@ -257,7 +288,7 @@ export class OpenApiMcpClient {
         headers.append("Cookie", `${parameter.name}=${encodeURIComponent(String(value))}`);
       }
     }
-    url.pathname = new URL(path.replace(/^\/+/, ""), `${this.apiUrl.replace(/\/+$/, "")}/`).pathname;
+    url.pathname = new URL(path.replace(/^\/+/, ""), base).pathname;
 
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- reassigned per request below; module scope would share mutable state across concurrent calls.
     let buildBody: () => Promise<BodyInit | undefined> = async () => undefined;
@@ -295,23 +326,34 @@ export class OpenApiMcpClient {
       }
     }
 
-    const maxAttempts = isMultipart ? 2 : 1;
+    const method = operation.method.toUpperCase();
+    // Retry policy. GETs are idempotent, so transient statuses and network
+    // errors are retried. Uploads may already have been accepted when a
+    // request times out or a gateway answers 502/504, and retrying would
+    // create a duplicate, so they retry only on 429/503 (the server explicitly
+    // did not process the request) and never after a network error or timeout.
+    const isGet = method === "GET";
+    const maxAttempts = isGet ? 3 : isMultipart ? 2 : 1;
+    const retryableStatuses = isGet ? new Set([408, 429, 502, 503, 504]) : new Set([429, 503]);
     let response: Response | undefined;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const body = await buildBody();
       try {
         response = await this.fetchImpl(url, {
-          method: operation.method.toUpperCase(),
+          method,
           headers,
           ...(body === undefined ? {} : { body }),
+          signal: AbortSignal.timeout(isMultipart ? this.uploadTimeoutMs : this.timeoutMs),
         });
-        if (isMultipart && attempt < maxAttempts && [408, 429, 502, 503, 504].includes(response.status)) {
+        if (attempt < maxAttempts && retryableStatuses.has(response.status)) {
           await response.body?.cancel().catch(() => undefined);
+          await retryDelay(attempt);
           continue;
         }
         break;
       } catch (error) {
-        if (attempt < maxAttempts) {
+        if (isGet && attempt < maxAttempts) {
+          await retryDelay(attempt);
           continue;
         }
         const reason = error instanceof Error ? error.message : String(error);
@@ -354,13 +396,62 @@ export class OpenApiMcpClient {
   }
 
   async close(): Promise<void> {
+    this.loading = undefined;
     this.tools = undefined;
     this.operations.clear();
   }
 
-  private async ensureLoaded(): Promise<void> {
-    if (this.tools) return;
-    const spec = await this.loadSpecImpl();
+  private ensureLoaded(): Promise<void> {
+    if (this.tools) return Promise.resolve();
+    // A load that just failed is not retried by every request; callers fail fast for a few seconds.
+    if (this.lastFailure && Date.now() - this.lastFailure.at < FAILED_LOAD_BACKOFF_MS) {
+      return Promise.reject(this.lastFailure.error);
+    }
+    // Concurrent first calls share one spec load instead of each dereferencing it.
+    const pending = (this.loading ??= this.loadAndCompile()
+      .then(() => {
+        this.lastFailure = undefined;
+      })
+      .catch((error: unknown) => {
+        this.lastFailure = { at: Date.now(), error };
+        throw error;
+      })
+      .finally(() => {
+        if (this.loading === pending) this.loading = undefined;
+      }));
+    return pending;
+  }
+
+  /**
+   * Re-reads the spec and swaps in the new tools when it changed. A failed
+   * refresh keeps the current tools. Returns true when the tool set changed.
+   */
+  async refresh(): Promise<boolean> {
+    if (!this.tools) return false;
+    const compiled = this.compile(await this.loadSpecImpl());
+    const changed = JSON.stringify(compiled.tools) !== JSON.stringify(this.tools);
+    if (changed) {
+      this.operations = compiled.operations;
+      this.tools = compiled.tools;
+      this.logger(`[openapi] refreshed spec: ${compiled.tools.length} operations`);
+    }
+    return changed;
+  }
+
+  private async loadAndCompile(): Promise<void> {
+    const compiled = this.compile(await this.loadSpecImpl());
+    this.tools = compiled.tools;
+    this.operations = compiled.operations;
+    this.logger(
+      `[openapi] loaded ${compiled.tools.length} operations ${compiled.fromCache ? "from cache" : "in process"}`,
+    );
+  }
+
+  private compile(spec: JsonObject): {
+    tools: OpenApiToolDefinition[];
+    operations: Map<string, CompiledOperation>;
+    fromCache: boolean;
+  } {
     const paths = isObject(spec.paths) ? spec.paths : {};
 
     const nameSignatureParts: string[] = [];
@@ -377,13 +468,14 @@ export class OpenApiMcpClient {
     const cachedBySpec = compiledSpecCache.get(spec);
     const cachedEntry = cachedBySpec?.get(nameSignature);
     if (cachedEntry) {
-      this.tools = cachedEntry.tools.map((tool) => ({
-        ...tool,
-        ...(tool.tags ? { tags: [...tool.tags] } : {}),
-      }));
-      this.operations = new Map(cachedEntry.operations);
-      this.logger(`[openapi] loaded ${this.tools.length} operations from cache`);
-      return;
+      return {
+        tools: cachedEntry.tools.map((tool) => ({
+          ...tool,
+          ...(tool.tags ? { tags: [...tool.tags] } : {}),
+        })),
+        operations: new Map(cachedEntry.operations),
+        fromCache: true,
+      };
     }
 
     const tools: OpenApiToolDefinition[] = [];
@@ -409,7 +501,20 @@ export class OpenApiMcpClient {
           : [];
         const parameters = [...sharedParameters, ...ownParameters];
         const compiled = compileInputSchema(parameters, operation);
-        const description = descriptionFor(operation);
+        const baseDescription = descriptionFor(operation);
+        // Mandatory/optional inputs straight from the spec, so the model can fill them in one go.
+        const properties = isObject(compiled.schema.properties) ? Object.keys(compiled.schema.properties) : [];
+        const requiredNames = Array.isArray(compiled.schema.required) ? (compiled.schema.required as string[]) : [];
+        const fieldsLine =
+          properties.length > 0
+            ? summarizeFields({
+                required: requiredNames,
+                optional: properties.filter((field) => !requiredNames.includes(field)),
+              })
+            : undefined;
+        const description = fieldsLine
+          ? `${baseDescription ? `${baseDescription}\n` : ""}${fieldsLine}`
+          : baseDescription;
         const tags = Array.isArray(operation.tags)
           ? operation.tags.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
           : [];
@@ -443,8 +548,6 @@ export class OpenApiMcpClient {
       operations: new Map(operations),
     });
 
-    this.operations = operations;
-    this.tools = tools;
-    this.logger(`[openapi] loaded ${tools.length} operations in process`);
+    return { tools, operations, fromCache: false };
   }
 }

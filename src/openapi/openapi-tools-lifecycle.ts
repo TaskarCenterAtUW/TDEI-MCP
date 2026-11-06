@@ -139,23 +139,25 @@ export class OpenApiToolsLifecycle {
     });
   }
 
-  callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
-    return this.serialize(async () => {
-      await this.ensureLoadedLocked();
-      // Binary downloads never touch server bytes or disk. They resolve to a
-      // client-side curl instruction which the LLM runs on the CLIENT machine,
-      // keeping them out of the generic text-oriented OpenAPI executor.
-      if (BinaryTdeiDownloads.isDownloadTool(tool)) {
-        const downloads =
-          this.downloads ??
-          new BinaryTdeiDownloads({
-            baseUrl: getConfig().apiUrl,
-            ...(this.authSession.getAccessToken ? { tokenProvider: () => this.authSession.getAccessToken!() } : {}),
-          });
-        return downloads.download(tool, input, {});
-      }
-      return this.openApiSession.callTool(tool, input);
-    });
+  async callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
+    // Only load/reload/logout are serialized. The call itself runs outside the
+    // queue so a slow upstream request never blocks unrelated tool calls.
+    if (this.state !== "loaded") {
+      await this.serialize(() => this.ensureLoadedLocked());
+    }
+    // Binary downloads never touch server bytes or disk. They resolve to a
+    // client-side curl instruction which the LLM runs on the CLIENT machine,
+    // keeping them out of the generic text-oriented OpenAPI executor.
+    if (BinaryTdeiDownloads.isDownloadTool(tool)) {
+      const downloads =
+        this.downloads ??
+        new BinaryTdeiDownloads({
+          baseUrl: getConfig().apiUrl,
+          ...(this.authSession.getAccessToken ? { tokenProvider: () => this.authSession.getAccessToken!() } : {}),
+        });
+      return downloads.download(tool, input, {});
+    }
+    return this.openApiSession.callTool(tool, input);
   }
 
   private async ensureLoadedLocked(): Promise<void> {

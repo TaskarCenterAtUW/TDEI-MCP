@@ -6,6 +6,9 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createServer, type ServerDependencies } from "../src/index.js";
 import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 
+// Registration mechanics tests: expose the full raw catalog.
+process.env.TDEI_EXPOSE_ALL_RAW_TOOLS = "1";
+
 function signedOutStatus() {
   return {
     configured: true,

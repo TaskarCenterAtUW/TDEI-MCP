@@ -49,6 +49,19 @@ export function joinDownloadPath(dir: string, filename: string): string {
 }
 
 /**
+ * Paths end up inside double quotes in a command the CLIENT machine runs, so a
+ * path that can break out of the quotes or run a command is rejected. Plain
+ * variables such as $HOME stay allowed (the default folder is $HOME/Downloads).
+ */
+export function assertSafeShellPath(value: string, label: string): void {
+  if (/["`\n\r\0]|\$\(/.test(value)) {
+    throw new Error(
+      `Unsafe ${label} "${value.slice(0, 80)}": it must not contain double quotes, backticks, "$(", or line breaks.`,
+    );
+  }
+}
+
+/**
  * Shared client-side download command used by every download path. Flags:
  * -L (follow redirects), -sS (silent but show errors), --create-dirs
  * (create the target folder), --fail-with-body (non-zero exit on HTTP
@@ -57,6 +70,7 @@ export function joinDownloadPath(dir: string, filename: string): string {
  * All interpolations are double-quoted for paths containing spaces.
  */
 export function buildClientDownloadCurl(url: string, bearer: string, filePath: string): string {
+  assertSafeShellPath(filePath, "download path");
   return (
     `curl -L -sS --create-dirs --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n" ` +
     `-H "Authorization: Bearer ${bearer}" "${url}" -o "${filePath}"`

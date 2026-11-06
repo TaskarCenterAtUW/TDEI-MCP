@@ -59,7 +59,10 @@ test("discovers OpenAPI operations as MCP tool definitions", async () => {
     ["get_dataset", "createDataset"],
   );
   const getDataset = tools[0]!;
-  assert.match(getDataset.description ?? "", /^\[OSW, Common APIs\] Get one dataset\. \| Returns: 200$/);
+  assert.match(
+    getDataset.description ?? "",
+    /^\[OSW, Common APIs\] Get one dataset\. \| Returns: 200\nFields - required: dataset_id\. optional: bbox, include_metadata\.$/,
+  );
   assert.deepEqual(getDataset.tags, ["OSW", "Common APIs"]);
   assert.deepEqual(getDataset.inputSchema.required, ["dataset_id"]);
   assert.deepEqual(Object.keys(getDataset.inputSchema.properties as Record<string, unknown>), [
