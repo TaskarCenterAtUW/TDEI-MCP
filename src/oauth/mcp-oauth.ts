@@ -139,13 +139,44 @@ export function openAuthorizationCode(code: string, verifier: string): SealedAcc
   return payload;
 }
 
+let generatedSecret: string | undefined;
+
+/**
+ * Server-side secret behind the sealed authorization codes and the login
+ * cookie. It must be unguessable: without it, both could be derived from
+ * public values (the PKCE challenge is visible in the authorize URL, and the
+ * API URL and slug are public), which would let anyone who sees those URLs open
+ * the tokens inside a code or forge a login cookie. Set TDEI_OAUTH_SECRET to
+ * the same value on every replica; otherwise a random per-process secret is
+ * used and a login must start and finish on the same instance.
+ */
+function oauthSecret(): string {
+  const configured = process.env.TDEI_OAUTH_SECRET?.trim();
+  if (configured) return configured;
+  return (generatedSecret ??= randomBytes(32).toString("hex"));
+}
+
+export function oauthSecretIsConfigured(): boolean {
+  return Boolean(process.env.TDEI_OAUTH_SECRET?.trim());
+}
+
 function challengeKey(codeChallenge: string): Buffer {
-  return createHash("sha256").update(codeChallenge).digest();
+  return createHash("sha256").update(`tdei-mcp-code-v2\n${oauthSecret()}\n${codeChallenge}`).digest();
 }
 
 function signingKey(apiUrl: string, slug: string): Buffer {
-  const extra = process.env.TDEI_OAUTH_SECRET?.trim() ?? "";
-  return createHash("sha256").update(`tdei-mcp-oauth-v1\n${apiUrl}\n${slug}\n${extra}`).digest();
+  return createHash("sha256").update(`tdei-mcp-oauth-v2\n${apiUrl}\n${slug}\n${oauthSecret()}`).digest();
+}
+
+/** Authorization codes are single-use: remember redeemed ones until they would have expired anyway. */
+const redeemedCodes = new Map<string, number>();
+
+function redeemOnce(code: string, expiresAt: number): void {
+  const now = Date.now();
+  for (const [key, until] of redeemedCodes) if (until <= now) redeemedCodes.delete(key);
+  const key = createHash("sha256").update(code).digest("base64url");
+  if (redeemedCodes.has(key)) throw new Error("invalid_grant");
+  redeemedCodes.set(key, expiresAt);
 }
 
 export function issueOAuthCookie(pending: OAuthPendingLogin, apiUrl: string, secure: boolean): string {
@@ -380,7 +411,8 @@ async function token(input: OAuthDispatchInput): Promise<OAuthHttpResult> {
       const redirectUri = form.get("redirect_uri") ?? "";
       const opened = openAuthorizationCode(code, verifier);
       if (opened.redirectUri !== redirectUri) throw new Error("invalid_grant");
-      return jsonResult(200, tokenResponseBody(opened));
+      redeemOnce(code, opened.exp);
+      return jsonResult(200, tokenResponseBody(opened), { "Cache-Control": "no-store", Pragma: "no-cache" });
     }
     if (grant === "refresh_token") {
       const refreshToken = form.get("refresh_token") ?? "";

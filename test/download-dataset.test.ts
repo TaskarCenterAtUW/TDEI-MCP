@@ -4,7 +4,6 @@ import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 
-import { resolveUserIntent } from "../src/intents/intent-resolver.js";
 import { registerSemanticTools } from "../src/intents/register-tools.js";
 import { SemanticIntentModule } from "../src/intents/semantic-intent-module.js";
 
@@ -195,12 +194,7 @@ test("downloadDataset asks for a UUID when a NAME matches nothing", async () => 
   assert.ok(result.status === "needs_input" && result.missing.some((m) => m.field === "tdeiDatasetId"));
 });
 
-test("download intent resolves to the registered tdei_download_dataset tool", async () => {
-  const resolved = resolveUserIntent("download this Seattle dataset");
-  assert.equal(resolved.status, "complete");
-  if (resolved.status !== "complete") throw new Error("expected complete");
-  assert.equal(resolved.data.tool, "tdei_download_dataset");
-
+test("tdei_download_dataset is registered and returns a curl command", async () => {
   const { module } = createModule();
   const server = new McpServer({ name: "download-dataset-test", version: "1.0.0" });
   registerSemanticTools(server, module);
@@ -222,11 +216,4 @@ test("download intent resolves to the registered tdei_download_dataset tool", as
   } finally {
     await client.close();
   }
-});
-
-test("feedback download requests do not resolve to dataset download", async () => {
-  const resolved = resolveUserIntent("download viewer feedbacks for my project group");
-  assert.equal(resolved.status, "complete");
-  if (resolved.status !== "complete") throw new Error("expected complete");
-  assert.notEqual(resolved.data.tool, "tdei_download_dataset");
 });

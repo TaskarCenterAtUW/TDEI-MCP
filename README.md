@@ -367,7 +367,6 @@ Both transports expose the common semantic tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `tdei_resolve_intent` | Deterministically map plain-language requests and aliases to a semantic tool and underlying TDEI operation; returns structured clarification instead of guessing. |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
 | `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook. |
 | `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded. |
@@ -466,6 +465,8 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
 | `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
 | `TDEI_DOWNLOAD_MODE` | No | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback) |
+| `TDEI_EXPOSE_ALL_RAW_TOOLS` | No | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it) |
+| `TDEI_OAUTH_SECRET` | Gateway deployments (generate with `openssl rand -hex 32`; see below) | Long random secret that protects sign-in codes and the login cookie. Set the same value on every replica. If unset, a random per-process secret is used and a sign-in must finish on the instance that started it |
 | `TDEI_DOWNLOAD_DIR` | No | `~/Downloads` (absolute folder for server-mode downloads) |
 | `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
@@ -547,3 +548,44 @@ node --env-file=.env --import tsx src/index.ts
 ```
 
 The source entry point uses the same stdio protocol and still needs an MCP client for initialization and tool calls.
+
+## Tool field lists
+
+Each tool description ends with a `Fields - required: ... optional: ...` line. Raw OpenAPI tools get it from the spec at load time. For `tdei_*` tools, mandatory fields are generated from the spec by `scripts/generate-tool-fields.ts` using the bindings in `src/intents/tool-spec-map.ts`:
+
+```bash
+pnpm gen:tool-fields     # regenerate src/intents/generated/tool-fields.generated.ts
+pnpm check:tool-fields   # fail if the committed file no longer matches the spec
+```
+
+Tool selection is guided by the routing guide in the server instructions (`src/intents/routing-guide.ts`); a test fails if a tool is added without a routing line.
+
+## Multiple users and logins
+
+- **A deployed or gateway server never shares a login.** Every tool call must carry the caller's own `Authorization: Bearer` token; without one the server answers `401` with an OAuth challenge. The server stores no user tokens and hands none to anyone else.
+- **One user, several logins is fine.** Tokens live with each client, so the same person can be signed in from several machines or tools at once. Each login is validated and refreshed on its own, and a browser SSO cookie keeps repeat sign-ins quick.
+- **Reuse of one login across MCP entries (dev, staging, workspace) applies only to a person on their own machine:** stdio, or a direct connection from the same machine's loopback with no proxy in between and not as a gateway child. There is no setting to enable it for remote callers.
+- **Connection security.** Terminate TLS in front of the server and never expose its port directly. Requests that a proxy reports as plain HTTP (`X-Forwarded-Proto: http`) and that can carry credentials are refused with `TDEI_HTTPS_REQUIRED`. Responses are sent `no-store`, and HSTS is added on HTTPS.
+- **Sign-in codes** are single-use, expire after two minutes, and are encrypted with a server secret as well as the PKCE challenge.
+
+### Setting `TDEI_OAUTH_SECRET`
+
+Generate it once and keep it. Changing it signs out anyone mid-login, and every replica must use the same value. Never put it in the image (it would be readable from `docker history` and the registry), the repo or CI logs.
+
+- **Deployed through GitHub Actions:** store it as a GitHub secret named `TDEI_OAUTH_SECRET` in the `Development` environment. The deploy job copies it into the Container App as a secret and points the env var at it, so no Azure access is needed on your machine:
+
+  ```bash
+  openssl rand -hex 32 | gh secret set TDEI_OAUTH_SECRET --env Development
+  ```
+
+  The deploy fails with this command if the secret is missing or shorter than 32 characters.
+
+- **Azure Container App by hand** (other environments):
+
+  ```bash
+  az containerapp secret set -n <app> -g <resource-group> --secrets tdei-oauth-secret=$(openssl rand -hex 32)
+  az containerapp update -n <app> -g <resource-group> --set-env-vars TDEI_OAUTH_SECRET=secretref:tdei-oauth-secret
+  ```
+
+- **Local Docker (`pnpm deploy:docker`):** the script generates a secret into the git-ignored `.env` on first run and reuses it on every restart.
+- **Any other host:** pass it as a runtime environment variable, for example `docker run -e TDEI_OAUTH_SECRET=... ` or your platform's secret store.

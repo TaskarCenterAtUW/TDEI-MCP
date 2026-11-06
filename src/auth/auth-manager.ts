@@ -19,6 +19,14 @@ const REFRESH_SAFETY_WINDOW_MS = 2 * 60 * 1000;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_TOKEN_VALIDATION_TTL_MS = 60 * 1000;
 const MAX_TOKEN_CACHE_ENTRIES = 1000;
+const TOKEN_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * In-flight validation probes, grouped by the shared validation cache. Several
+ * tool calls arriving together with a not-yet-validated token share one
+ * upstream probe instead of each sending their own.
+ */
+const inflightProbes = new WeakMap<Map<string, number>, Map<string, Promise<void>>>();
 const MAX_CALLBACK_PARAM_LENGTH = 1024;
 const MAX_AUTH_ERROR_DETAIL_LENGTH = 200;
 
@@ -382,7 +390,6 @@ export class AuthManager {
 
   async getAccessToken(): Promise<string> {
     if (this.hasUsableAccessToken()) {
-      console.error("[auth] using existing access token");
       return this.accessToken!;
     }
     if (this.refreshToken) {
@@ -485,19 +492,51 @@ export class AuthManager {
       }
     }
 
-    let response: Response;
-    try {
-      response = await fetchImpl(new URL("/api/v1/project-groups", `${apiUrl}/`), {
-        method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${this.accessToken}` },
-      });
-    } catch {
+    const token = this.accessToken;
+    const probe = async (): Promise<void> => {
+      let response: Response;
+      try {
+        // One row is enough to prove the token is accepted; the body is discarded.
+        const probeUrl = new URL("/api/v1/project-groups", `${apiUrl}/`);
+        probeUrl.searchParams.set("page_no", "1");
+        probeUrl.searchParams.set("page_size", "1");
+        response = await fetchImpl(probeUrl, {
+          method: "GET",
+          headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(TOKEN_PROBE_TIMEOUT_MS),
+        });
+      } catch {
+        throw new Error("TDEI_TOKEN_INVALID");
+      }
+      await response.body?.cancel().catch(() => undefined);
+      if (response.ok) return;
+      // Only a 2xx proves the token. 401/403 mean it is bad; 5xx means TDEI could
+      // not check it right now (retry), and anything else is not a confirmation.
+      if (response.status >= 500) throw new Error("TDEI_UPSTREAM_UNAVAILABLE");
       throw new Error("TDEI_TOKEN_INVALID");
+    };
+
+    // Concurrent validations of the same token share one probe. The entry is
+    // removed when it settles, so a failure is never reused by later requests.
+    let pending: Promise<void>;
+    const sharedCache = resolvedOptions.cache;
+    if (cacheKey && sharedCache) {
+      let inflight = inflightProbes.get(sharedCache);
+      if (!inflight) {
+        inflight = new Map();
+        inflightProbes.set(sharedCache, inflight);
+      }
+      const existing = inflight.get(cacheKey);
+      if (existing) {
+        pending = existing;
+      } else {
+        pending = probe().finally(() => inflight.delete(cacheKey));
+        inflight.set(cacheKey, pending);
+      }
+    } else {
+      pending = probe();
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("TDEI_TOKEN_INVALID");
-    }
-    await response.body?.cancel().catch(() => undefined);
+    await pending;
 
     if (ttlMs > 0) {
       const maxValidUntil = this.expiresAt

@@ -184,6 +184,8 @@ export function formatError(err: unknown): { isError: true; content: [{ type: "t
 }
 
 export function truncateText(text: string): { text: string; truncated: boolean } {
+  // UTF-8 is at most 3 bytes per UTF-16 code unit, so short strings can skip the Buffer copy.
+  if (text.length * 3 <= MAX_OUTPUT_BYTES) return { text, truncated: false };
   const bytes = Buffer.from(text, "utf-8");
   if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
     return { text, truncated: false };

@@ -8,6 +8,7 @@ import type {
   DatasetMetadata,
   RequestContext,
 } from "../intents/types.js";
+import { assertSafeShellPath } from "./binary-tdei-downloads.js";
 import { TdeiHttpError } from "./tdei-http-error.js";
 
 type DatasetMutations = Required<Pick<TdeiOperations, "validateDataset" | "uploadDataset">>;
@@ -202,6 +203,7 @@ function clientAssetPath(asset: DatasetAsset, field: string): string {
       `"${field}" path must be absolute on the CLIENT machine (e.g. /Users/you/data/file.zip or C:\\data\\file.zip); got "${asset.path}".`,
     );
   }
+  assertSafeShellPath(rawPath, `${field} path`);
   assertAllowedExtension(rawPath);
   if (asset.name) assertAllowedExtension(asset.name);
   return rawPath;

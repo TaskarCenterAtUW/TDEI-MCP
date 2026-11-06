@@ -9,6 +9,9 @@ import { isToolAllowed, loadConfigFile } from "../src/config-file.js";
 import { OpenApiToolsLifecycle } from "../src/openapi/openapi-tools-lifecycle.js";
 import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
 
+// Registration mechanics tests: expose the full raw catalog.
+process.env.TDEI_EXPOSE_ALL_RAW_TOOLS = "1";
+
 function fakeClient(names: Array<string | { name: string; tags?: string[]; description?: string }>) {
   return {
     async listTools() {

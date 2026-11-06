@@ -3,7 +3,8 @@ import * as z from "zod/v4";
 
 import { formatError, truncateText } from "../mcp/errors.js";
 import { SEMANTIC_TOOL_DESCRIPTIONS } from "./descriptions.js";
-import { resolveUserIntent } from "./intent-resolver.js";
+import { TOOL_SPEC_FIELDS } from "./generated/tool-fields.generated.js";
+import { summarizeFields } from "../mcp/field-summary.js";
 import type { SemanticIntentModule } from "./semantic-intent-module.js";
 import type { RequestContext } from "./types.js";
 
@@ -27,6 +28,8 @@ const findDatasetsSchema = z.object({
 const listJobsSchema = z.object({
   jobId: z.string().trim().min(1).optional(),
   projectGroupId: z.string().trim().min(1).optional(),
+  projectGroupName: z.string().trim().min(1).optional(),
+  allGroups: z.boolean().optional(),
   includeGroupJobs: z.boolean().optional(),
   jobType: z.string().trim().min(1).optional(),
   status: z.enum(["COMPLETED", "FAILED", "IN-PROGRESS", "ABANDONED"]).optional(),
@@ -47,10 +50,6 @@ const downloadDatasetSchema = z.object({
   filename: z.string().trim().min(1).optional(),
   confirm: z.boolean().optional(),
   selection: z.number().int().min(1).optional(),
-});
-
-const resolveIntentSchema = z.object({
-  request: z.string().trim().min(1),
 });
 
 const listServicesSchema = z.object({
@@ -297,8 +296,27 @@ const regenerateApiKeySchema = z.object({
 });
 
 function jsonIntentResult(data: unknown) {
-  const { text } = truncateText(JSON.stringify(data, null, 2));
+  // Compact JSON: indentation only costs the model tokens.
+  const { text } = truncateText(JSON.stringify(data));
   return { content: [{ type: "text" as const, text }] };
+}
+
+type ToolHandler = Parameters<McpServer["registerTool"]>[2];
+
+/**
+ * Description plus a spec-derived "Fields" line. Mandatory fields come from the
+ * OpenAPI spec (see scripts/generate-tool-fields.ts); everything else the tool
+ * accepts is listed as optional. Our Zod schemas keep fields optional on purpose
+ * so a missing value gets a helpful needs_input reply, which hides required-ness
+ * from the model; this line puts it back.
+ */
+export function describeWithFields(name: string, description: string, shapeKeys: readonly string[]): string {
+  const spec = TOOL_SPEC_FIELDS[name];
+  if (!spec) return description;
+  const required = shapeKeys.filter((key) => spec.required.includes(key));
+  const optional = shapeKeys.filter((key) => !spec.required.includes(key) && !spec.oneOf?.includes(key));
+  const line = summarizeFields({ required, optional, oneOf: spec.oneOf });
+  return line ? `${description}\n${line}` : description;
 }
 
 export function registerSemanticTools(
@@ -312,320 +330,89 @@ export function registerSemanticTools(
     registeredToolsByServer.set(server, registered);
   }
 
-  const register = (
-    name: string,
-    definition: Parameters<McpServer["registerTool"]>[1],
-    handler: Parameters<McpServer["registerTool"]>[2],
-  ) => {
-    if (registered.has(name)) return;
-    server.registerTool(name, definition, handler);
-    registered.add(name);
-  };
-
-  register(
-    "tdei_resolve_intent",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.resolveIntent,
-      inputSchema: resolveIntentSchema.shape,
-    },
-    async (args) => jsonIntentResult(resolveUserIntent(String(args.request))),
-  );
-
-  register(
-    "tdei_find_datasets",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.findDatasets,
-      inputSchema: findDatasetsSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.findDatasets(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_list_my_project_groups",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.listMyProjectGroups,
-      inputSchema: listProjectGroupsSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.listMyProjectGroups(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_list_services",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.listServices,
-      inputSchema: listServicesSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.listServices(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_validate_dataset",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.validateDataset,
-      inputSchema: validateDatasetSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.validateDataset(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_upload_dataset",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.uploadDataset,
-      inputSchema: uploadDatasetSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.uploadDataset(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_get_my_identity",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.getMyIdentity,
-      inputSchema: {},
-    },
-    async () => {
-      try {
-        return jsonIntentResult(await module.getMyIdentity(contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_list_jobs",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.listJobs,
-      inputSchema: listJobsSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.listJobs(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_get_dataset_details",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.getDatasetDetails,
-      inputSchema: getDatasetDetailsSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.getDatasetDetails(args as { tdeiDatasetId: string }, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  register(
-    "tdei_download_dataset",
-    {
-      description: SEMANTIC_TOOL_DESCRIPTIONS.downloadDataset,
-      inputSchema: downloadDatasetSchema.shape,
-    },
-    async (args) => {
-      try {
-        return jsonIntentResult(await module.downloadDataset(args as never, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    },
-  );
-
-  const registerIntent = (
+  /** Registers one intent tool; the try/catch + JSON wrapping lives here once. */
+  const tool = <S extends z.ZodObject>(
     name: string,
     description: string,
-    shape: Record<string, z.ZodType>,
-    invoke: (args: Record<string, unknown>, ctx: RequestContext) => Promise<unknown>,
+    schema: S,
+    // Zod's inferred optionals (`T | undefined`) clash with the module's
+    // exactOptionalPropertyTypes inputs; the schema already validated `args`.
+    // oxlint-disable-next-line typescript/no-explicit-any
+    invoke: (args: any, ctx: RequestContext) => unknown,
   ): void => {
-    register(name, { description, inputSchema: shape }, (async (args: Record<string, unknown>) => {
-      try {
-        return jsonIntentResult(await invoke(args, contextProvider()));
-      } catch (error) {
-        return formatError(error);
-      }
-    }) as Parameters<McpServer["registerTool"]>[2]);
+    if (registered.has(name)) return;
+    server.registerTool(
+      name,
+      { description: describeWithFields(name, description, Object.keys(schema.shape)), inputSchema: schema.shape },
+      (async (args: unknown) => {
+        try {
+          return jsonIntentResult(await invoke(args, contextProvider()));
+        } catch (error) {
+          return formatError(error);
+        }
+      }) as unknown as ToolHandler,
+    );
+    registered.add(name);
   };
+  const D = SEMANTIC_TOOL_DESCRIPTIONS;
+  const noArgs = z.object({});
 
-  registerIntent(
-    "tdei_publish_dataset",
-    SEMANTIC_TOOL_DESCRIPTIONS.publishDataset,
-    publishDatasetSchema.shape,
-    (args, ctx) => module.publishDataset(args as never, ctx),
+  tool("tdei_find_datasets", D.findDatasets, findDatasetsSchema, (a, c) => module.findDatasets(a, c));
+  tool("tdei_list_my_project_groups", D.listMyProjectGroups, listProjectGroupsSchema, (a, c) =>
+    module.listMyProjectGroups(a, c),
   );
-  registerIntent(
-    "tdei_delete_dataset",
-    SEMANTIC_TOOL_DESCRIPTIONS.deleteDataset,
-    deleteDatasetSchema.shape,
-    (args, ctx) => module.deleteDataset(args as never, ctx),
+  tool("tdei_list_services", D.listServices, listServicesSchema, (a, c) => module.listServices(a, c));
+  tool("tdei_validate_dataset", D.validateDataset, validateDatasetSchema, (a, c) => module.validateDataset(a, c));
+  tool("tdei_upload_dataset", D.uploadDataset, uploadDatasetSchema, (a, c) => module.uploadDataset(a, c));
+  tool("tdei_get_my_identity", D.getMyIdentity, noArgs, (_a, c) => module.getMyIdentity(c));
+  tool("tdei_list_jobs", D.listJobs, listJobsSchema, (a, c) => module.listJobs(a, c));
+  tool("tdei_get_dataset_details", D.getDatasetDetails, getDatasetDetailsSchema, (a, c) =>
+    module.getDatasetDetails(a, c),
   );
-  registerIntent("tdei_clone_dataset", SEMANTIC_TOOL_DESCRIPTIONS.cloneDataset, cloneDatasetSchema.shape, (args, ctx) =>
-    module.cloneDataset(args as never, ctx),
+  tool("tdei_download_dataset", D.downloadDataset, downloadDatasetSchema, (a, c) => module.downloadDataset(a, c));
+  tool("tdei_publish_dataset", D.publishDataset, publishDatasetSchema, (a, c) => module.publishDataset(a, c));
+  tool("tdei_delete_dataset", D.deleteDataset, deleteDatasetSchema, (a, c) => module.deleteDataset(a, c));
+  tool("tdei_clone_dataset", D.cloneDataset, cloneDatasetSchema, (a, c) => module.cloneDataset(a, c));
+  tool("tdei_edit_metadata", D.editMetadata, editMetadataSchema, (a, c) => module.editMetadata(a, c));
+  tool("tdei_calculate_confidence", D.calculateConfidence, confidenceSchema, (a, c) =>
+    module.calculateConfidence(a, c),
   );
-  registerIntent("tdei_edit_metadata", SEMANTIC_TOOL_DESCRIPTIONS.editMetadata, editMetadataSchema.shape, (args, ctx) =>
-    module.editMetadata(args as never, ctx),
+  tool("tdei_calculate_quality_intersection", D.calculateQualityIntersection, qualityIntersectionSchema, (a, c) =>
+    module.calculateQualityIntersection(a, c),
   );
-  registerIntent(
-    "tdei_calculate_confidence",
-    SEMANTIC_TOOL_DESCRIPTIONS.calculateConfidence,
-    confidenceSchema.shape,
-    (args, ctx) => module.calculateConfidence(args as never, ctx),
+  tool("tdei_tag_quality_metric", D.tagQualityMetric, qualityTagSchema, (a, c) => module.tagQualityMetric(a, c));
+  tool("tdei_generate_quality_report", D.generateQualityReport, qualityReportSchema, (a, c) =>
+    module.generateQualityReport(a, c),
   );
-  registerIntent(
-    "tdei_calculate_quality_intersection",
-    SEMANTIC_TOOL_DESCRIPTIONS.calculateQualityIntersection,
-    qualityIntersectionSchema.shape,
-    (args, ctx) => module.calculateQualityIntersection(args as never, ctx),
+  tool("tdei_sanitize_dataset", D.sanitizeDataset, sanitizeSchema, (a, c) => module.sanitizeDataset(a, c));
+  tool("tdei_convert_osw", D.convertOsw, convertOswSchema, (a, c) => module.convertOsw(a, c));
+  tool("tdei_convert_pathways", D.convertPathways, convertPathwaysSchema, (a, c) => module.convertPathways(a, c));
+  tool("tdei_self_merge", D.selfMerge, selfMergeSchema, (a, c) => module.selfMerge(a, c));
+  tool("tdei_spatial_join", D.spatialJoin, spatialJoinSchema, (a, c) => module.spatialJoin(a, c));
+  tool("tdei_union_datasets", D.unionDatasets, unionSchema, (a, c) => module.unionDatasets(a, c));
+  tool("tdei_cut_dataset_bbox", D.cutDatasetBbox, cutBboxSchema, (a, c) => module.cutDatasetBbox(a, c));
+  tool("tdei_tag_road", D.tagRoad, tagRoadSchema, (a, c) => module.tagRoad(a, c));
+  tool("tdei_tag_incline", D.tagIncline, getDatasetDetailsSchema, (a, c) => module.tagIncline(a, c));
+  tool("tdei_check_dataset_incline", D.checkDatasetIncline, getDatasetDetailsSchema, (a, c) =>
+    module.checkDatasetIncline(a, c),
   );
-  registerIntent(
-    "tdei_tag_quality_metric",
-    SEMANTIC_TOOL_DESCRIPTIONS.tagQualityMetric,
-    qualityTagSchema.shape,
-    (args, ctx) => module.tagQualityMetric(args as never, ctx),
+  tool("tdei_list_feedbacks", D.listFeedbacks, feedbackListSchema, (a, c) => module.listFeedbacks(a, c));
+  tool("tdei_get_feedback_summary", D.getFeedbackSummary, feedbackSummarySchema, (a, c) =>
+    module.getFeedbackSummary(a, c),
   );
-  registerIntent(
-    "tdei_generate_quality_report",
-    SEMANTIC_TOOL_DESCRIPTIONS.generateQualityReport,
-    qualityReportSchema.shape,
-    (args, ctx) => module.generateQualityReport(args as never, ctx),
+  tool("tdei_download_feedbacks", D.downloadFeedbacks, feedbackDownloadSchema, (a, c) =>
+    module.downloadFeedbacks(a, c),
   );
-  registerIntent(
-    "tdei_sanitize_dataset",
-    SEMANTIC_TOOL_DESCRIPTIONS.sanitizeDataset,
-    sanitizeSchema.shape,
-    (args, ctx) => module.sanitizeDataset(args as never, ctx),
+  tool("tdei_submit_feedback", D.submitFeedback, feedbackSubmitSchema, (a, c) => module.submitFeedback(a, c));
+  tool("tdei_update_feedback_status", D.updateFeedbackStatus, feedbackStatusSchema, (a, c) =>
+    module.updateFeedbackStatus(a, c),
   );
-  registerIntent("tdei_convert_osw", SEMANTIC_TOOL_DESCRIPTIONS.convertOsw, convertOswSchema.shape, (args, ctx) =>
-    module.convertOsw(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_convert_pathways",
-    SEMANTIC_TOOL_DESCRIPTIONS.convertPathways,
-    convertPathwaysSchema.shape,
-    (args, ctx) => module.convertPathways(args as never, ctx),
-  );
-  registerIntent("tdei_self_merge", SEMANTIC_TOOL_DESCRIPTIONS.selfMerge, selfMergeSchema.shape, (args, ctx) =>
-    module.selfMerge(args as never, ctx),
-  );
-  registerIntent("tdei_spatial_join", SEMANTIC_TOOL_DESCRIPTIONS.spatialJoin, spatialJoinSchema.shape, (args, ctx) =>
-    module.spatialJoin(args as never, ctx),
-  );
-  registerIntent("tdei_union_datasets", SEMANTIC_TOOL_DESCRIPTIONS.unionDatasets, unionSchema.shape, (args, ctx) =>
-    module.unionDatasets(args as never, ctx),
-  );
-  registerIntent("tdei_cut_dataset_bbox", SEMANTIC_TOOL_DESCRIPTIONS.cutDatasetBbox, cutBboxSchema.shape, (args, ctx) =>
-    module.cutDatasetBbox(args as never, ctx),
-  );
-  registerIntent("tdei_tag_road", SEMANTIC_TOOL_DESCRIPTIONS.tagRoad, tagRoadSchema.shape, (args, ctx) =>
-    module.tagRoad(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_tag_incline",
-    SEMANTIC_TOOL_DESCRIPTIONS.tagIncline,
-    getDatasetDetailsSchema.shape,
-    (args, ctx) => module.tagIncline(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_check_dataset_incline",
-    SEMANTIC_TOOL_DESCRIPTIONS.checkDatasetIncline,
-    getDatasetDetailsSchema.shape,
-    (args, ctx) => module.checkDatasetIncline(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_list_feedbacks",
-    SEMANTIC_TOOL_DESCRIPTIONS.listFeedbacks,
-    feedbackListSchema.shape,
-    (args, ctx) => module.listFeedbacks(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_get_feedback_summary",
-    SEMANTIC_TOOL_DESCRIPTIONS.getFeedbackSummary,
-    feedbackSummarySchema.shape,
-    (args, ctx) => module.getFeedbackSummary(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_download_feedbacks",
-    SEMANTIC_TOOL_DESCRIPTIONS.downloadFeedbacks,
-    feedbackDownloadSchema.shape,
-    (args, ctx) => module.downloadFeedbacks(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_submit_feedback",
-    SEMANTIC_TOOL_DESCRIPTIONS.submitFeedback,
-    feedbackSubmitSchema.shape,
-    (args, ctx) => module.submitFeedback(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_update_feedback_status",
-    SEMANTIC_TOOL_DESCRIPTIONS.updateFeedbackStatus,
-    feedbackStatusSchema.shape,
-    (args, ctx) => module.updateFeedbackStatus(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_get_pm_tiles_url",
-    SEMANTIC_TOOL_DESCRIPTIONS.getPmTilesUrl,
-    getDatasetDetailsSchema.shape,
-    (args, ctx) => module.getPmTilesUrl(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_set_viewer_access",
-    SEMANTIC_TOOL_DESCRIPTIONS.setViewerAccess,
-    viewerAccessSchema.shape,
-    (args, ctx) => module.setViewerAccess(args as never, ctx),
-  );
-  registerIntent("tdei_get_metrics", SEMANTIC_TOOL_DESCRIPTIONS.getMetrics, metricsSchema.shape, (args, ctx) =>
-    module.getMetrics(args as never, ctx),
-  );
-  registerIntent("tdei_list_versions", SEMANTIC_TOOL_DESCRIPTIONS.listVersions, versionsSchema.shape, (args, ctx) =>
-    module.listVersions(args as never, ctx),
-  );
-  registerIntent("tdei_get_system_info", SEMANTIC_TOOL_DESCRIPTIONS.getSystemInfo, confirmSchema.shape, (_args, ctx) =>
-    module.getSystemInfo(ctx),
-  );
-  registerIntent("tdei_verify_email", SEMANTIC_TOOL_DESCRIPTIONS.verifyEmail, emailSchema.shape, (args, ctx) =>
-    module.verifyEmail(args as never, ctx),
-  );
-  registerIntent("tdei_recover_password", SEMANTIC_TOOL_DESCRIPTIONS.recoverPassword, emailSchema.shape, (args, ctx) =>
-    module.recoverPassword(args as never, ctx),
-  );
-  registerIntent(
-    "tdei_regenerate_api_key",
-    SEMANTIC_TOOL_DESCRIPTIONS.regenerateApiKey,
-    regenerateApiKeySchema.shape,
-    (args, ctx) => module.regenerateApiKey(args as never, ctx),
-  );
+  tool("tdei_get_pm_tiles_url", D.getPmTilesUrl, getDatasetDetailsSchema, (a, c) => module.getPmTilesUrl(a, c));
+  tool("tdei_set_viewer_access", D.setViewerAccess, viewerAccessSchema, (a, c) => module.setViewerAccess(a, c));
+  tool("tdei_get_metrics", D.getMetrics, metricsSchema, (a, c) => module.getMetrics(a, c));
+  tool("tdei_list_versions", D.listVersions, versionsSchema, (a, c) => module.listVersions(a, c));
+  tool("tdei_get_system_info", D.getSystemInfo, confirmSchema, (_a, c) => module.getSystemInfo(c));
+  tool("tdei_verify_email", D.verifyEmail, emailSchema, (a, c) => module.verifyEmail(a, c));
+  tool("tdei_recover_password", D.recoverPassword, emailSchema, (a, c) => module.recoverPassword(a, c));
+  tool("tdei_regenerate_api_key", D.regenerateApiKey, regenerateApiKeySchema, (a, c) => module.regenerateApiKey(a, c));
 }

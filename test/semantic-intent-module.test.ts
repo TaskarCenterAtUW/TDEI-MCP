@@ -300,7 +300,7 @@ test("recent-upload filter drops datasets older than the cutoff", async () => {
   );
 });
 
-test("jobs fan out across project groups when no group is given", async () => {
+test("jobs fan out across project groups only when allGroups is requested", async () => {
   const jobSearches: Array<Record<string, unknown>> = [];
   const groups = [
     { tdei_project_group_id: "group-1", name: "One" },
@@ -330,7 +330,7 @@ test("jobs fan out across project groups when no group is given", async () => {
     },
   });
 
-  const result = await module.listJobs({ limit: 10 });
+  const result = await module.listJobs({ limit: 10, allGroups: true });
 
   assert.equal(result.status, "complete");
   if (result.status !== "complete") return;

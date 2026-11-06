@@ -103,6 +103,10 @@ export interface ListProjectGroupsData {
 export interface ListJobsInput {
   jobId?: string;
   projectGroupId?: string;
+  /** Resolved against the caller's project groups (case-insensitive). */
+  projectGroupName?: string;
+  /** Search every accessible project group. Only for an explicit "all" request. */
+  allGroups?: boolean;
   includeGroupJobs?: boolean;
   jobType?: string;
   status?: "COMPLETED" | "FAILED" | "IN-PROGRESS" | "ABANDONED";

@@ -26,9 +26,19 @@ if [ "$cmd" != "up" ]; then
   exit 1
 fi
 
-docker build -t "$IMAGE" .
+# The commit sha becomes part of the MCP serverInfo.version (x.y.z+sha), which
+# is how clients notice a new deploy.
+docker build --build-arg GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)" -t "$IMAGE" .
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+
+# Sign-in codes and the login cookie are protected by TDEI_OAUTH_SECRET. It must
+# stay the same across restarts (and across replicas), so generate it once and
+# keep it in .env, which is git-ignored and never copied into the image.
+if [ -z "${TDEI_OAUTH_SECRET:-}" ] && ! grep -qs '^TDEI_OAUTH_SECRET=' .env; then
+  printf '\nTDEI_OAUTH_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+  echo "generated TDEI_OAUTH_SECRET in .env (reused on every restart)"
+fi
 
 ENV_FILE_ARGS=()
 if [ -f .env ]; then
@@ -40,6 +50,7 @@ fi
 docker run -d --name "$CONTAINER" \
   -p "${PORT}:${PORT}" \
   -e "PORT=${PORT}" \
+  ${TDEI_OAUTH_SECRET:+-e TDEI_OAUTH_SECRET} \
   "${ENV_FILE_ARGS[@]}" \
   -v "$PWD/mcps.json:/app/mcps.json:ro" \
   "$IMAGE"

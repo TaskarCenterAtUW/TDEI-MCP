@@ -12,6 +12,7 @@ import {
   type OpenApiToolRegistrationResult,
 } from "../openapi/register-openapi-tools.js";
 import { augmentTdeiToolDescription } from "./tool-instructions.js";
+import { exposeAllRawTools, SEMANTIC_COVERED_RAW_OPERATIONS } from "./raw-tool-coverage.js";
 
 export type TdeiOpenApiToolClient = OpenApiToolClient;
 export type TdeiOpenApiToolCall = OpenApiToolCall;
@@ -46,9 +47,14 @@ export async function registerTdeiOpenApiTools(
   onCall?: TdeiOpenApiToolCall,
 ): Promise<TdeiOpenApiToolRegistrationResult> {
   console.error("[openapi-tools] discovering TDEI OpenAPI tools");
+  // Semantic tools cover most raw operations; keep the duplicates out of the
+  // catalog unless the operator opted in or explicitly allow-listed them.
+  const explicitlyAllowed = new Set(filter.mode === "allow" ? filter.allow : []);
+  const hideCovered = !exposeAllRawTools();
   const result = await registerOpenApiTools(server, client, {
     hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
     isAllowed: (name, tags) => isToolAllowed(name, filter, tags ?? []),
+    catalogHidden: (name) => hideCovered && SEMANTIC_COVERED_RAW_OPERATIONS.has(name) && !explicitlyAllowed.has(name),
     augmentDescription: augmentTdeiToolDescription,
     ...(onCall ? { onCall } : {}),
     mapResult: (toolResult) => truncateResult(normalizeOpenApiToolResult(toolResult)),

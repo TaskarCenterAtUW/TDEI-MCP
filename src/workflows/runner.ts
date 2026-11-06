@@ -54,6 +54,22 @@ function declaresFileUpload(schema: unknown): boolean {
   return visit(schema);
 }
 
+// Schemas are immutable once discovered, so the compiled validator and the
+// file-upload scan are computed once per schema object, not once per step run.
+const schemaChecks = new WeakMap<object, { uploads: boolean; validator: ReturnType<typeof fromJsonSchema> }>();
+
+function checksFor(schema: object): { uploads: boolean; validator: ReturnType<typeof fromJsonSchema> } {
+  let checks = schemaChecks.get(schema);
+  if (!checks) {
+    checks = {
+      uploads: declaresFileUpload(schema),
+      validator: fromJsonSchema(schema as Record<string, unknown>),
+    };
+    schemaChecks.set(schema, checks);
+  }
+  return checks;
+}
+
 export async function runWorkflow(
   def: WorkflowDef,
   userArgs: Record<string, unknown>,
@@ -89,13 +105,13 @@ export async function runWorkflow(
     }) as Record<string, unknown>;
 
     const schemaEntry = deps.toolSchemas.get(step.tool);
-    if (schemaEntry?.inputSchema !== undefined && schemaEntry?.inputSchema !== null) {
-      if (declaresFileUpload(schemaEntry.inputSchema)) {
+    if (typeof schemaEntry?.inputSchema === "object" && schemaEntry.inputSchema !== null) {
+      const { uploads, validator } = checksFor(schemaEntry.inputSchema);
+      if (uploads) {
         throw new Error(
           `[workflows.${def.name}] step ${step.id}: tool "${step.tool}" uses file upload (multipart) which is not supported in v1`,
         );
       }
-      const validator = fromJsonSchema(schemaEntry.inputSchema as Record<string, unknown>);
       const validated = await validator["~standard"].validate(resolved);
       if ("issues" in validated && Array.isArray(validated.issues) && validated.issues.length > 0) {
         const issues = validated.issues.map((issue: { message: string }) => issue.message).join("; ");

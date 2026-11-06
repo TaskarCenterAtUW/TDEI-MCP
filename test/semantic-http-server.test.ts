@@ -71,7 +71,6 @@ test("hosted semantic server calls TDEI directly with its request bearer", async
       "tdei_publish_dataset",
       "tdei_recover_password",
       "tdei_regenerate_api_key",
-      "tdei_resolve_intent",
       "tdei_sanitize_dataset",
       "tdei_self_merge",
       "tdei_set_viewer_access",

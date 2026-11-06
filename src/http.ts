@@ -17,7 +17,9 @@ import {
 } from "./http-setup-script.js";
 import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { expiresAtForTokens, saveSharedSession } from "./auth/shared-session.js";
+import { sharedSessionAllowed } from "./auth/session-sharing.js";
 import {
+  oauthSecretIsConfigured,
   dispatchOAuth,
   matchesOAuthPath,
   oauthCallbackResult,
@@ -83,6 +85,9 @@ function sendJson(
   response.writeHead(status, {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(body),
+    // Responses can carry user data or auth challenges; never let a cache keep them.
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
     ...extraHeaders,
   });
   response.end(body);
@@ -171,6 +176,10 @@ async function sendWebResponse(nodeResponse: ServerResponse, webResponse: Respon
   webResponse.headers.forEach((value, key) => {
     headers[key] = value;
   });
+  // Tool results carry user data. The transport's own "no-cache" still lets a
+  // shared cache store the body; force no-store (no-transform keeps streams intact).
+  headers["cache-control"] = "no-store, no-transform";
+  headers["x-content-type-options"] = "nosniff";
   nodeResponse.writeHead(webResponse.status, headers);
   if (!webResponse.body) {
     nodeResponse.end();
@@ -246,6 +255,12 @@ async function handleMcpRequest(
   host: string,
   publicBaseUrl: string,
   mcpPath: string,
+  /**
+   * True only for a direct loopback caller on a non-gateway server. Otherwise no
+   * process-wide login is read, written or handed out: the request must carry
+   * its own bearer token.
+   */
+  sharedSession: boolean,
 ): Promise<void> {
   if (!checkCors(request, response)) {
     sendJson(response, 403, { code: "TDEI_ORIGIN_FORBIDDEN", message: "Origin not allowed." });
@@ -284,7 +299,18 @@ async function handleMcpRequest(
   const needsAuth = mcpRequestNeedsAuth(parsed);
 
   let server;
-  if (!needsAuth) {
+  if (!needsAuth && !sharedSession) {
+    // Handshake on a multi-user server: list tools, but attach no login. Tool
+    // calls arrive with their own bearer token and are handled below.
+    server = createHttpSemanticServer({
+      apiUrl: getConfig().apiUrl,
+      instructions: options.serverInstructions,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      places: options.places,
+      ssoCallbackListener: false,
+      ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
+    });
+  } else if (!needsAuth) {
     server = await createReadyHttpSemanticServer({
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
@@ -312,6 +338,19 @@ async function handleMcpRequest(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (message === "TDEI_UPSTREAM_UNAVAILABLE") {
+        sendJson(
+          response,
+          503,
+          {
+            code: "TDEI_UPSTREAM_UNAVAILABLE",
+            message: "The TDEI API could not confirm this token right now. Retry shortly.",
+            retryable: true,
+          },
+          { "Retry-After": "5" },
+        );
+        return;
+      }
       if (message === "TDEI_TOKEN_EXPIRED") {
         unauthorized(response, message, `TDEI access token expired. ${tokenExpiredText()}`, {
           refresh_hint: true,
@@ -335,7 +374,11 @@ async function handleMcpRequest(
       ssoCallbackListener: options.ssoCallbackListener,
       ...(options.gatewaySlug ? { gatewaySlug: options.gatewaySlug } : {}),
     });
-  } else if (options.gatewaySlug && !options.sessionAuth.getStatus().authenticated) {
+  } else if (!sharedSession && !options.gatewaySlug) {
+    // Multi-user server, no gateway: a tool call without a token is never served.
+    unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
+    return;
+  } else if (options.gatewaySlug && (!sharedSession || !options.sessionAuth.getStatus().authenticated)) {
     const endpoints = oauthEndpoints(publicBaseUrl, options.gatewaySlug, mcpPath);
     sendJson(
       response,
@@ -446,6 +489,35 @@ export async function serveHttp(
           fallbackHost: `${host}:${port}`,
         });
         const url = new URL(request.url ?? "/", publicBaseUrl);
+        const sharedSession = sharedSessionAllowed({
+          gatewaySlug,
+          remoteAddress: request.socket.remoteAddress,
+          headers: request.headers,
+        });
+        if (publicBaseUrl.startsWith("https://")) {
+          response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        }
+        // A proxy that says the client used plain HTTP means credentials would
+        // cross the network unencrypted. Refuse any request that can carry them:
+        // an Authorization header, a write method, or the OAuth and callback
+        // paths. Token-free pages (status, health, setup scripts) stay open.
+        const clientProto = String(request.headers["x-forwarded-proto"] ?? "")
+          .split(",")[0]
+          ?.trim()
+          .toLowerCase();
+        const carriesCredentials =
+          request.headers.authorization !== undefined ||
+          (request.method !== "GET" && request.method !== "HEAD" && request.method !== "OPTIONS") ||
+          url.pathname.includes("/oauth/") ||
+          isAuthCallbackPath(url.pathname, gatewaySlug);
+        const isStatusRequest = !carriesCredentials;
+        if (!sharedSession && clientProto === "http" && !isStatusRequest) {
+          sendJson(response, 400, {
+            code: "TDEI_HTTPS_REQUIRED",
+            message: "Use https. Access tokens must not be sent over plain HTTP.",
+          });
+          return;
+        }
 
         if (request.method === "GET" && url.pathname === "/") {
           const html = renderStatusPage(publicBaseUrl, basePath, mcpName);
@@ -539,7 +611,9 @@ export async function serveHttp(
             body,
             exchangeCode: async (code, state) => {
               const tokens = await sessionAuth.exchangeSsoCode(code, state);
-              saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
+              // Only a single-user server keeps the login for reuse. A shared
+              // server hands the tokens to the caller who logged in and keeps nothing.
+              if (sharedSession) saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
               return tokens;
             },
             refreshToken: (refreshToken) => sessionAuth.refreshExternalToken(refreshToken),
@@ -547,6 +621,8 @@ export async function serveHttp(
             // (own session or a sibling MCP's shared session) instead of
             // forcing another explicit browser SSO roundtrip per MCP.
             getValidSessionTokens: async () => {
+              // Never answer one person's login with another person's session.
+              if (!sharedSession) return undefined;
               try {
                 await sessionAuth.getAccessToken();
               } catch {
@@ -580,7 +656,7 @@ export async function serveHttp(
               cookieHeader: request.headers.cookie,
               exchangeCode: async (code, state) => {
                 const tokens = await sessionAuth.exchangeSsoCode(code, state);
-                saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
+                if (sharedSession) saveSharedSession(httpConfig.authApiUrl, tokens, expiresAtForTokens(tokens));
                 return tokens;
               },
             });
@@ -671,7 +747,7 @@ export async function serveHttp(
           });
           return;
         }
-        await handleMcpRequest(request, response, resolved, host, publicBaseUrl, basePath);
+        await handleMcpRequest(request, response, resolved, host, publicBaseUrl, basePath, sharedSession);
       } catch (error) {
         console.error("[http] request failed:", error instanceof Error ? error.message : String(error));
         if (!response.headersSent) {
@@ -690,10 +766,31 @@ export async function serveHttp(
   });
 
   console.error(`[tdei-mcp] Serving MCP (http) on ${host}:${port}${basePath}`);
+  if (gatewaySlug && !oauthSecretIsConfigured()) {
+    console.error(
+      "[tdei-mcp] TDEI_OAUTH_SECRET is not set: using a random per-process secret for sign-in codes and cookies. Set the same TDEI_OAUTH_SECRET on every replica so a sign-in can finish on any of them.",
+    );
+  }
+  console.error(
+    "[tdei-mcp] Shared login: only for direct loopback callers on a non-gateway server; every other caller must send its own bearer token.",
+  );
 
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
+  // Pick up API changes without a restart. Each request re-registers tools from
+  // this client, so a refreshed spec reaches clients on their next connection.
+  const refreshMinutes = Number(process.env.TDEI_SPEC_REFRESH_MINUTES ?? 15);
+  const specRefreshTimer =
+    Number.isFinite(refreshMinutes) && refreshMinutes > 0
+      ? setInterval(() => {
+          sessionOpenApiClient.refresh().catch((error: unknown) => {
+            console.error("[openapi] spec refresh failed:", error instanceof Error ? error.message : String(error));
+          });
+        }, refreshMinutes * 60_000)
+      : undefined;
+  specRefreshTimer?.unref();
   const close = async (): Promise<void> => {
+    if (specRefreshTimer) clearInterval(specRefreshTimer);
     await sessionOpenApiClient.close().catch(() => undefined);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
