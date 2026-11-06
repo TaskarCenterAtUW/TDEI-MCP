@@ -6,6 +6,7 @@ import {
   defaultClientDownloadsDir,
   joinDownloadPath,
 } from "../adapters/binary-tdei-downloads.js";
+import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { signInText } from "../mcp/errors.js";
 import { saveDatasetToDisk, type DownloadSettings } from "./server-download.js";
@@ -223,7 +224,11 @@ export class SemanticIntentModule {
    * sees another's data, and a failed lookup is never cached.
    */
   private async cached<T>(name: string, ttlMs: number, context: RequestContext, load: () => Promise<T>): Promise<T> {
-    const key = `${(await this.resolveCurlToken(context)) ?? ""}\u0000${name}`;
+    const token = await this.resolveCurlToken(context);
+    // Without a token there is no caller to key the entry to, so never cache.
+    if (!token) return load();
+    // Keyed by a hash of the caller's token: one caller's entry can never be read by another.
+    const key = `${createHash("sha256").update(token).digest("base64url")}\u0000${name}`;
     const now = Date.now();
     const hit = this.readCache.get(key);
     if (hit && hit.expires > now) return hit.value as Promise<T>;

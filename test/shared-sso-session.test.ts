@@ -210,41 +210,24 @@ test("gateway authorize falls back to SSO when no shared login exists", async ()
   }
 });
 
-test("gateway authorize reuses a sibling shared login end to end", async () => {
+test("gateway authorize never reuses a saved login, because gateway callers are different users", async () => {
   const apiUrl = getConfig().authApiUrl;
   clearSharedSession(apiUrl);
   saveSharedSession(apiUrl, seededTokens, Date.now() + 3600 * 1000);
   const restore = mockProbe(200);
   try {
-    // Fresh gateway with a signed-out sessionAuth, like a second mcps.json entry.
     const handle = await serveTestHttp({ gatewaySlug: "tdei-core-dev" });
     try {
       const verifier = randomBytes(32).toString("base64url");
       const challenge = createHash("sha256").update(verifier).digest("base64url");
-      const clientRedirect = "http://127.0.0.1:9/callback";
       const authorize = await fetch(
-        `${handle.url}/tdei-core-dev/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent(clientRedirect)}&state=sibling-state&code_challenge=${challenge}&code_challenge_method=S256`,
+        `${handle.url}/tdei-core-dev/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent("http://127.0.0.1:9/callback")}&state=sibling-state&code_challenge=${challenge}&code_challenge_method=S256`,
         { redirect: "manual" },
       );
       assert.equal(authorize.status, 302);
-      const back = new URL(authorize.headers.get("location") ?? "");
-      assert.equal(back.origin + back.pathname, clientRedirect);
-      assert.equal(back.searchParams.get("state"), "sibling-state");
-
-      const tokenRes = await fetch(`${handle.url}/tdei-core-dev/oauth/token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: back.searchParams.get("code") ?? "",
-          code_verifier: verifier,
-          redirect_uri: clientRedirect,
-          client_id: "tdei-mcp",
-        }),
-      });
-      assert.equal(tokenRes.status, 200);
-      const token = (await tokenRes.json()) as { access_token: string };
-      assert.equal(token.access_token, "shared-access-token");
+      const location = authorize.headers.get("location") ?? "";
+      assert.match(location, /api\/v1\/sso-redirect/, "the caller signs in as themselves");
+      assert.ok(!location.includes("code="), "no authorization code is sealed from the saved login");
     } finally {
       await handle.close();
     }

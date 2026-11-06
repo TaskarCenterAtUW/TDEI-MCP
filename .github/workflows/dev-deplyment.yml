@@ -47,6 +47,30 @@ jobs:
         with:
           creds: ${{ secrets.TDEI_CORE_AZURE_CREDS }}
 
+      - name: Store the sign-in secret on the Container App
+        env:
+          CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
+          RESOURCE_GROUP: GaussianRG
+          TDEI_OAUTH_SECRET: ${{ secrets.TDEI_OAUTH_SECRET }}
+        run: |
+          : "${CONTAINER_APP_NAME:?CONTAINER_APP_NAME secret is not configured}"
+          if [[ "${#TDEI_OAUTH_SECRET}" -lt 32 ]]; then
+            {
+              echo "The TDEI_OAUTH_SECRET GitHub secret is missing or shorter than 32 characters."
+              echo "Create it in this environment without printing it:"
+              echo "  openssl rand -hex 32 | gh secret set TDEI_OAUTH_SECRET --env Development"
+            } >&2
+            exit 1
+          fi
+          # Stored as a Container App secret and referenced by the env var below,
+          # so it is never baked into the image or shown in the app's settings.
+          az containerapp secret set \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --secrets "tdei-oauth-secret=${TDEI_OAUTH_SECRET}" \
+            --only-show-errors \
+            --output none
+
       - name: Deploy to Dev Container App
         env:
           CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
@@ -63,6 +87,7 @@ jobs:
             --name "$CONTAINER_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --image "$IMAGE" \
+            --set-env-vars "TDEI_OAUTH_SECRET=secretref:tdei-oauth-secret" \
             --only-show-errors \
             --output none
 

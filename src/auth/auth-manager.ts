@@ -508,10 +508,12 @@ export class AuthManager {
       } catch {
         throw new Error("TDEI_TOKEN_INVALID");
       }
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("TDEI_TOKEN_INVALID");
-      }
       await response.body?.cancel().catch(() => undefined);
+      if (response.ok) return;
+      // Only a 2xx proves the token. 401/403 mean it is bad; 5xx means TDEI could
+      // not check it right now (retry), and anything else is not a confirmation.
+      if (response.status >= 500) throw new Error("TDEI_UPSTREAM_UNAVAILABLE");
+      throw new Error("TDEI_TOKEN_INVALID");
     };
 
     // Concurrent validations of the same token share one probe. The entry is
