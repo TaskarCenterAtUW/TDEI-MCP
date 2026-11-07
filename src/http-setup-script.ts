@@ -368,13 +368,16 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
   const relayCode = \`const http = require("node:http");
 const targetBase = \${JSON.stringify(remoteCallbackUrl)};
 const port = Number(\${JSON.stringify(callbackPortRaw)}) || 8765;
+// One-shot: quit as soon as the browser has been handed the callback, or after 300s if no sign-in happens.
+const IDLE_MS = 300000;
+const idle = setTimeout(() => process.exit(0), IDLE_MS);
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
   if (url.pathname === "/callback" || url.pathname === "/auth/callback") {
     const dest = new URL(targetBase);
     dest.search = url.search;
     res.writeHead(302, { Location: dest.toString(), "Cache-Control": "no-store" });
-    res.end();
+    res.end(() => { clearTimeout(idle); setTimeout(() => process.exit(0), 200); });
     return;
   }
   if (url.pathname === "/health") {
