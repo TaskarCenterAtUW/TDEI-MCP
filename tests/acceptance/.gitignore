@@ -1,0 +1,4 @@
+.env
+reports/
+.cache/
+cassettes/*.local.json
