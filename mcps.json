@@ -19,10 +19,24 @@
       "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway-prod.json"
     },
     {
-      "name": "tdei-workspace",
+      "name": "tdei-workspace-dev",
       "apiUrl": "https://ws-backend-dev.azurewebsites.net/",
       "authApiUrl": "https://api-dev.tdei.us",
       "specUrl": "https://ws-backend-dev.azurewebsites.net/openapi.json",
+      "profile": "workspace"
+    },
+    {
+      "name": "tdei-workspace-stage",
+      "apiUrl": "https://ws-backend-dev.azurewebsites.net/",
+      "authApiUrl": "https://api-stage.tdei.us",
+      "specUrl": "https://ws-backend-stage.azurewebsites.net/openapi.json",
+      "profile": "workspace"
+    },
+    {
+      "name": "tdei-workspace-prod",
+      "apiUrl": "https://api.workspaces.sidewalks.washington.edu/",
+      "authApiUrl": "https://api.tdei.us",
+      "specUrl": "https://api.workspaces.sidewalks.washington.edu/openapi.json",
       "profile": "workspace"
     }
   ]
