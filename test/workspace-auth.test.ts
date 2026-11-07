@@ -59,17 +59,21 @@ test("multi-config honors per-server authApiUrl override", () => {
 
 test("shipped mcps.json keeps workspace login on TDEI core", () => {
   const file = JSON.parse(readFileSync(new URL("../mcps.json", import.meta.url), "utf8")) as {
-    servers: Array<{ name: string; apiUrl: string; authApiUrl?: string }>;
+    servers: Array<{ name: string; profile?: string; apiUrl: string; authApiUrl?: string }>;
   };
-  const workspace = file.servers.find((entry) => entry.name === "tdei-workspace");
-  assert.ok(workspace, "mcps.json must define tdei-workspace");
-  assert.ok(
-    workspace.authApiUrl?.startsWith("https://api"),
-    `tdei-workspace needs authApiUrl on TDEI core (got ${JSON.stringify(workspace.authApiUrl)})`,
-  );
-  assert.notEqual(
-    new URL(workspace.apiUrl).origin,
-    new URL(workspace.authApiUrl ?? "").origin,
-    "workspace apiUrl must differ from authApiUrl: the data backend does not serve SSO",
-  );
+  // Every workspace server must log in against TDEI core — the data backend
+  // does not serve SSO — so check the whole family, not one hard-coded name.
+  const workspaces = file.servers.filter((entry) => entry.name.includes("workspace") || entry.profile === "workspace");
+  assert.ok(workspaces.length > 0, "mcps.json must define at least one workspace server");
+  for (const workspace of workspaces) {
+    assert.ok(
+      workspace.authApiUrl?.startsWith("https://api"),
+      `${workspace.name} needs authApiUrl on TDEI core (got ${JSON.stringify(workspace.authApiUrl)})`,
+    );
+    assert.notEqual(
+      new URL(workspace.apiUrl).origin,
+      new URL(workspace.authApiUrl ?? "").origin,
+      `${workspace.name}: workspace apiUrl must differ from authApiUrl: the data backend does not serve SSO`,
+    );
+  }
 });

@@ -29,6 +29,13 @@ test("installer relays the registered loopback callback to the gateway", () => {
   assert.match(js, /127\.0\.0\.1/);
 });
 
+test("installer relay is one-shot: exits after the callback or after 300s", () => {
+  const js = getClientSetupJs();
+  assert.match(js, /IDLE_MS = 300000/);
+  assert.match(js, /process\.exit\(0\)/);
+  assert.match(js, /clearTimeout\(idle\)/);
+});
+
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
 
 test("sh and ps1 installers embed the identical node program", () => {
