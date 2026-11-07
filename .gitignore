@@ -25,3 +25,4 @@ nginx/gateway.html
 .DS_Store
 Thumbs.db
 .idea/
+/tests/acceptance/reports

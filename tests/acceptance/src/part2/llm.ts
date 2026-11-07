@@ -16,7 +16,7 @@ export interface Llm { name: string; chat(system: string, msgs: Msg[], tools: To
 
 async function post(url: string, headers: Record<string, string>, body: unknown): Promise<any> {
   for (let attempt = 0; ; attempt++) {
-    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(Number(process.env.ACCEPT_LLM_CALL_TIMEOUT_MS) || 240000) });
     const t = await r.text();
     if ((r.status === 429 || r.status >= 500) && attempt < 3) { await new Promise((x) => setTimeout(x, 2000 * (attempt + 1))); continue; }
     if (!r.ok) throw new Error(`LLM HTTP ${r.status}: ${t.slice(0, 300)}`);

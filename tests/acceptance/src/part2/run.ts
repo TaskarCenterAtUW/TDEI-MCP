@@ -5,7 +5,7 @@ import type { Config } from "../config.ts";
 import { McpClient } from "../mcp.ts";
 import type { Fakes } from "../fakes/fake-tdei.ts";
 import type { Result } from "../runner/runner.ts";
-import { redactTrace, runScenario, systemPrompt, type Trace } from "./harness.ts";
+import { Asserts, redactTrace, renderRun, runScenario, systemPrompt, type Trace } from "./harness.ts";
 import { makeLlm, type Llm, type ToolDef } from "./llm.ts";
 import { SCENARIOS, type SCtx, type Scenario } from "./scenarios.ts";
 
@@ -35,7 +35,7 @@ export async function runPart2(o: P2Opts): Promise<Result[]> {
     const t0 = Date.now(); let pass = 0; let skipReason: string | undefined; const fails: string[] = []; const id = `${s.id}`;
     for (let r = 1; r <= repeats; r++) {
       const rt0 = Date.now();
-      o.log?.(`  ... ${id} run ${r}/${repeats} (LLM calls can take a minute)`);
+      o.log?.(`  ... ${id} run ${r}/${repeats}: ${s.title} (LLM calls can take a minute)`);
       if (tokensRun > cfg.llm.maxTokensPerRun) { fails.push("per-run token ceiling exceeded"); break; }
       target.fakes?.reset();
       const mcp = new McpClient(target.mcpUrl, target.token, cfg.httpTimeoutMs);
@@ -45,12 +45,17 @@ export async function runPart2(o: P2Opts): Promise<Result[]> {
       let trace: Trace;
       try {
         trace = await runScenario({ system: sys, tools, mcp, llm, userTurns: s.turns(ctx), ...(s.allowedTools ? { allowedTools: s.allowedTools } : {}), maxTurns: cfg.llm.maxTurns, maxToolTurns: cfg.llm.maxToolTurns, maxTokens: cfg.llm.maxTokensPerScenario, ...(s.inject?.(ctx) ? { inject: s.inject(ctx)! as any } : {}), onUsage: () => ("used" in llm ? (llm as any).used() : 0) });
-      } catch (e) { fails.push(`run ${r}: ${e instanceof Error ? e.message : String(e)}`); continue; }
+      } catch (e) { const m = e instanceof Error ? e.message : String(e); o.log?.(`  ✗ ${id} run ${r}/${repeats} crashed before any assertion: ${m} (LLM call or MCP call failed)`); fails.push(`run ${r}: ${m}`); continue; }
       tokensRun += trace.tokens;
       writeFileSync(join(o.outDir, "traces", `${tag(id)}-${id}-${r}.json`), JSON.stringify(redactTrace(trace), null, 1));
-      const v = await s.check(trace, ctx);
-      if (!Array.isArray(v)) { skipReason = v.skip; break; }
-      if (v.length === 0) pass++; else fails.push(`run ${r}: ${v.join("; ")}`);
+      const a = new Asserts(); const v = await s.check(trace, ctx, a);
+      if (v && !Array.isArray(v)) { skipReason = v.skip; o.log?.(`  - ${id} skipped: ${v.skip}`); break; }
+      const failures = [...(Array.isArray(v) ? v : []), ...a.failures];
+      if (Array.isArray(v) && v.length === 0 && a.items.length === 0) a.that(true, "no failure conditions hit");
+      for (const f of Array.isArray(v) ? v : []) a.that(false, f);
+      const block = renderRun(id, s.title, r, repeats, target.id, trace, a, failures.length ? `FAIL (${failures.length} assertion${failures.length > 1 ? "s" : ""} failed)` : "PASS");
+      o.log?.(block); mkdirSync(join(o.outDir, "transcripts"), { recursive: true }); writeFileSync(join(o.outDir, "transcripts", `${id}-${r}.txt`), block + "\n");
+      if (failures.length === 0) pass++; else fails.push(`run ${r}: ${failures.join("; ")}`);
       if (Date.now() - rt0 > cfg.latency.budgets.SCENARIO!) fails.push(`scenario exceeded ${cfg.latency.budgets.SCENARIO}ms`);
     }
     const need = s.cls === "safety" ? repeats : Math.ceil((repeats * 2) / 3);

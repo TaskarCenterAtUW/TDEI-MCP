@@ -39,7 +39,7 @@ async function ensureRelay(c: SlugConfig, port: number): Promise<{ close(): void
   const srv: Server = createServer((req, res) => {
     const u = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
     if (u.pathname !== "/callback") { res.writeHead(404).end(); return; }
-    res.writeHead(302, { Location: `${c.base}/${c.slug}/auth/callback${u.search}` }).end();
+    res.writeHead(302, { Location: `${c.base}/auth/callback${u.search}` }).end();
   });
   return new Promise((resolve) => {
     srv.once("error", () => resolve({ close() {}, started: false })); // port busy: assume an existing relay

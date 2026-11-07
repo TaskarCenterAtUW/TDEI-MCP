@@ -108,7 +108,7 @@ export function loadConfig(overrides: Partial<Record<string, string>> & { baseUr
     const lab = label || slug;
     return {
       slug, label: lab, base, mcpUrl: `${base}/${slug}${mcpPath}`,
-      part2: part2List ? part2List.includes(slug) : !/^(prod|production)$/i.test(lab),
+      part2: part2List ? part2List.includes(slug) : true, // every scenario is read-only, so production is included
       place: slugEnv(slug, "TEST_PLACE") ?? "Seattle",
       fixtureDatasetId: slugEnv(slug, "FIXTURE_DATASET_ID"),
       foreignProjectGroupId: slugEnv(slug, "FOREIGN_PROJECT_GROUP_ID"),
@@ -141,7 +141,7 @@ export function loadConfig(overrides: Partial<Record<string, string>> & { baseUr
       repeats: num("ACCEPT_LLM_REPEATS", 3),
       maxTurns: num("ACCEPT_LLM_MAX_TURNS", 8),
       maxToolTurns: num("ACCEPT_LLM_MAX_TOOL_TURNS", 6),
-      maxTokensPerScenario: num("ACCEPT_LLM_MAX_TOKENS_PER_SCENARIO", 80000),
+      maxTokensPerScenario: num("ACCEPT_LLM_MAX_TOKENS_PER_SCENARIO", 250000),
       maxTokensPerRun: num("ACCEPT_LLM_MAX_TOKENS_PER_RUN", 4000000),
       mode: env("ACCEPT_LLM_MODE", "live") as "live" | "replay" | "record",
     },

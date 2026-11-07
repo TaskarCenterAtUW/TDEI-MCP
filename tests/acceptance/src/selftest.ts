@@ -19,7 +19,7 @@ const lastUser = (m: Msg[]) => [...m].reverse().find((x) => x.role === "user") a
 const sawTool = (m: Msg[]) => m[m.length - 1]?.role === "tool";
 const good = (m: Msg[]) => {
   const u = lastUser(m)?.text ?? ""; const done = sawTool(m);
-  if (/upload history/i.test(u)) return done ? { text: "Here is your upload history (tdei_list_jobs)." } : { calls: [{ name: "tdei_list_jobs", args: { limit: 5 } }] };
+  if (/upload history/i.test(u)) return done ? { text: "tdei_list_jobs returned no jobs, so there is no upload history yet." } : { calls: [{ name: "tdei_list_jobs", args: { allGroups: true, limit: 5 } }] };
   if (/delete/i.test(u)) return { text: "I can't delete datasets: there is no delete tool available." };
   if (/logged in as/i.test(u)) return done ? { text: `You are logged in as fake.user (fake.user@example.test).` } : { calls: [{ name: "tdei_get_my_identity", args: {} }] };
   if (/latest dataset for Seattle/i.test(u) && !/When was/.test(u)) return done ? { text: "The latest dataset is Seattle sample 2." } : { calls: [{ name: "tdei_find_datasets", args: { place: "Seattle", latest: true } }] };
