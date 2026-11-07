@@ -16,7 +16,7 @@
 // Flags: --file --out --html-out --upstream-host --listen (default 3000)
 //   --root (html root, default /usr/share/nginx/html)
 //   --direct (localhost upstreams, no resolver) --standalone (full config)
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 function flagValue(name) {
@@ -49,6 +49,15 @@ const upstreamHost = flagValue("--upstream-host") ?? (direct ? "127.0.0.1" : "ho
 const listen = flagValue("--listen") ?? "3000";
 const standalone = process.argv.includes("--standalone");
 const rootDir = flagValue("--root") ?? "/usr/share/nginx/html";
+
+// Full build version baked into the gateway page: package.json version plus
+// the commit SHA that CI passed as the GIT_SHA build arg (Docker exposes it as
+// TDEI_MCP_BUILD_SHA in the runtime stage, and the entrypoint regenerates this
+// page on every boot). Without a SHA (local generation) only the version is
+// baked; the page's health fetch then fills in version + full SHA at runtime.
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+const buildSha = (process.env.TDEI_MCP_BUILD_SHA ?? "").trim();
+const buildVersion = buildSha && buildSha !== "unknown" ? `${pkg.version}+${buildSha}` : pkg.version;
 
 let multiConfig;
 try {
@@ -278,6 +287,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 pre { overflow-x: auto; padding: 12px; border: 1px solid #8884; border-radius: 8px; }
 button { cursor: pointer; }
 .muted { opacity: 0.75; font-size: 13px; }
+.build-line { font-size: 13px; margin: -4px 0 14px; }
+.build-line code { word-break: break-all; }
 .cmd { position: relative; }
 .cmd pre { padding-right: 52px; margin: 0; }
 .copy-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px; border: 1px solid #8886; background: #fff; color: #606060; opacity: 0; transition: opacity 0.15s ease-in-out; }
@@ -318,6 +329,7 @@ button { cursor: pointer; }
 <body>
 <main>
 <h1>TDEI-MCP gateway</h1>
+<p class="build-line">Deployed build: <code id="tdei-build">${escapeHtml(buildVersion)}</code></p>
 <p class="muted">Install the MCP server on your client first, copy a starter question to test your setup, then check live status for each server at the bottom.</p>
 
 <section class="card" aria-label="Install">
@@ -474,7 +486,16 @@ async function loadServer(card, server) {
     dot.className = 'dot ' + (good ? 'ok' : 'bad');
     state.textContent = h.ok ? 'healthy' : 'needs attention';
     const row = (k, v) => '<tr><th>' + k + '</th><td><code>' + String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code></td></tr>';
+    // Full deployed version: package.json version + the full commit SHA that
+    // CI baked into the image (GIT_SHA -> TDEI_MCP_BUILD_SHA), e.g.
+    // 0.1.0+f3bda3c63fdd426841f31d93a65f83bc046cd0ab. Every child runs the
+    // same image, so one child's build fills the header for the whole page.
+    const b = h.build || {};
+    const build = b.version ? b.version + (b.sha && b.sha !== 'unknown' ? '+' + b.sha : '') : 'unknown';
+    const buildEl = document.getElementById('tdei-build');
+    if (buildEl && b.version) buildEl.textContent = build;
     rows.innerHTML =
+      row('build', build) +
       row('auth', (h.auth && h.auth.state) || 'unknown') +
       row('openapi.loaded', h.openapi && h.openapi.loaded) +
       row('spec', (h.spec && h.spec.url || '') + ' reachable=' + (h.spec && h.spec.reachable) + (h.spec && h.spec.latencyMs != null ? ' ' + h.spec.latencyMs + 'ms' : '')) +

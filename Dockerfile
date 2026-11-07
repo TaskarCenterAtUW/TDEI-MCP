@@ -27,6 +27,10 @@ COPY tsconfig.json ./tsconfig.json
 COPY scripts ./scripts
 COPY src ./src
 COPY mcps.json ./mcps.json
+# Bakes the CI commit SHA into the gateway page at build time; the runtime
+# stage repeats it so the entrypoint regenerates the same value at boot.
+ARG GIT_SHA=unknown
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA
 RUN pnpm build \
   && node scripts/generate-nginx-conf.mjs --file mcps.json --out nginx/nginx.conf --direct
 
