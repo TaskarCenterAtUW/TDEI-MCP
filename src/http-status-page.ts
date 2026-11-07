@@ -1,3 +1,4 @@
+import { BUILD } from "./build-info.js";
 import { clientMcpName } from "./http-setup-script.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
@@ -34,6 +35,12 @@ export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp", gatew
   const urls = statusPageUrls(publicBaseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const e = escapeHtml;
+  // Full deployed version: package.json version + the full commit SHA that CI
+  // baked into the image (GIT_SHA -> TDEI_MCP_BUILD_SHA), e.g.
+  // 0.1.0+f3bda3c63fdd426841f31d93a65f83bc046cd0ab. Baked into the HTML
+  // server-side so the version is visible before (or without) the health
+  // fetch; the status table refreshes it from GET /health.
+  const buildVersion = BUILD.sha && BUILD.sha !== "unknown" ? `${BUILD.version}+${BUILD.sha}` : BUILD.version;
   const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `<!doctype html>
 <html lang="en">
@@ -54,6 +61,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 pre { overflow-x: auto; padding: 12px; border: 1px solid #8884; border-radius: 8px; }
 button { cursor: pointer; }
 .muted { opacity: 0.75; font-size: 13px; }
+.build-line { font-size: 13px; margin: -4px 0 14px; }
+.build-line code { word-break: break-all; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .cmd { position: relative; }
 .cmd pre { padding-right: 52px; margin: 0; }
@@ -78,6 +87,7 @@ button { cursor: pointer; }
 <body>
 <main>
 <h1>TDEI-MCP</h1>
+<p class="build-line">Deployed build: <code>${e(buildVersion)}</code></p>
 <p class="muted">Streamable HTTP connector &mdash; live status + client install. MCP endpoint: <code>${e(urls.mcpUrl)}</code></p>
 
 <section class="card" aria-label="Server status">
@@ -197,6 +207,7 @@ document.querySelectorAll('[data-copy]').forEach((btn) => {
 });
 const TDEI_SETUP_BASE = ${JSON.stringify(urls.setupBase).replace(/</g, "\\u003c")};
 const TDEI_MCP_NAME = ${JSON.stringify(mcpName).replace(/</g, "\\u003c")};
+const TDEI_BUILD = ${JSON.stringify(buildVersion).replace(/</g, "\\u003c")};
 const TDEI_ACTION_HINTS = {
   install: 'Writes the ' + TDEI_MCP_NAME + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
   update: 'Safe to re-run — replaces only the ' + TDEI_MCP_NAME + ' entry, keeps every other entry. Run it, restart the app, start a new chat.',
@@ -229,7 +240,12 @@ async function load() {
     dot.className = 'dot ' + (good ? 'ok' : 'bad');
     ok.textContent = h.ok ? 'healthy' : 'needs attention';
     const row = (k, v) => '<tr><th>' + k + '</th><td><code>' + String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code></td></tr>';
+    // Live value from /health; falls back to the server-baked version when the
+    // health payload has no build block (older build).
+    const b = h.build || {};
+    const build = b.version ? b.version + (b.sha && b.sha !== 'unknown' ? '+' + b.sha : '') : TDEI_BUILD;
     rows.innerHTML =
+      row('build', build) +
       row('auth', (h.auth && h.auth.state) || 'unknown') +
       row('openapi.loaded', h.openapi && h.openapi.loaded) +
       row('spec', (h.spec && h.spec.url || '') + ' reachable=' + (h.spec && h.spec.reachable) + (h.spec && h.spec.latencyMs != null ? ' ' + h.spec.latencyMs + 'ms' : '')) +
