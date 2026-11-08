@@ -1,4 +1,5 @@
 import type { DatasetSearch, TdeiOperations } from "./operations.js";
+import { JOB_TYPES, normalizeJobType } from "./job-types.js";
 import type { PlaceResolver } from "./place-resolver.js";
 import { extractAuthIdentity } from "../auth/auth-manager.js";
 import {
@@ -575,6 +576,26 @@ export class SemanticIntentModule {
     const pageSize = Math.min(Math.max(input.limit ?? 20, 1), 50);
     const cutoffMs = resolveCutoffMs(input.createdAfter, input.createdWithinDays);
 
+    // The API only accepts its own job_type values; map portal labels ("Filter Dataset by BBox") and
+    // aliases, and ask rather than send a value the API would reject.
+    let jobType: string | undefined;
+    if (input.jobType?.trim()) {
+      jobType = normalizeJobType(input.jobType);
+      if (!jobType) {
+        return {
+          status: "needs_input",
+          missing: [
+            {
+              field: "jobType",
+              question: `"${input.jobType}" is not a TDEI job type. Which job type do you mean?`,
+              allowedValues: [...JOB_TYPES],
+            },
+          ],
+          accepted: { ...input },
+        };
+      }
+    }
+
     let groupIds: string[];
     const explicitId = input.projectGroupId?.trim();
     const explicitName = input.projectGroupName?.trim();
@@ -646,7 +667,7 @@ export class SemanticIntentModule {
             ...(input.jobId?.trim() ? { jobId: input.jobId.trim() } : {}),
             projectGroupId: groupId,
             ...(input.includeGroupJobs !== undefined ? { includeGroupJobs: input.includeGroupJobs } : {}),
-            ...(input.jobType ? { jobType: input.jobType } : {}),
+            ...(jobType ? { jobType } : {}),
             ...(input.status ? { status: input.status } : {}),
             page: 1,
             pageSize,

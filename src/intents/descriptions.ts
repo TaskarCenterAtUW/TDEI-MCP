@@ -1,10 +1,13 @@
+import { webUiHandoff, type WebUiTask } from "../tdei-shared/web-ui-handoffs.js";
+import { workspaceCompanionNote } from "../tdei-shared/companion-servers.js";
+
 export const TDEI_LLM_CACHE_INSTRUCTIONS =
   "Cache and reuse stable TDEI reference data (project group IDs and names, service IDs and types, dataset IDs and metadata) within the conversation context instead of re-fetching on every turn. Only re-query when the user asks to refresh, changes filter criteria, or after a mutation (such as dataset upload or creation).";
 
 export const TDEI_PRESENTATION_INSTRUCTIONS =
   "Always beautify list results for the user: render datasets, services, project groups, jobs, feedbacks, versions, and metrics as a markdown table (one row per item with key columns such as name, type, project group, dates, and IDs) plus a one-line count summary. Never present raw JSON arrays as the primary answer; keep full IDs available for follow-up actions.";
 
-export const SEMANTIC_TOOL_DESCRIPTIONS = {
+const BASE_SEMANTIC_TOOL_DESCRIPTIONS = {
   findDatasets:
     "Find TDEI datasets from a natural-language place or bounding box. Use for requests such as 'get me the latest dataset for Seattle'. Searches dataset name first, then city, then forward-geocodes the place for a bbox search. Supports exact lookup via tdeiDatasetId (release-status follow-ups) and recent-upload filtering via uploadedAfter / uploadedWithinDays (client-side on uploaded_timestamp; the API has no uploaded_after). Returns ambiguity instead of guessing a place. Every complete result includes a markdown match table (#, name, tdei_dataset_id UUID, data_type, status) — always show that table to the user with a count summary instead of raw JSON, and reuse its UUIDs for follow-up actions (download, details, incline checks) without re-searching. Cache returned dataset IDs, names, project_group_id, service_id, and metadata in conversation memory to avoid redundant searches across follow-up turns.",
   listMyProjectGroups:
@@ -18,7 +21,7 @@ export const SEMANTIC_TOOL_DESCRIPTIONS = {
   getMyIdentity:
     "Return the caller's identity and roles decoded from the SSO JWT (username, email, roles, groups). Use for 'who am I' / 'my email' / 'what are my roles'. This is the ONLY source of the login email — never infer it from project-group poc contacts. TDEI has no roles endpoint; roles come from JWT realm_access/resource_access claims. Requires a signed-in session.",
   listJobs:
-    'List TDEI jobs (GET /api/v1/jobs), one project group at a time. The API needs a project group, so ASK THE USER WHICH PROJECT GROUP FIRST (by name) unless they already named one; pass it as projectGroupName (resolved against your groups) or projectGroupId. Only when the user explicitly says "all" (all groups, every project) pass allGroups:true to search every group (slower). Typical uses, most common first: (1) running jobs: status "IN-PROGRESS"; (2) the status of one job: jobId; (3) recent or failed jobs: status, jobType, createdWithinDays; (4) a job\'s result, which is the least common: only after the status is COMPLETED call job_download (GET /api/v1/job/download/<job_id>), never for FAILED or IN-PROGRESS jobs. If the reply is status needs_input, ask the user the question it contains and call again with their answer. Results are newest first. Always beautify the list for the user as a markdown table with a count summary instead of raw JSON.',
+    'List TDEI jobs (GET /api/v1/jobs), one project group at a time. The API needs a project group, so ASK THE USER WHICH PROJECT GROUP FIRST (by name) unless they already named one; pass it as projectGroupName (resolved against your groups) or projectGroupId. Only when the user explicitly says "all" (all groups, every project) pass allGroups:true to search every group (slower). Typical uses, most common first: (1) running jobs: status "IN-PROGRESS"; (2) the status of one job: jobId; (3) recent or failed jobs: status, jobType, createdWithinDays; (4) a job\'s result, which is the least common: only after the status is COMPLETED call job_download (GET /api/v1/job/download/<job_id>), never for FAILED or IN-PROGRESS jobs. If the reply is status needs_input, ask the user the question it contains and call again with their answer. Results are newest first. Always beautify the list for the user as a markdown table with a count summary instead of raw JSON. Filters mirror the TDEI Portal Jobs page: jobId (Search Job Id); jobType (Job Type: Clone-Dataset, Confidence-Calculate, Dataset-BBox [portal: Filter Dataset by BBox], Dataset-Incline-Tag, Dataset-Publish, Dataset-Reformat, Dataset-Road-Tag, Dataset-Spatial-Join, Dataset-Union, Dataset-Upload, Dataset-Validate, Edit-Metadata, Quality-Metric, Quality-Report; portal labels and common wordings are accepted); status (COMPLETED, FAILED, IN-PROGRESS, ABANDONED); includeGroupJobs (portal Show: true = All jobs in the group, false or omitted = Submitted by me only). Date filters and limit are extras this tool adds.',
   getDatasetDetails:
     "Get dataset details by exact tdei_dataset_id (status/release + metadata). Includes an incline note: incline presence is not in metadata — download the ZIP via tdei_download_dataset and inspect edges for an incline tag; tag via tdei_tag_incline. Always beautify dataset details for the user as a markdown table instead of raw JSON.",
   downloadDataset:
@@ -70,3 +73,63 @@ export const SEMANTIC_TOOL_DESCRIPTIONS = {
   recoverPassword: "Send a password-recovery link to an email address.",
   regenerateApiKey: "Regenerate the TDEI API key (invalidates the old key). Requires confirm:true.",
 } as const;
+
+/**
+ * Guidance for "create a workspace from a dataset" flows that start on the core server. The workspace
+ * server owns the create call; core owns project groups, services and datasets.
+ */
+const WORKSPACE_CREATE_FLOW =
+  "Workspace creation flow (creates a private editable COPY of a dataset on the tdei-workspace-* server): " +
+  "(1) resolve the dataset: for a jurisdiction such as a city, county or state ('latest dataset for Oak Harbor') use tdei_find_datasets with place, dataType osw, status Publish and latest:true, then show the match table and let the user confirm one row; for a known id use tdei_get_dataset_details; " +
+  "(2) ALWAYS ask the user for the workspace name (title) and the project group it should live in, showing their project groups from tdei_list_my_project_groups as a table; never pick either yourself; " +
+  "(3) pass the dataset's tdei_dataset_id as tdeiRecordId, its data type as type, its service_id as tdeiServiceId, and the chosen project group id as tdeiProjectGroupId to the workspace create call. " +
+  "The user needs access to that project group and dataset; stop and report if either is missing.";
+
+/**
+ * "What changed in this dataset?" There is no dataset-diff endpoint: answer from lineage and exact
+ * versions (TCAT wiki: dataset lineage, release versioning) and be explicit about what is not known.
+ */
+const DATASET_CHANGES_HELP =
+  "What changed in a dataset? TDEI has no dataset-diff operation. Answer from lineage and exact versions: use tdei_get_dataset_details and compare the dataset id, metadata version, upload/publication dates, source, data type and derived_from_dataset_id (the dataset it was derived from, e.g. by a workspace export); compare exact dataset ids/versions, never dataset names. " +
+  "tdei_list_versions lists supported data-standard (schema) versions, not dataset release versions. For workspace-origin data, the workspace server's get_workspace shows the source dataset lineage and its changeset tools show individual edits; the per-feature edits view (review or restore) is only in the Workspaces web UI. " +
+  "If lineage or the source/version cannot be verified from metadata, say so and suggest confirming with the data steward or field checks rather than inferring changes.";
+
+const WORKSPACE_COMPANION_KEYS = [
+  "findDatasets",
+  "listMyProjectGroups",
+  "listServices",
+  "getDatasetDetails",
+  "getMyIdentity",
+] as const;
+
+function withWorkspaceNotes<T extends Record<string, string>>(base: T): T {
+  const note = workspaceCompanionNote();
+  const out: Record<string, string> = { ...base };
+  for (const key of WORKSPACE_COMPANION_KEYS) {
+    if (!(key in out)) continue;
+    const flow = key === "findDatasets" || key === "listMyProjectGroups" ? ` ${WORKSPACE_CREATE_FLOW}` : "";
+    const changes = key === "getDatasetDetails" || key === "findDatasets" ? ` ${DATASET_CHANGES_HELP}` : "";
+    out[key] = `${out[key]}${flow}${changes} ${note}`;
+  }
+  return out as T;
+}
+
+/** UI-only tasks that surface from these core tools: hand the user to the right web page with the steps. */
+const WEB_UI_HANDOFFS: Record<string, readonly WebUiTask[]> = {
+  listServices: ["create_service", "export_workspace"],
+  listMyProjectGroups: ["manage_project_group_members"],
+  getMyIdentity: ["manage_project_group_members", "register_account"],
+  verifyEmail: ["register_account"],
+  recoverPassword: ["register_account"],
+};
+
+function withWebUiHandoffs<T extends Record<string, string>>(base: T): T {
+  const out: Record<string, string> = { ...base };
+  for (const [key, tasks] of Object.entries(WEB_UI_HANDOFFS)) {
+    if (!(key in out)) continue;
+    out[key] = `${out[key]} ${tasks.map((task) => webUiHandoff(task)).join(" ")}`;
+  }
+  return out as T;
+}
+
+export const SEMANTIC_TOOL_DESCRIPTIONS = withWebUiHandoffs(withWorkspaceNotes(BASE_SEMANTIC_TOOL_DESCRIPTIONS));

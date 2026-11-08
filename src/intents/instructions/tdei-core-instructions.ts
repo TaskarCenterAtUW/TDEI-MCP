@@ -1,3 +1,4 @@
+import { workspaceCompanionNote } from "../../tdei-shared/companion-servers.js";
 import { renderToolRoutingGuide } from "../routing-guide.js";
 import { TDEI_SHARED_SERVER_INSTRUCTIONS } from "./tdei-shared-instructions.js";
 
@@ -15,7 +16,12 @@ This server talks to the TDEI core API: project groups, services, datasets, jobs
 - For OSW Tag definition, use the osw-tag-definition schema (inclines, surface, width, length,description, name) then use tdei_get_dataset_details to generate the request payload based on the json at https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-osw-datasvc-ts/dev/schema/tag-quality.json.
 - For Tags, use the tag-quality schema to generate the request payload.
 - Jobs: before tdei_list_jobs, ask the user which project group (by name) unless they named one; list project groups with tdei_list_my_project_groups if they need options. Pass projectGroupName (or projectGroupId). Only when the user says "all" pass allGroups:true. For "running jobs" use status IN-PROGRESS; for one job's status use jobId. Fetching a job's result (job_download) is the last step and only for COMPLETED jobs.
+- Some things have no API and are web-only: registering an account, creating or editing a service, and adding project-group members or changing their roles are done in the TDEI Portal (poc role for services and members); exporting a workspace is done in Workspaces. When the user asks for one, give them the link for their environment and walk them through the steps in the matching tool description instead of failing or guessing an API.
 - Do not use workspace-only paths (workspace_id, tasking projects, teams, fixmes) on this server. Those belong to the tdei-workspace server.
+
+## Workspace tasks need the workspace server
+${workspaceCompanionNote()}
+To create a workspace from a dataset: resolve the dataset here (for "latest dataset for <place>" use tdei_find_datasets with place, osw, Publish, latest and let the user confirm a row), ask the user for the workspace name and the project group (show tdei_list_my_project_groups as a table), then hand tdei_dataset_id, data type, service_id and project group id to the workspace server's create_workspace. Exporting a workspace back to TDEI is done in the Workspaces web UI by a user with the POC or osw_data_generator role (see tdei_get_my_identity); use tdei_list_services to show candidate services.
 
 ${renderToolRoutingGuide()}
 `;
