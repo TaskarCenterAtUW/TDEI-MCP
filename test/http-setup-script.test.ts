@@ -769,6 +769,9 @@ test("server status page shows the npx installer above the script builder", () =
   assert.ok(npx < builder, "npx block comes before the sh/ps1 builder");
   assert.match(html, /github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup cleanup/);
   assert.match(html, /--profile core/);
+  assert.match(html, /white-space: pre-wrap/);
+  assert.ok(html.indexOf("<strong>Install</strong>") < html.indexOf('id="tdei-npx"'));
+  assert.ok(html.indexOf("<strong>Remove</strong>") < html.indexOf("setup cleanup"));
 
   const staging = renderStatusPage(
     "https://gw.example.org",
@@ -810,6 +813,13 @@ test("gateway page lists tdei-*-dev/staging/production first and installs both c
     const servers = options.slice(0, options.indexOf("Codex"));
     assert.deepEqual(servers.slice(0, 4), ["tdei-*-dev", "tdei-*-staging", "tdei-*-production", "tdei-core-dev"]);
     assert.ok(html.indexOf('id="tdei-npx"') < html.indexOf('aria-label="Command builder"'));
+    // Commands wrap (no horizontal scroll hides the tail) and the cleanup
+    // command is labelled Remove, not mistaken for a second install line.
+    assert.match(html, /white-space: pre-wrap/);
+    assert.doesNotMatch(html, /overflow-x: auto/);
+    assert.ok(html.indexOf("<strong>Install</strong>") < html.indexOf('id="tdei-npx"'));
+    assert.ok(html.indexOf("<strong>Remove</strong>") < html.indexOf("setup cleanup"));
+    assert.doesNotMatch(html, /The line above removes/);
     assert.match(html, /"with":\["tdei-workspace-dev"\]/);
     assert.match(html, /"with":\["tdei-workspace-stage"\]/);
     assert.match(html, /"with":\["tdei-workspace-prod"\]/);

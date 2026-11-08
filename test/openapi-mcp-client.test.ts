@@ -89,6 +89,28 @@ test("rejects operation IDs that normalize to the same MCP tool name", async () 
   await assert.rejects(() => client.listTools(), /operation name collision.*get_pet/i);
 });
 
+test("keeps the first operation when a backend repeats one operationId across methods (FastAPI catch-all)", async () => {
+  const logs: string[] = [];
+  const client = new OpenApiMcpClient({
+    apiUrl: "https://api.example.test",
+    logger: (message) => logs.push(message),
+    loadSpec: async () => ({
+      openapi: "3.1.0",
+      paths: {
+        "/mine": { get: { operationId: "get_mine", responses: {} } },
+        "/{full_path}": {
+          get: { operationId: "catch_all__full_path__head", responses: {} },
+          post: { operationId: "catch_all__full_path__head", responses: {} },
+          head: { operationId: "catch_all__full_path__head", responses: {} },
+        },
+      },
+    }),
+  });
+  const { tools } = await client.listTools();
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["catch_all__full_path__head", "get_mine"]);
+  assert.ok(logs.some((l) => /duplicate operationId.*catch_all__full_path__head/i.test(l)));
+});
+
 test("executes path and repeated query parameters with the current bearer", async () => {
   let request: Request | undefined;
   let tokens = 0;
