@@ -124,7 +124,7 @@ test("tdei_health tool is listed and callable", async () => {
     async close() {},
     isConnected: () => false,
   };
-  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei-core/register-openapi-tools.js");
   const server = await createServer({
     authManager: {
       async startSsoLogin() {

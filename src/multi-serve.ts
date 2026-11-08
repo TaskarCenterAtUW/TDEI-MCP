@@ -45,6 +45,9 @@ function startChild(server: ResolvedMultiMcpServer, extraEnv: NodeJS.ProcessEnv)
         TDEI_API_URL: server.apiUrl,
         TDEI_AUTH_API_URL: server.authApiUrl,
         TDEI_SPEC_URL: server.specUrl,
+        // Empty means "derive from the core host"; never inherit another server's value from the parent.
+        TDEI_USER_API_URL: server.userApiUrl ?? "",
+        TDEI_USER_SPEC_URL: server.userSpecUrl ?? "",
         TDEI_HTTP_HOST: server.host,
         TDEI_HTTP_PORT: String(server.port),
         TDEI_HTTP_BASE_PATH: server.basePath,

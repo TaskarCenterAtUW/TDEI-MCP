@@ -12,6 +12,7 @@ export const TOOL_SPEC_FIELDS: Readonly<Record<string, ToolSpecFields>> = {
   tdei_validate_dataset: { required: ["asset","dataType"] },
   tdei_upload_dataset: { required: ["asset","dataType","metadata","projectGroupId","serviceId"] },
   tdei_get_my_identity: { required: [] },
+  tdei_my_project_group_roles: { required: [] },
   tdei_list_jobs: { required: [], oneOf: ["projectGroupName","projectGroupId","allGroups"] },
   tdei_get_dataset_details: { required: ["tdeiDatasetId"] },
   tdei_download_dataset: { required: ["tdeiDatasetId"] },

@@ -28,11 +28,16 @@ import {
   type OAuthHttpResult,
 } from "./oauth/mcp-oauth.js";
 import { createConfiguredPlaceResolver } from "./adapters/configured-place-resolver.js";
-import { resolveTdeiServerProfile, tdeiServerInstructions } from "./intents/server-instructions.js";
+import {
+  resolveTdeiServerProfile,
+  tdeiServerInstructions,
+  type TdeiServerProfile,
+} from "./intents/server-instructions.js";
 import { BUILD } from "./build-info.js";
 import { setSignInMode, signInText, tokenExpiredText } from "./mcp/errors.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
-import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
+import { createOpenApiClient } from "./tdei-user/client.js";
+import type { OpenApiClientLike } from "./tdei-user/composite-client.js";
 
 export interface HttpServeOptions {
   fetchImpl?: typeof fetch;
@@ -64,8 +69,9 @@ interface ResolvedHttpOptions {
   ssoCallbackListener: boolean;
   gatewaySlug: string | undefined;
   sessionAuth: AuthManager;
-  sessionOpenApiClient: OpenApiMcpClient;
+  sessionOpenApiClient: OpenApiClientLike;
   serverInstructions: string;
+  serverProfile: TdeiServerProfile;
 }
 
 function buildLoginUrl(): string {
@@ -304,7 +310,9 @@ async function handleMcpRequest(
     // calls arrive with their own bearer token and are handled below.
     server = createHttpSemanticServer({
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
+      profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       ssoCallbackListener: false,
@@ -315,7 +323,9 @@ async function handleMcpRequest(
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
+      profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       publicBaseUrl,
@@ -368,7 +378,9 @@ async function handleMcpRequest(
     server = createHttpSemanticServer({
       accessToken: bearer,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
+      profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       ssoCallbackListener: options.ssoCallbackListener,
@@ -402,7 +414,9 @@ async function handleMcpRequest(
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
+      profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       places: options.places,
       publicBaseUrl,
@@ -444,15 +458,20 @@ export async function serveHttp(
   }
   const gatewaySlug = options.gatewaySlug?.trim() || process.env.TDEI_GATEWAY_SLUG?.trim() || undefined;
   setSignInMode(gatewaySlug ? "gateway" : options.requireBearerAuth ? "bearer" : "tool");
+  const serverProfile = resolveTdeiServerProfile({
+    name: process.env.TDEI_MCP_NAME || gatewaySlug,
+    explicit: process.env.TDEI_MCP_PROFILE,
+    apiUrl: httpConfig.apiUrl,
+  });
   const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
-  const sessionOpenApiClient = new OpenApiMcpClient({
-    apiUrl: httpConfig.apiUrl,
-    specUrl: httpConfig.specUrl,
+  const sessionOpenApiClient = createOpenApiClient({
+    config: httpConfig,
+    profile: serverProfile,
     headersProvider: async () => ({
       Authorization: `Bearer ${await sessionAuth.getAccessToken()}`,
     }),
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    fetchImpl: options.fetchImpl,
   });
   const resolved: ResolvedHttpOptions = {
     fetchImpl: options.fetchImpl,
@@ -463,13 +482,8 @@ export async function serveHttp(
     gatewaySlug,
     sessionAuth,
     sessionOpenApiClient,
-    serverInstructions: tdeiServerInstructions(
-      resolveTdeiServerProfile({
-        name: process.env.TDEI_MCP_NAME || gatewaySlug,
-        explicit: process.env.TDEI_MCP_PROFILE,
-        apiUrl: httpConfig.apiUrl,
-      }),
-    ),
+    serverInstructions: tdeiServerInstructions(serverProfile),
+    serverProfile,
   };
   const host = overrides.host ?? httpConfig.httpHost;
   const port = overrides.port ?? httpConfig.httpPort;
@@ -520,7 +534,7 @@ export async function serveHttp(
         }
 
         if (request.method === "GET" && url.pathname === "/") {
-          const html = renderStatusPage(publicBaseUrl, basePath, mcpName);
+          const html = renderStatusPage(publicBaseUrl, basePath, mcpName, serverProfile);
           response.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-store",
@@ -552,7 +566,7 @@ export async function serveHttp(
         }
 
         if (request.method === "GET" && (url.pathname === `${basePath}/setup` || url.pathname === "/setup")) {
-          const text = renderSetupOverview(publicBaseUrl, basePath, mcpName);
+          const text = renderSetupOverview(publicBaseUrl, basePath, mcpName, serverProfile);
           response.writeHead(200, {
             "Content-Type": "text/plain; charset=utf-8",
             "Cache-Control": "no-store",
@@ -588,8 +602,8 @@ export async function serveHttp(
             return;
           }
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, mcpName)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, mcpName);
+            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, mcpName, serverProfile)
+            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, mcpName, serverProfile);
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",

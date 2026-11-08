@@ -66,6 +66,7 @@ test("common semantic tools are discoverable and callable", async () => {
       "tdei_list_my_project_groups",
       "tdei_list_services",
       "tdei_list_versions",
+      "tdei_my_project_group_roles",
       "tdei_publish_dataset",
       "tdei_recover_password",
       "tdei_regenerate_api_key",

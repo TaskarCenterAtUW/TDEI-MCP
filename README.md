@@ -410,7 +410,7 @@ Both transports expose the common semantic tools:
 
 File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
 
-Raw operation descriptions are augmented with connector runbooks in `src/tdei/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
+Raw operation descriptions are augmented with connector runbooks in `src/tdei-core/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 
@@ -466,6 +466,9 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
 | `TDEI_DOWNLOAD_MODE` | No | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback) |
 | `TDEI_EXPOSE_ALL_RAW_TOOLS` | No | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it) |
+| `TDEI_STATUS_PAGE_URL` | No | unset (the TDEI MCP status/install page of this deployment, for example `https://tdei-mcp-dev.proudbay-977f7717.westus.azurecontainerapps.io/`. Tools that need the companion server (workspace tools that need core data, core dataset tools used for workspace creation) tell the model to send the user there to install both servers when the other one is missing; when unset the note says to use the root URL of the host the server was installed from) |
+| `TDEI_USER_API_URL` | No | derived from `TDEI_API_URL` for the three TDEI core hosts (`portal-api-dev.tdei.us`, `portal-api-stage.tdei.us`, `portal-api.tdei.us`); `off` disables it; other hosts load nothing. Core servers load the TDEI User Management API as a second OpenAPI source (see below) |
+| `TDEI_USER_SPEC_URL` | No | `<TDEI_USER_API_URL>/api-docs/swagger.json` (the User Management API's OpenAPI document) |
 | `TDEI_OAUTH_SECRET` | Gateway deployments (generate with `openssl rand -hex 32`; see below) | Long random secret that protects sign-in codes and the login cookie. Set the same value on every replica. If unset, a random per-process secret is used and a sign-in must finish on the instance that started it |
 | `TDEI_DOWNLOAD_DIR` | No | `~/Downloads` (absolute folder for server-mode downloads) |
 | `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
@@ -473,6 +476,22 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
 
 The API URL must use HTTPS. The spec URL and SSO callback are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it.
+
+## User Management API tools (core servers)
+
+Each `tdei-core-*` server also loads the **TDEI User Management API** (the "portal API") as a second OpenAPI source, so project-group services, members and roles are available without a separate MCP entry. The workspace servers never load it.
+
+| Environment | API origin | OpenAPI document |
+|---|---|---|
+| dev | `https://portal-api-dev.tdei.us` | `https://portal-api-dev.tdei.us/api-docs/swagger.json` |
+| stage | `https://portal-api-stage.tdei.us` | `https://portal-api-stage.tdei.us/api-docs/swagger.json` |
+| prod | `https://portal-api.tdei.us` | `https://portal-api.tdei.us/api-docs/swagger.json` |
+
+The URLs are derived from the core host, or set per server with `userApiUrl` / `userSpecUrl` in `mcps.json` (shipped explicitly for the three core servers), or with `TDEI_USER_API_URL` / `TDEI_USER_SPEC_URL`. If the User API cannot be reached the core tools keep working and the log says why.
+
+Exposed tools (named `portal_*` so operators can still deny them with `endpoints.deny`; `tdei_*` names bypass that filter): `portal_list_roles`, `portal_list_project_group_members`, `portal_create_service`, `portal_update_service`, `portal_set_service_active`, `portal_assign_project_group_roles`, `portal_revoke_project_group_roles`, `portal_list_referral_codes`, `portal_create_referral_code`, `portal_update_referral_code`, `portal_delete_referral_code`, `portal_get_referral_code`, `portal_set_project_group_viewer_settings`, plus the semantic `tdei_my_project_group_roles` (your project groups and roles; the user id comes from the sign-in token). Most write tools need the `poc` role in that project group; the descriptions say so.
+
+Hidden by default (opt in with `endpoints.allow`, except credentials which are never exposed): operations covered by core tools (`getService`, `getProjectGroup`, `getUserProfile`), `TDEI_ADMIN`-only operations (project group create/update/deactivate, user search and download, application roles), and sign-in, registration and password operations. Registering an account stays on the TDEI Portal because it takes a password.
 
 ## Endpoint filtering and workflows (tdei.config.json)
 

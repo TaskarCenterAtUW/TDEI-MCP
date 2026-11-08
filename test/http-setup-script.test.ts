@@ -323,12 +323,12 @@ test("sh and ps1 wrappers pass the action through to the node program", () => {
     const uninstallSh = renderClientSetupScript(client, "http://h:1", 8765, "uninstall");
     assert.match(uninstallSh, /ACTION="uninstall"/);
     assert.match(uninstallSh, /SERVER_NAME="tdei"/);
-    assert.match(uninstallSh, /"\$ACTION" "\$SERVER_NAME" <<'EOF'/);
+    assert.match(uninstallSh, /"\$ACTION" "\$SERVER_NAME" "\$PROFILE" <<'EOF'/);
 
     const updatePs = renderClientSetupPowershell(client, "http://h:1", 8765, "update");
     assert.match(updatePs, /\$Action = 'update'/);
     assert.match(updatePs, /\$ServerName = 'tdei'/);
-    assert.match(updatePs, /"\$CallbackPort" \$Action \$ServerName/);
+    assert.match(updatePs, /"\$CallbackPort" \$Action \$ServerName \$Profile/);
     // The embedded program is identical across actions — only the wrapper arg differs.
     const js = `${updatePs.split("$setupJs = @'\n")[1]!.split("\n'@")[0]!}\n`;
     assert.equal(js, getClientSetupJs());

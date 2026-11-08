@@ -45,6 +45,27 @@ export function normalizeAuthApiUrl(value: string): string {
   return normalizeToOrigin(value, "TDEI_AUTH_API_URL");
 }
 
+/** User Management API ("portal API") that sits beside each TDEI core environment. */
+const USER_API_BY_CORE_ORIGIN: Readonly<Record<string, string>> = {
+  "https://api-dev.tdei.us": "https://portal-api-dev.tdei.us",
+  "https://api-stage.tdei.us": "https://portal-api-stage.tdei.us",
+  "https://api.tdei.us": "https://portal-api.tdei.us",
+};
+
+/** User Management API origin for a known TDEI core host; undefined for any other host. */
+export function userApiUrlForApiUrl(apiUrl: string): string | undefined {
+  try {
+    return USER_API_BY_CORE_ORIGIN[new URL(apiUrl).origin];
+  } catch {
+    return undefined;
+  }
+}
+
+/** The User Management API publishes its OpenAPI document under /api-docs/swagger.json. */
+export function userSpecUrlForUserApiUrl(userApiUrl: string): string {
+  return `${userApiUrl.replace(/\/+$/, "")}/api-docs/swagger.json`;
+}
+
 /** True when the URL points at one of the three TDEI core API hosts. */
 export function isCoreApiOrigin(value: string | undefined): boolean {
   if (!value?.trim()) return false;

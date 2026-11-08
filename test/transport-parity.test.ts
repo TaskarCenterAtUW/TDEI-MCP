@@ -5,7 +5,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
 import { createHttpSemanticServer } from "../src/http-semantic-server.js";
 import { createServer } from "../src/server.js";
-import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei-core/register-openapi-tools.js";
 
 const API_URL = "https://tdei-parity.example";
 

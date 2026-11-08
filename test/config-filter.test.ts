@@ -7,7 +7,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { isToolAllowed, loadConfigFile } from "../src/config-file.js";
 import { OpenApiToolsLifecycle } from "../src/openapi/openapi-tools-lifecycle.js";
-import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei-core/register-openapi-tools.js";
 
 // Registration mechanics tests: expose the full raw catalog.
 process.env.TDEI_EXPOSE_ALL_RAW_TOOLS = "1";

@@ -1,4 +1,4 @@
-import { specUrlForApiUrl } from "./init/envs.js";
+import { specUrlForApiUrl, userApiUrlForApiUrl, userSpecUrlForUserApiUrl } from "./init/envs.js";
 
 const DEFAULT_API_URL = "https://api-dev.tdei.us";
 
@@ -20,6 +20,12 @@ export interface ResolvedConfig {
   /** Base URL used for SSO + token validation. Defaults to apiUrl; workspace backends that do not serve SSO point this at TDEI core. */
   authApiUrl: string;
   specUrl: string;
+  /**
+   * User Management API (project-group roles, members, services). Core servers load it as a second OpenAPI
+   * source; derived from the core host unless TDEI_USER_API_URL is set ("off" disables it).
+   */
+  userApiUrl?: string;
+  userSpecUrl?: string;
   ssoClientId: string;
   ssoCallbackUrl: string;
   transport: Transport;
@@ -134,6 +140,28 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
   const authApiUrl = rawAuthApiUrl ? readHttpsUrl("TDEI_AUTH_API_URL", rawAuthApiUrl, DEFAULT_API_URL) : apiUrl;
   if ("error" in authApiUrl) errors.push(authApiUrl.error);
 
+  let userApiUrl: string | undefined;
+  let userSpecUrl: string | undefined;
+  const rawUserApi = process.env.TDEI_USER_API_URL?.trim();
+  if (rawUserApi && /^(off|none|false|0)$/i.test(rawUserApi)) {
+    userApiUrl = undefined;
+  } else if (rawUserApi) {
+    const parsed = readHttpsUrl("TDEI_USER_API_URL", rawUserApi, "https://portal-api-dev.tdei.us");
+    if ("error" in parsed) errors.push(parsed.error);
+    else userApiUrl = parsed.value;
+  } else if (!("error" in apiUrl)) {
+    userApiUrl = userApiUrlForApiUrl(apiUrl.value);
+  }
+  if (userApiUrl) {
+    const spec = readHttpsUrl(
+      "TDEI_USER_SPEC_URL",
+      userSpecUrlForUserApiUrl(userApiUrl),
+      userSpecUrlForUserApiUrl(userApiUrl),
+    );
+    if ("error" in spec) errors.push(spec.error);
+    else userSpecUrl = spec.value;
+  }
+
   const transport = resolveTransport();
   if ("error" in transport) errors.push(transport.error);
 
@@ -166,6 +194,7 @@ export function loadConfig(): { ok: true; config: ResolvedConfig } | { ok: false
       apiUrl: (apiUrl as { value: string }).value,
       authApiUrl: (authApiUrl as { value: string }).value,
       specUrl: (specUrl as { value: string }).value,
+      ...(userApiUrl && userSpecUrl ? { userApiUrl, userSpecUrl } : {}),
       ssoClientId: TDEI_SSO_CLIENT_ID,
       ssoCallbackUrl: new URL(process.env.TDEI_SSO_CALLBACK_URL?.trim() || DEFAULT_SSO_CALLBACK_URL).toString(),
       transport: goodTransport,

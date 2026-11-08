@@ -22,7 +22,7 @@ function makeAuth() {
 
 test("lifecycle routes binary downloads through the dedicated adapter", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
-  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei-core/register-openapi-tools.js");
   const server = new McpServer({ name: "binary-routing-test", version: "1.0.0" });
 
   const auth = makeAuth();
@@ -81,7 +81,7 @@ test("lifecycle routes binary downloads through the dedicated adapter", async ()
 
 test("lifecycle routes JSON tools to the OpenAPI provider", async () => {
   const { McpServer } = await import("@modelcontextprotocol/server");
-  const { registerTdeiOpenApiTools } = await import("../src/tdei/register-openapi-tools.js");
+  const { registerTdeiOpenApiTools } = await import("../src/tdei-core/register-openapi-tools.js");
   const server = new McpServer({ name: "binary-routing-json-test", version: "1.0.0" });
 
   const auth = makeAuth();

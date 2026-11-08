@@ -1,4 +1,5 @@
 import type { DatasetSearch, TdeiOperations } from "./operations.js";
+import { JOB_TYPES, normalizeJobType } from "./job-types.js";
 import type { PlaceResolver } from "./place-resolver.js";
 import { extractAuthIdentity } from "../auth/auth-manager.js";
 import {
@@ -29,6 +30,7 @@ import type {
   GetMetricsData,
   GetMetricsInput,
   GetMyIdentityData,
+  MyProjectGroupRolesData,
   IntentResult,
   ListFeedbacksData,
   ListFeedbacksInput,
@@ -90,6 +92,8 @@ export interface SemanticIntentDependencies {
   downloadSettings?: DownloadSettings;
   /** Injected for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
+  /** TDEI User Management API origin (project-group roles). Unset means the tool reports it as unsupported. */
+  userApiUrl?: string;
 }
 
 function uploadedTimestampMs(dataset: Record<string, unknown>): number | undefined {
@@ -199,6 +203,9 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
 }
+
+/** The jobs API returns at most this many records per call (page_size 1 to 50). */
+const JOBS_API_PAGE_SIZE = 50;
 
 export class SemanticIntentModule {
   private readonly readCache = new Map<string, { expires: number; value: Promise<unknown> }>();
@@ -377,7 +384,7 @@ export class SemanticIntentModule {
         appliedFilters,
         accessScope: "authenticated_user",
         scopeExplanation:
-          "These are all project groups visible to your login (an admin login sees all groups), NOT confirmed membership. TDEI reports only poc contacts per group, not members. For your login email call tdei_get_my_identity. For full membership check the TDEI portal user/role screen. Use searchText to narrow, do not POC-filter.",
+          "These are all project groups visible to your login (an admin login sees all groups), NOT confirmed membership. TDEI reports only poc contacts per group, not members. For your login email call tdei_get_my_identity. For the project groups you belong to and your role in each call tdei_my_project_group_roles. Use searchText to narrow, do not POC-filter.",
         apiOperation: "listProjectGroups",
         method: "GET",
         path: "/api/v1/project-groups",
@@ -530,6 +537,75 @@ export class SemanticIntentModule {
     };
   }
 
+  /**
+   * The caller's own project groups with the roles they hold in each, from the User Management API
+   * (GET /api/v1/project-group-roles/{userId}). The user id is the sign-in token's subject, so the model never
+   * has to supply or guess it. One call; reports when the API holds more groups than were returned.
+   */
+  async myProjectGroupRoles(
+    input: { projectGroupName?: string } = {},
+    context: RequestContext = {},
+  ): Promise<IntentResult<MyProjectGroupRolesData>> {
+    const base = this.dependencies.userApiUrl?.replace(/\/+$/, "");
+    if (!base) {
+      return {
+        status: "unsupported",
+        reason:
+          "The TDEI User Management API is not configured for this server (set TDEI_USER_API_URL), so project-group roles cannot be read here.",
+        requiredCapability: "TDEI User Management API",
+      };
+    }
+    const token = context.accessToken ?? (await this.dependencies.tokenProvider?.().catch(() => undefined));
+    const subject =
+      this.dependencies.identityProvider?.()?.subject ?? (token ? extractAuthIdentity(token)?.subject : undefined);
+    if (!token || !subject) {
+      return {
+        status: "complete",
+        data: {
+          authenticated: false,
+          hint: `Not authenticated or the sign-in token has no user id. ${signInText()} Then retry tdei_my_project_group_roles.`,
+        },
+      };
+    }
+    const params = new URLSearchParams({ page_size: "50", page_no: "1", sort_by: "name" });
+    if (input.projectGroupName?.trim()) params.set("searchText", input.projectGroupName.trim());
+    const response = await (this.dependencies.fetchImpl ?? fetch)(
+      `${base}/api/v1/project-group-roles/${encodeURIComponent(subject)}?${params}`,
+      {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) {
+      return {
+        status: "unsupported",
+        reason: `The User Management API answered ${response.status} when reading your project-group roles.`,
+        requiredCapability: "TDEI User Management API",
+      };
+    }
+    const body = (await response.json().catch(() => [])) as unknown;
+    const items = Array.isArray(body) ? (body as Array<Record<string, unknown>>) : [];
+    const projectGroups = items.map((item) => ({
+      tdei_project_group_id: String(item.tdei_project_group_id ?? ""),
+      project_group_name: String(item.project_group_name ?? ""),
+      roles: Array.isArray(item.roles) ? item.roles.map(String) : [],
+    }));
+    const totalHeader = Number.parseInt(response.headers.get("X-Total-Count") ?? "", 10);
+    const total = Number.isFinite(totalHeader) ? totalHeader : undefined;
+    const more = total !== undefined && total > projectGroups.length;
+    return {
+      status: "complete",
+      data: {
+        authenticated: true,
+        projectGroups,
+        ...(more ? { total } : {}),
+        hint: more
+          ? `Showing ${projectGroups.length} of ${total} project groups (one call, no paging). Ask for a project group name to narrow the list.`
+          : `${projectGroups.length} project group(s). Roles are TDEI project-group roles.`,
+      },
+    };
+  }
+
   /** Identity/roles from the SSO JWT (no roles endpoint exists in the TDEI API). */
   async getMyIdentity(context: RequestContext = {}): Promise<IntentResult<GetMyIdentityData>> {
     const fromProvider = this.dependencies.identityProvider?.();
@@ -574,6 +650,26 @@ export class SemanticIntentModule {
   async listJobs(input: ListJobsInput = {}, context: RequestContext = {}): Promise<IntentResult<ListJobsData>> {
     const pageSize = Math.min(Math.max(input.limit ?? 20, 1), 50);
     const cutoffMs = resolveCutoffMs(input.createdAfter, input.createdWithinDays);
+
+    // The API only accepts its own job_type values; map portal labels ("Filter Dataset by BBox") and
+    // aliases, and ask rather than send a value the API would reject.
+    let jobType: string | undefined;
+    if (input.jobType?.trim()) {
+      jobType = normalizeJobType(input.jobType);
+      if (!jobType) {
+        return {
+          status: "needs_input",
+          missing: [
+            {
+              field: "jobType",
+              question: `"${input.jobType}" is not a TDEI job type. Which job type do you mean?`,
+              allowedValues: [...JOB_TYPES],
+            },
+          ],
+          accepted: { ...input },
+        };
+      }
+    }
 
     let groupIds: string[];
     const explicitId = input.projectGroupId?.trim();
@@ -646,10 +742,11 @@ export class SemanticIntentModule {
             ...(input.jobId?.trim() ? { jobId: input.jobId.trim() } : {}),
             projectGroupId: groupId,
             ...(input.includeGroupJobs !== undefined ? { includeGroupJobs: input.includeGroupJobs } : {}),
-            ...(input.jobType ? { jobType: input.jobType } : {}),
+            ...(jobType ? { jobType } : {}),
             ...(input.status ? { status: input.status } : {}),
             page: 1,
-            pageSize,
+            // One call per group at the API maximum; the display limit is applied afterwards.
+            pageSize: JOBS_API_PAGE_SIZE,
           },
           context,
         );
@@ -658,6 +755,7 @@ export class SemanticIntentModule {
       }
     });
     const collected: Array<Record<string, unknown>> = perGroup.flat();
+    const apiPageFull = perGroup.some((jobs) => jobs.length >= JOBS_API_PAGE_SIZE);
     // Newest first across all groups, so the page holds the most recent jobs
     // rather than whatever the first groups happened to return. Jobs without
     // a timestamp sort last; the sort is stable so ties keep group order.
@@ -669,14 +767,24 @@ export class SemanticIntentModule {
       if (tb === undefined) return -1;
       return tb - ta;
     });
-    const filtered = (
+    const matching =
       cutoffMs === undefined
         ? newestFirst
         : newestFirst.filter((job) => {
             const ts = createdTimestampMs(job);
             return ts !== undefined && ts >= cutoffMs;
-          })
-    ).slice(0, pageSize);
+          });
+    const filtered = matching.slice(0, pageSize);
+    const mayHaveMore = apiPageFull || matching.length > filtered.length;
+    const truncation = {
+      returned: collected.length,
+      shown: filtered.length,
+      apiPageFull,
+      mayHaveMore,
+      note: mayHaveMore
+        ? `Showing ${filtered.length} jobs from one API page (the jobs API returns at most ${JOBS_API_PAGE_SIZE} per project group, has no total count and does not document its ordering; shown newest first by created_at). More matching jobs may exist. Do not call again to page: tell the user the list may be incomplete and ask them to narrow it, for example by status, job type, a specific job id, "submitted by me" versus the whole group, a recent-days filter, or a single project group.`
+        : `Complete for the filters used: ${filtered.length} job(s) matched.`,
+    };
     return {
       status: "complete",
       data: {
@@ -689,6 +797,7 @@ export class SemanticIntentModule {
           groupIds.length === 1
             ? "Jobs for the requested project group."
             : "Jobs searched across all of your accessible project groups, as requested.",
+        truncation,
       },
     };
   }
