@@ -1,3 +1,5 @@
+import { lookupToolInstruction } from "../tdei-shared/register-openapi-tools.js";
+
 /**
  * Extra LLM-facing usage guidance appended to discovered TDEI OpenAPI tool
  * descriptions. The generated spec descriptions explain what an operation
@@ -41,7 +43,5 @@ export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
 
 /** Append the matching TDEI instruction to a discovered tool description. */
 export function augmentTdeiToolDescription(operationName: string, description: string | undefined): string | undefined {
-  const instruction = TDEI_TOOL_INSTRUCTIONS[operationName] ?? TDEI_TOOL_INSTRUCTIONS[operationName.replace(/-/g, "_")];
-  if (!instruction) return description;
-  return description ? `${description}\n\n${instruction}` : instruction;
+  return lookupToolInstruction(TDEI_TOOL_INSTRUCTIONS, operationName, description);
 }

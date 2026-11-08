@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { AuthManager } from "../auth/auth-manager.js";
 import type { SsoLogoutOptions, SsoLogoutStart } from "../auth/types.js";
 import type { OpenApiMcpClient } from "../openapi/openapi-mcp-client.js";
-import type { registerTdeiOpenApiTools } from "../tdei/register-openapi-tools.js";
+import type { registerTdeiOpenApiTools } from "../tdei-core/register-openapi-tools.js";
 import {
   BUILTIN_TOOL_PREFIX,
   CONNECTOR_AUTH_TOOLS,

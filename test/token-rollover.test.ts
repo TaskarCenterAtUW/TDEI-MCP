@@ -4,7 +4,7 @@ import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 
 import { OpenApiToolsLifecycle } from "../src/openapi/openapi-tools-lifecycle.js";
-import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
+import { registerTdeiOpenApiTools } from "../src/tdei-core/register-openapi-tools.js";
 import { createServer } from "../src/server.js";
 
 // Registration mechanics tests: expose the full raw catalog.

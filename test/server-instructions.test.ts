@@ -73,3 +73,28 @@ test("the MCP handshake advertises the profile-specific instructions", async () 
   assert.match((await instructionsForProfile("core")) ?? "", /TDEI core data server/);
   assert.match((await instructionsForProfile("workspace")) ?? "", /TDEI workspace server/);
 });
+
+async function toolNamesForProfile(profile: "core" | "workspace"): Promise<string[]> {
+  const server = createHttpSemanticServer({ apiUrl: "https://api-dev.tdei.us", profile });
+  const client = new Client({ name: "tools-client", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    return (await client.listTools()).tools.map((tool) => tool.name);
+  } finally {
+    await client.close();
+  }
+}
+
+test("workspace servers do not register the core semantic tdei_* tools", async () => {
+  const core = await toolNamesForProfile("core");
+  const workspace = await toolNamesForProfile("workspace");
+  assert.ok(core.includes("tdei_find_datasets"));
+  assert.ok(core.includes("tdei_upload_dataset"));
+  assert.deepEqual(
+    workspace.filter(
+      (name) => name.startsWith("tdei_") && !["tdei_sso_login", "tdei_auth_status", "tdei_sso_logout"].includes(name),
+    ),
+    [],
+  );
+});

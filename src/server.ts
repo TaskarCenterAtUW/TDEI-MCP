@@ -4,11 +4,12 @@ import * as z from "zod/v4";
 import { authManager, type AuthManager } from "./auth/auth-manager.js";
 import { BUILD } from "./build-info.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
-import { openApiMcpClient } from "./tdei/openapi-provider.js";
+import { openApiMcpClient } from "./tdei-shared/openapi-provider.js";
 import { errorResult } from "./mcp/responses.js";
 import { signInText } from "./mcp/errors.js";
 import { log } from "./mcp/log.js";
-import { registerTdeiOpenApiTools } from "./tdei/register-openapi-tools.js";
+import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
+import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-openapi-tools.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
@@ -131,6 +132,11 @@ export async function createServer(
     explicit: process.env.TDEI_MCP_PROFILE,
     apiUrl: getConfig().apiUrl,
   });
+  // The default registrar follows the profile; an injected one (tests) wins.
+  const registrar =
+    profile === "workspace" && dependencies.registerTdeiOpenApiTools === registerTdeiOpenApiTools
+      ? registerTdeiWorkspaceOpenApiTools
+      : dependencies.registerTdeiOpenApiTools;
 
   const server = new McpServer(
     {
@@ -145,7 +151,7 @@ export async function createServer(
     server,
     auth,
     openApiClient,
-    dependencies.registerTdeiOpenApiTools,
+    registrar,
     dependencies.binaryDownloads ??
       new BinaryTdeiDownloads({
         baseUrl: getConfig().apiUrl,
@@ -171,7 +177,8 @@ export async function createServer(
     fetchImpl: fetch,
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
-  registerSemanticTools(server, semanticModule);
+  // Semantic tdei_* tools target the TDEI core API; workspace servers only expose their own OpenAPI tools.
+  if (profile === "core") registerSemanticTools(server, semanticModule);
 
   server.registerTool(
     "tdei_sso_login",

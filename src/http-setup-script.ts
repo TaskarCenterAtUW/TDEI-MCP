@@ -1,3 +1,5 @@
+import type { TdeiServerProfile } from "./intents/server-instructions.js";
+import { installCopy } from "./tdei-shared/install-copy.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 
 export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
@@ -80,9 +82,10 @@ function psQuote(value: string): string {
 /**
  * Shared client-configuration program (CommonJS, `require` only — no deps).
  * Runs identically on macOS, Ubuntu, and Windows under any Node 22+.
- * argv: [node, script, client, mcpUrl, remoteCallbackUrl, callbackPort, action, serverName].
+ * argv: [node, script, client, mcpUrl, remoteCallbackUrl, callbackPort, action, serverName, profile].
  * action is one of install (default), update, or uninstall.
  * serverName is the mcps.json name (for example tdei-core-dev); omitted means tdei.
+ * profile is core (default) or workspace; it only selects the post-login hint.
  * Embedded by both the POSIX sh wrapper and the PowerShell wrapper.
  */
 const CLIENT_SETUP_JS = `const fs = require("node:fs");
@@ -90,7 +93,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw, serverNameRaw] = process.argv;
+const [, , client, mcpUrl, remoteCallbackUrl, callbackPortRaw, actionRaw, serverNameRaw, profileRaw] = process.argv;
+const profile = profileRaw === "workspace" ? "workspace" : "core";
+const AFTER_LOGIN = {
+  core: "Then try tdei_list_my_project_groups to see your project groups and datasets.",
+  workspace: "Then try get_my_workspaces to see your workspaces. Dataset upload, validation and publish live on the matching tdei-core-* server.",
+};
 const action = actionRaw || "install";
 const serverName = /^[A-Za-z_][A-Za-z0-9_-]*$/.test(serverNameRaw || "") ? serverNameRaw : "tdei";
 
@@ -353,7 +361,7 @@ if (client === "claude-desktop") {
   console.log("[tdei-mcp] Claude Desktop accepts stdio servers only; registered a local npx mcp-remote bridge.");
 }
 printRestart();
-console.log("[tdei-mcp] Then ask your agent to log in to TDEI (it calls tdei_sso_login).");
+console.log("[tdei-mcp] Then ask your agent to log in to TDEI (it calls tdei_sso_login). " + AFTER_LOGIN[profile]);
 
 const parsedMcp = new URL(mcpUrl);
 const isLoopbackServer =
@@ -407,7 +415,12 @@ export function getClientSetupJs(): string {
   return CLIENT_SETUP_JS;
 }
 
-export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
+export function renderSetupOverview(
+  baseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+): string {
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const prefix = normalizeBasePath(basePath);
@@ -417,6 +430,7 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewayS
     "",
     `MCP Endpoint: ${mcpUrl}`,
     `Client entry name: ${mcpName}`,
+    `Server: ${installCopy(profile).summary}`,
     `Keycloak redirect: ${REGISTERED_SSO_REDIRECT_URI}`,
     `Local relay forwards that to: ${remoteCallbackUrl}`,
     "",
@@ -489,6 +503,7 @@ export function renderSetupOverview(baseUrl: string, basePath = "/mcp", gatewayS
     `  # Cursor:           quit and reopen Cursor, then start a new chat (verify ${mcpName}).`,
     "",
     "Then ask your agent to log in to TDEI (it calls tdei_sso_login).",
+    installCopy(profile).afterLogin,
     "",
   ].join("\n");
 }
@@ -500,6 +515,7 @@ export function renderClientSetupScript(
   action: SetupScriptAction = "install",
   basePath = "/mcp",
   gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
 ): string {
   const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
@@ -513,13 +529,14 @@ REMOTE_CALLBACK_URL=${JSON.stringify(remoteCallbackUrl)}
 CALLBACK_PORT=${JSON.stringify(String(callbackPort))}
 ACTION=${JSON.stringify(action)}
 SERVER_NAME=${JSON.stringify(mcpName)}
+PROFILE=${JSON.stringify(profile)}
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Error: node is required on the client machine to configure $CLIENT." >&2
   exit 1
 fi
 
-node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" "$SERVER_NAME" <<'EOF'
+node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" "$SERVER_NAME" "$PROFILE" <<'EOF'
 ${CLIENT_SETUP_JS}EOF
 `;
 }
@@ -531,6 +548,7 @@ export function renderClientSetupPowershell(
   action: SetupScriptAction = "install",
   basePath = "/mcp",
   gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
 ): string {
   const { mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
@@ -545,6 +563,7 @@ $RemoteCallbackUrl = ${psQuote(remoteCallbackUrl)}
 $CallbackPort = ${Number(callbackPort) || 8765}
 $Action = ${psQuote(action)}
 $ServerName = ${psQuote(mcpName)}
+$Profile = ${psQuote(profile)}
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Error "node is required on this machine to configure $Client. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
@@ -557,7 +576,7 @@ ${CLIENT_SETUP_JS}'@
 $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("tdei-mcp-setup-" + [Guid]::NewGuid().ToString("N") + ".cjs")
 Set-Content -Path $tempFile -Value $setupJs -Encoding utf8NoBOM
 try {
-  & node $tempFile $Client $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action $ServerName
+  & node $tempFile $Client $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action $ServerName $Profile
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
   Remove-Item -Path $tempFile -ErrorAction SilentlyContinue

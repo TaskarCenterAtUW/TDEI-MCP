@@ -3,8 +3,8 @@ import test from "node:test";
 
 import { McpServer } from "@modelcontextprotocol/server";
 
-import { registerTdeiOpenApiTools } from "../src/tdei/register-openapi-tools.js";
-import { SEMANTIC_COVERED_RAW_OPERATIONS } from "../src/tdei/raw-tool-coverage.js";
+import { registerTdeiOpenApiTools } from "../src/tdei-core/register-openapi-tools.js";
+import { SEMANTIC_COVERED_RAW_OPERATIONS } from "../src/tdei-core/raw-tool-coverage.js";
 
 const tools = ["listProjectGroups", "cloneDataset", "job-download", "listApiVersions"].map((name) => ({
   name,

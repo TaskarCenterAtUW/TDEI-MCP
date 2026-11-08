@@ -5,7 +5,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 
 import { registerOpenApiTools, type OpenApiToolClient } from "../src/openapi/register-openapi-tools.js";
-import { augmentTdeiToolDescription, TDEI_TOOL_INSTRUCTIONS } from "../src/tdei/tool-instructions.js";
+import { augmentTdeiToolDescription, TDEI_TOOL_INSTRUCTIONS } from "../src/tdei-core/tool-instructions.js";
 
 function fakeClient(names: string[]): OpenApiToolClient {
   return {

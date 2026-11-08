@@ -410,7 +410,7 @@ Both transports expose the common semantic tools:
 
 File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
 
-Raw operation descriptions are augmented with connector runbooks in `src/tdei/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
+Raw operation descriptions are augmented with connector runbooks in `src/tdei-core/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
 
 The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset name and city searches both miss. Use a Nominatim-compatible endpoint and an identifying `TDEI_GEOCODER_USER_AGENT`; operators using the public OpenStreetMap instance must follow its rate and caching policy.
 

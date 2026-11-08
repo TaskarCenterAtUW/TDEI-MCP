@@ -1,3 +1,5 @@
+import type { TdeiServerProfile } from "./intents/server-instructions.js";
+import { installCopy } from "./tdei-shared/install-copy.js";
 import { BUILD } from "./build-info.js";
 import { clientMcpName } from "./http-setup-script.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
@@ -31,7 +33,13 @@ function escapeHtml(value: string): string {
  * Live values are fetched client-side from GET /health so the HTML
  * itself needs no templated secrets and has no new dependencies.
  */
-export function renderStatusPage(publicBaseUrl: string, basePath = "/mcp", gatewaySlug?: string): string {
+export function renderStatusPage(
+  publicBaseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+): string {
+  const copy = installCopy(profile);
   const urls = statusPageUrls(publicBaseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const e = escapeHtml;
@@ -100,6 +108,7 @@ button { cursor: pointer; }
 
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
+<p class="muted">${e(mcpName)}: ${e(copy.summary)}</p>
 <p>No tokens are written to disk. Pick your client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
 <div class="builder" role="group" aria-label="Command builder">
 <label>Client / harness
@@ -158,10 +167,10 @@ button { cursor: pointer; }
 <li>Pick your client, OS, and command in the builder above, copy the generated command, and run it on the <em>client</em> machine (macOS/Linux needs <code>sh</code> + <code>node 22+</code>; Windows needs PowerShell + <code>node</code>).</li>
 <li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>; Cursor — quit + reopen.</li>
 <li>Ask the agent to log in: it calls <code>tdei_sso_login</code> and gives you a browser URL.</li>
-<li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>).</li>
+<li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>). First call: <code>${e(copy.firstCall)}</code>.</li>
 <li>MCP broken later (server moved, entry stale)? Pick <em>Update / reinstall</em> in the builder, run it, restart the app, start a new chat. To remove TDEI instead, pick <em>Uninstall</em>.</li>
 </ol>
-<p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo. File bytes never go through MCP — run curl from the client machine for any size, then poll with tdei_list_jobs; local stdio also accepts absolute <code>local_path</code> assets.</p>
+<p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo. ${e(copy.fileTransfer)}</p>
 </section>
 </main>
 <script>

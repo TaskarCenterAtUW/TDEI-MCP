@@ -88,7 +88,7 @@ async function postMcp(url: string, body: string, token?: string) {
 
 test("http.ts import has no side effects on singletons", async () => {
   const auth = await import("../src/auth/auth-manager.js");
-  const openapi = await import("../src/tdei/openapi-provider.js");
+  const openapi = await import("../src/tdei-shared/openapi-provider.js");
   await import("../src/http.js");
   assert.equal(auth.authManager.getStatus().authenticated, false);
   assert.equal(openapi.openApiMcpClient.isConnected(), false);

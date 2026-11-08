@@ -27,7 +27,7 @@
     },
     {
       "name": "tdei-workspace-stage",
-      "apiUrl": "https://ws-backend-dev.azurewebsites.net/",
+      "apiUrl": "https://ws-backend-stage.azurewebsites.net/",
       "authApiUrl": "https://api-stage.tdei.us",
       "specUrl": "https://ws-backend-stage.azurewebsites.net/openapi.json",
       "profile": "workspace"
