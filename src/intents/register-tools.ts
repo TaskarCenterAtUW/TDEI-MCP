@@ -355,6 +355,8 @@ export function registerSemanticTools(
     registered.add(name);
   };
   const D = SEMANTIC_TOOL_DESCRIPTIONS;
+  const myRolesSchema = z.object({ projectGroupName: z.string().trim().min(1).optional() });
+
   const noArgs = z.object({});
 
   tool("tdei_find_datasets", D.findDatasets, findDatasetsSchema, (a, c) => module.findDatasets(a, c));
@@ -365,6 +367,7 @@ export function registerSemanticTools(
   tool("tdei_validate_dataset", D.validateDataset, validateDatasetSchema, (a, c) => module.validateDataset(a, c));
   tool("tdei_upload_dataset", D.uploadDataset, uploadDatasetSchema, (a, c) => module.uploadDataset(a, c));
   tool("tdei_get_my_identity", D.getMyIdentity, noArgs, (_a, c) => module.getMyIdentity(c));
+  tool("tdei_my_project_group_roles", D.myProjectGroupRoles, myRolesSchema, (a, c) => module.myProjectGroupRoles(a, c));
   tool("tdei_list_jobs", D.listJobs, listJobsSchema, (a, c) => module.listJobs(a, c));
   tool("tdei_get_dataset_details", D.getDatasetDetails, getDatasetDetailsSchema, (a, c) =>
     module.getDatasetDetails(a, c),

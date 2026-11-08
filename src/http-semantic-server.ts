@@ -11,7 +11,7 @@ import { SemanticIntentModule } from "./intents/semantic-intent-module.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { errorResult } from "./mcp/responses.js";
 import { signInText } from "./mcp/errors.js";
-import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
+import type { OpenApiClientLike } from "./tdei-user/composite-client.js";
 import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
 import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
@@ -20,9 +20,11 @@ import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-ope
 export interface HttpSemanticServerOptions {
   accessToken?: string;
   authManager?: AuthManager;
-  openApiMcpClient?: OpenApiMcpClient;
+  openApiMcpClient?: OpenApiClientLike;
   preloadOpenApiTools?: boolean;
   apiUrl: string;
+  /** User Management API origin for tdei_my_project_group_roles (core profile). */
+  userApiUrl?: string | undefined;
   fetchImpl?: typeof fetch;
   places?: PlaceResolver;
   publicBaseUrl?: string;
@@ -97,6 +99,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       },
     },
     apiUrl: options.apiUrl,
+    ...(options.userApiUrl ? { userApiUrl: options.userApiUrl } : {}),
     ...(auth ? { tokenProvider: () => auth.getAccessToken() } : {}),
     ...(auth ? { identityProvider: () => auth.getIdentity() } : {}),
   });

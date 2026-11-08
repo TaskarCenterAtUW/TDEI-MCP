@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { specUrlForApiUrl } from "./init/envs.js";
+import { specUrlForApiUrl, userSpecUrlForUserApiUrl } from "./init/envs.js";
 import { resolveTdeiServerProfile, type TdeiServerProfile } from "./intents/server-instructions.js";
 
 export interface MultiMcpServerEntry {
@@ -10,6 +10,10 @@ export interface MultiMcpServerEntry {
   /** SSO/token issuer. Defaults to apiUrl; workspace-style backends that do not serve SSO point this at TDEI core. */
   authApiUrl?: string;
   specUrl?: string;
+  /** User Management API origin for a core server. Defaults from the core host (portal-api-dev/stage/prod). */
+  userApiUrl?: string;
+  /** OpenAPI document of the User Management API. Defaults to <userApiUrl>/api-docs/swagger.json. */
+  userSpecUrl?: string;
   port?: number;
   basePath?: string;
   ssoCallbackUrl?: string;
@@ -31,6 +35,8 @@ export interface ResolvedMultiMcpServer {
   apiUrl: string;
   authApiUrl: string;
   specUrl: string;
+  userApiUrl?: string;
+  userSpecUrl?: string;
   host: string;
   port: number;
   basePath: string;
@@ -161,6 +167,17 @@ export function resolveMultiMcp(
         ? assertHttpsUrl(entry.specUrl, `servers[${index}].specUrl`)
         : specUrlForApiUrl(apiUrl);
 
+    const userApiUrl =
+      typeof entry.userApiUrl === "string" && entry.userApiUrl.trim()
+        ? assertHttpsUrl(entry.userApiUrl, `servers[${index}].userApiUrl`)
+        : undefined;
+    const userSpecUrl =
+      typeof entry.userSpecUrl === "string" && entry.userSpecUrl.trim()
+        ? assertHttpsUrl(entry.userSpecUrl, `servers[${index}].userSpecUrl`)
+        : userApiUrl
+          ? userSpecUrlForUserApiUrl(userApiUrl)
+          : undefined;
+
     const port = entry.port !== undefined ? assertPort(entry.port, `servers[${index}].port`) : basePort + index;
     if (seenPorts.has(port)) throw new Error(`Port collision: ${port} assigned twice (servers[${index}] "${name}")`);
     seenPorts.add(port);
@@ -199,6 +216,8 @@ export function resolveMultiMcp(
       apiUrl,
       authApiUrl,
       specUrl,
+      ...(userApiUrl ? { userApiUrl } : {}),
+      ...(userSpecUrl ? { userSpecUrl } : {}),
       host,
       port,
       basePath,

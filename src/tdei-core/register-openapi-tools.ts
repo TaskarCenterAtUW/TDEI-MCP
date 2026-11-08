@@ -12,6 +12,7 @@ import {
 } from "../tdei-shared/register-openapi-tools.js";
 import { augmentTdeiToolDescription } from "./tool-instructions.js";
 import { exposeAllRawTools, SEMANTIC_COVERED_RAW_OPERATIONS } from "./raw-tool-coverage.js";
+import { isUserApiHidden, USER_API_NEVER_EXPOSED } from "../tdei-user/operation-names.js";
 
 export type { TdeiOpenApiToolCall, TdeiOpenApiToolClient, TdeiOpenApiToolRegistrationResult };
 export { sanitizeJsonSchema };
@@ -29,7 +30,10 @@ export async function registerTdeiOpenApiTools(
   return registerOpenApiToolsForProfile(server, client, filter, onCall, {
     label: "core",
     augmentDescription: augmentTdeiToolDescription,
+    neverExposed: USER_API_NEVER_EXPOSED,
     catalogHidden: (name, f) =>
-      hideCovered && SEMANTIC_COVERED_RAW_OPERATIONS.has(name) && !new Set(f.mode === "allow" ? f.allow : []).has(name),
+      hideCovered &&
+      (SEMANTIC_COVERED_RAW_OPERATIONS.has(name) || isUserApiHidden(name)) &&
+      !new Set(f.mode === "allow" ? f.allow : []).has(name),
   });
 }

@@ -36,7 +36,8 @@ import {
 import { BUILD } from "./build-info.js";
 import { setSignInMode, signInText, tokenExpiredText } from "./mcp/errors.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
-import { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
+import { createOpenApiClient } from "./tdei-user/client.js";
+import type { OpenApiClientLike } from "./tdei-user/composite-client.js";
 
 export interface HttpServeOptions {
   fetchImpl?: typeof fetch;
@@ -68,7 +69,7 @@ interface ResolvedHttpOptions {
   ssoCallbackListener: boolean;
   gatewaySlug: string | undefined;
   sessionAuth: AuthManager;
-  sessionOpenApiClient: OpenApiMcpClient;
+  sessionOpenApiClient: OpenApiClientLike;
   serverInstructions: string;
   serverProfile: TdeiServerProfile;
 }
@@ -309,6 +310,7 @@ async function handleMcpRequest(
     // calls arrive with their own bearer token and are handled below.
     server = createHttpSemanticServer({
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
       profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -321,6 +323,7 @@ async function handleMcpRequest(
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
       profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -375,6 +378,7 @@ async function handleMcpRequest(
     server = createHttpSemanticServer({
       accessToken: bearer,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
       profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -410,6 +414,7 @@ async function handleMcpRequest(
       authManager: options.sessionAuth,
       openApiMcpClient: options.sessionOpenApiClient,
       apiUrl: getConfig().apiUrl,
+      userApiUrl: options.serverProfile === "core" ? getConfig().userApiUrl : undefined,
       instructions: options.serverInstructions,
       profile: options.serverProfile,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -460,13 +465,13 @@ export async function serveHttp(
   });
   const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
-  const sessionOpenApiClient = new OpenApiMcpClient({
-    apiUrl: httpConfig.apiUrl,
-    specUrl: httpConfig.specUrl,
+  const sessionOpenApiClient = createOpenApiClient({
+    config: httpConfig,
+    profile: serverProfile,
     headersProvider: async () => ({
       Authorization: `Bearer ${await sessionAuth.getAccessToken()}`,
     }),
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    fetchImpl: options.fetchImpl,
   });
   const resolved: ResolvedHttpOptions = {
     fetchImpl: options.fetchImpl,

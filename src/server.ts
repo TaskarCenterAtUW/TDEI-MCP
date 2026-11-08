@@ -172,6 +172,7 @@ export async function createServer(
     }),
     places: createConfiguredPlaceResolver(getConfig()),
     apiUrl: getConfig().apiUrl,
+    ...(getConfig().userApiUrl ? { userApiUrl: getConfig().userApiUrl } : {}),
     tokenProvider: () => auth.getAccessToken(),
     downloadSettings: downloadSettings.settings,
     fetchImpl: fetch,

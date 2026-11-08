@@ -1,0 +1,1738 @@
+{
+  "openapi": "3.0.1",
+  "externalDocs": { "description": "Specification - swagger.json", "url": "/api-docs/swagger.json" },
+  "info": {
+    "title": "TDEI Management API",
+    "description": "Management API, describes admin & user activities in the TDEI system.",
+    "contact": {
+      "name": "TDEI Support",
+      "url": "https://placeholder.transequity.cs.washington.edu/support",
+      "email": "placeholder_support@transequity.cs.washington.edu"
+    },
+    "version": "v0.1"
+  },
+  "servers": [],
+  "security": [{ "AuthorizationToken": [] }],
+  "tags": [
+    { "name": "Auth", "description": "Authentication operations" },
+    { "name": "User Management", "description": "User Management operations" },
+    { "name": "ProjectGroup", "description": "Project Group Management operations" },
+    { "name": "Service", "description": "Service Management operations" }
+  ],
+  "paths": {
+    "/api/v1/authenticate": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Authenticates the user to the TDEI system",
+        "description": "Authenticates the user to the TDEI system.  Returns access token. ",
+        "operationId": "authenticate",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the access token object.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Token" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "500": { "description": "Internal server error." }
+        }
+      }
+    },
+    "/api/v1/authenticate/{referral_code}": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Authenticates the user to the TDEI system with referral code",
+        "description": "Authenticates the user to the TDEI system with referral code.  Returns token and promo details.",
+        "operationId": "authenticateWithReferralCode",
+        "parameters": [
+          {
+            "name": "referral_code",
+            "in": "path",
+            "description": "Referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the access token object.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralLoginResponse" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "User not found or invalid credentials." },
+          "500": { "description": "Internal server error." }
+        }
+      }
+    },
+    "/api/v1/referral-codes/{referral_code}": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Gets the referral code details",
+        "description": "Gets the referral code details.",
+        "operationId": "getReferralCodeDetails",
+        "parameters": [
+          {
+            "name": "referral_code",
+            "in": "path",
+            "description": "Referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns true if referral code applied successfully.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeLiteResponse" } } }
+          },
+          "410": { "description": "Referral code is expired or inactive." },
+          "500": { "description": "An Internal server error occured." }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/referral-codes/apply/{referral_code}": {
+      "post": {
+        "tags": ["User Management"],
+        "summary": "Applies the referral code to the user",
+        "description": "Applies the referral code to the user.",
+        "operationId": "applyReferralCode",
+        "parameters": [
+          {
+            "name": "referral_code",
+            "in": "path",
+            "description": "Referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns true if referral code applied successfully.",
+            "content": { "application/json": { "schema": { "type": "boolean" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "User not found or invalid credentials." },
+          "410": { "description": "Referral code is expired or inactive." },
+          "500": { "description": "Internal server error." }
+        }
+      }
+    },
+    "/api/v1/user-profile": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Gets the user profile",
+        "description": "Gets the user profile.",
+        "operationId": "getUserProfile",
+        "parameters": [
+          {
+            "name": "user_name",
+            "in": "query",
+            "description": "User name",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the user profile details.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserProfile" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/refresh-token": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refresh the user token",
+        "description": "Refresh the user token. Optionally provide a client_id header.",
+        "operationId": "refresh-token",
+        "parameters": [
+          {
+            "name": "refresh_token",
+            "in": "header",
+            "description": "Valid refresh token",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "client_id",
+            "in": "header",
+            "description": "Optional client id. When omitted, client_id is not forwarded to the auth service.",
+            "required": false,
+            "schema": { "type": "string", "example": "tdei-web-client" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the access token object.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Token" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "500": { "description": "Internal server error." }
+        }
+      }
+    },
+    "/api/v1/roles": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Gets the TDEI roles",
+        "description": "Gets the TDEI roles. ",
+        "operationId": "roles",
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the list of roles.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "RoleResponse",
+                  "type": "object",
+                  "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Roles" } } },
+                  "description": "Holds the response data"
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthenticated request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group-roles/{userId}": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Gets the user associated project groups with roles.",
+        "description": "Gets the user associated project groups with roles.Restricted to logged in user project groups and roles.",
+        "operationId": "projectGroupRoles",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "User id for which project groups to be fetched",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "searchText",
+            "in": "query",
+            "description": "Search by project group name.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "description": "Sort by project group name (default) ascending or created_at descending.",
+            "required": false,
+            "schema": { "type": "string", "default": "name", "enum": ["created_at", "name"] }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch",
+            "required": false,
+            "schema": { "type": "string", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch.",
+            "required": false,
+            "schema": { "type": "string", "default": 10 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the user project groups with roles.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ProjectGroupRoles" } }
+              }
+            }
+          },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "An server error occurred." }
+        }
+      }
+    },
+    "/api/v1/register": {
+      "post": {
+        "tags": ["User Management"],
+        "summary": "Registers the user to the TDEI system",
+        "description": "Registers the user to the TDEI system.  Returns new User object. ",
+        "operationId": "registerUser",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Register" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the newly created object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "RegisterResponse",
+                  "type": "object",
+                  "properties": { "data": { "$ref": "#/components/schemas/User" } },
+                  "description": "Holds the response data"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "409": { "description": "User already exists." },
+          "500": { "description": "Internal server error." }
+        }
+      }
+    },
+    "/api/v1/service": {
+      "get": {
+        "tags": ["Service"],
+        "summary": "Gets the Services in the TDEI system ",
+        "description": "Gets the Services in the TDEI system .",
+        "operationId": "getService",
+        "parameters": [
+          {
+            "name": "tdei_service_id",
+            "in": "query",
+            "description": "Search by service Id.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "searchText",
+            "in": "query",
+            "description": "Search by service name.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "service_type",
+            "in": "query",
+            "description": "Service type",
+            "required": false,
+            "schema": { "type": "string", "default": "all", "enum": ["all", "flex", "pathways", "osw"] }
+          },
+          {
+            "name": "tdei_project_group_id",
+            "in": "query",
+            "description": "Owner project group id.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "A bounding box which specifies the area to be searched. A bounding box is specified by a string providing the lat/lon coordinates of the corners of the bounding box. Coordinate should be specified as west, south, east, north.",
+            "required": false,
+            "schema": {
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array",
+              "items": { "type": "number", "format": "double" }
+            }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch",
+            "required": false,
+            "schema": { "type": "string", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch.",
+            "required": false,
+            "schema": { "type": "string", "default": 10 }
+          },
+          {
+            "name": "show_inactive",
+            "in": "query",
+            "description": "Show inactive project groups",
+            "required": false,
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the list of Service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "ServiceResponse",
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Service" },
+                  "description": "List of services"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request input parameters." },
+          "401": { "description": "Unauthenticated request. Check your access token or API-Key." },
+          "404": { "description": "tdei_project_group_id or tdei_service_id doesn't exist in the system." },
+          "500": { "description": "An Internal server error occured." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "post": {
+        "tags": ["Service"],
+        "summary": "Creates a Service in the TDEI system",
+        "description": "Creates a Service in the TDEI system.Returns the id for the newly created flex service.",
+        "operationId": "createService",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Service" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the id for the newly created flex service.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/service/{projectGroupId}": {
+      "put": {
+        "tags": ["Service"],
+        "summary": "Updates a Service in the TDEI system",
+        "description": "Updates a Service in the TDEI system.",
+        "operationId": "updateService",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Owner project group id.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServiceUpdate" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Service update successful." },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "Service not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/service/{projectGroupId}/{serviceId}/active/{status}": {
+      "put": {
+        "tags": ["Service"],
+        "summary": "Activates/Deactives the service.",
+        "description": "Activates/Deactives the service.",
+        "operationId": "deleteService",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Owner project group id.",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "description": "Service Id of the service to be Activated/Deactivated.",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "status",
+            "in": "path",
+            "description": "Boolean flag to Activate/Deactivate service.",
+            "required": true,
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "An server error occurred." }
+        }
+      }
+    },
+    "/api/v1/permission": {
+      "post": {
+        "tags": ["User Management"],
+        "summary": "Associates a user with the project group and permissions in the TDEI system",
+        "description": "Associates a user with the project group and permissions in the TDEI system. Returns the boolean flag true. Empty permissions array will remove a user from Project Group.",
+        "operationId": "permission",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RoleDetails" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the boolean flag true.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "User not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/permission/revoke": {
+      "put": {
+        "tags": ["User Management"],
+        "summary": "Revokes the user permissions",
+        "description": "Revokes the user permissions.",
+        "operationId": "revokePermission",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RoleDetails" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the boolean flag true.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "User not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/applications/{clientId}/roles": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Lists roles for an application",
+        "description": "Admin-only. Lists the roles defined for one client in the tdei realm. clientId is the Keycloak client id.",
+        "operationId": "listApplicationRoles",
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "description": "Keycloak client id in the tdei realm.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ApplicationRole" } }
+              }
+            }
+          },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "Application not found." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/applications/{clientId}/users/{userId}/roles": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Gets a user's roles for an application",
+        "description": "Returns the roles assigned to one user for one Keycloak client. The caller supplies the client id. A user with no roles for that client returns an empty list. Requires an authenticated user, a service secret, or an API key.",
+        "operationId": "getUserApplicationRoles",
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "description": "Keycloak client id in the tdei realm.",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "User id returned by GET /api/v1/users.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserClientRoles" } } }
+          },
+          "400": { "description": "userId is not a 36 character user id." },
+          "401": { "description": "Unauthenticated request" },
+          "404": { "description": "User or application not found." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/applications/{clientId}/user-roles": {
+      "post": {
+        "tags": ["User Management"],
+        "summary": "Adds application roles",
+        "description": "Admin-only. Adds the listed roles for this client in the tdei realm without changing any other roles. The user is the realm user returned by GET /api/v1/users. Adding a role the user already has succeeds without change. Only roles defined for this client are accepted.",
+        "operationId": "addApplicationRoles",
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "description": "Keycloak client id in the tdei realm.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplicationRoles" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request, or a role that is not defined for this application." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "User or application not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "delete": {
+        "tags": ["User Management"],
+        "summary": "Removes application roles",
+        "description": "Admin-only. Removes only the listed roles for this client in the tdei realm. Removing a role the user does not have succeeds without change.",
+        "operationId": "removeApplicationRoles",
+        "parameters": [
+          {
+            "name": "clientId",
+            "in": "path",
+            "description": "Keycloak client id in the tdei realm.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplicationRoles" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request, or a role that is not defined for this application." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "User or application not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group": {
+      "get": {
+        "tags": ["ProjectGroup"],
+        "summary": "Gets the project groups in the TDEI system ",
+        "description": "Gets the project groups in the TDEI system.",
+        "operationId": "getProjectGroup",
+        "parameters": [
+          {
+            "name": "tdei_project_group_id",
+            "in": "query",
+            "description": "Search by project group Id.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "searchText",
+            "in": "query",
+            "description": "Search by project group name.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "description": "A bounding box which specifies the area to be searched. A bounding box is specified by a string providing the lat/lon coordinates of the corners of the bounding box. Coordinate should be specified as west, south, east, north.",
+            "required": false,
+            "schema": {
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array",
+              "items": { "type": "number", "format": "double" }
+            }
+          },
+          {
+            "name": "data_viewer_allowed",
+            "in": "query",
+            "description": "<strong>Data viewer allowed:</strong> Filters project groups based on whether data viewer access is allowed. Uses a boolean value.",
+            "required": false,
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch",
+            "required": false,
+            "schema": { "type": "string", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch.",
+            "required": false,
+            "schema": { "type": "string", "default": 10 }
+          },
+          {
+            "name": "show_inactive",
+            "in": "query",
+            "description": "Show inactive project groups",
+            "required": false,
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the list of project groups.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "ProjectGroupListResponse",
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ProjectGroupList" },
+                  "description": "List of project groups"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request parameters." },
+          "401": { "description": "Unauthenticated request. Check your access token or API-key." },
+          "404": { "description": "tdei_project_group_id doesn't exist in the system." },
+          "500": { "description": "An Internal server error occured." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "post": {
+        "tags": ["ProjectGroup"],
+        "summary": "Creates an project group in the TDEI system ",
+        "description": "Creates an project group in the TDEI system.  Returns the id for the newly created project group.",
+        "operationId": "createProjectGroup",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectGroup" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the id for the newly created project group.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Response" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "put": {
+        "tags": ["ProjectGroup"],
+        "summary": "Updates an project group in the TDEI system ",
+        "description": "Updates an project group in the TDEI system.  Returns success if updated.",
+        "operationId": "updateProjectGroup",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectGroup" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Project group update successful." },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "Project group not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group/{projectGroupId}/users": {
+      "get": {
+        "tags": ["ProjectGroup"],
+        "summary": "Gets the project group users in the TDEI system ",
+        "description": "Gets the project group users in the TDEI system.",
+        "operationId": "getProjectGroupUsers",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Project group id for which users to be fetched",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "searchText",
+            "in": "query",
+            "description": "Search by first_name, last_name or username.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch",
+            "required": false,
+            "schema": { "type": "string", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch.",
+            "required": false,
+            "schema": { "type": "string", "default": 10 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the list of project group users.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "ProjectGroupUserResponse",
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ProjectGroupUser" },
+                  "description": "List of project group users"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group/{projectGroupId}/active/{status}": {
+      "put": {
+        "tags": ["ProjectGroup"],
+        "summary": "Activates/Deactives the project group.",
+        "description": "Activates/Deactives the project group.",
+        "operationId": "deleteProjectGroup",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "projectGroupId of the project group to be Activated/Deactivated.",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "status",
+            "in": "path",
+            "description": "Boolean flag to Activate/Deactivate project group.",
+            "required": true,
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "An server error occurred." }
+        }
+      }
+    },
+    "/api/v1/project-group/{projectGroupId}/dataset-viewer": {
+      "post": {
+        "tags": ["ProjectGroup"],
+        "summary": "Updates the project group data viewer preferences",
+        "description": "Updates the project group data viewer preferences.",
+        "operationId": "updateDataViewer",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "The ID of the project group to update.",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/data_viewer" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Project group data viewer preferences updated successfully." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "An server error occurred." }
+        }
+      }
+    },
+    "/api/v1/reset-credentials": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Resets the user credential",
+        "description": "Resets the user credential.  Returns the boolean flag if the password is reset successfully.",
+        "operationId": "resetCredentials",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResetCredentialModel" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response - Returns the boolean flag if the password is reset successfully.",
+            "content": { "application/json": { "schema": { "type": "boolean" } } }
+          },
+          "400": { "description": "Input validation issue" },
+          "403": { "description": "Not authorized to reset the password" },
+          "404": { "description": "User not found." },
+          "500": { "description": "An server error occurred." }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Searches TDEI users",
+        "description": "Admin-only search of TDEI users. Supports prefix search on first name, last name, and username. Returns username and application roles. Does not return email, phone, or API key.",
+        "operationId": "searchUsers",
+        "parameters": [
+          {
+            "name": "searchText",
+            "in": "query",
+            "description": "Prefix search against first name, last name, or username.",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch.",
+            "required": false,
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch. Maximum 50.",
+            "required": false,
+            "schema": { "type": "integer", "default": 10 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the matching TDEI users.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TdeiUser" } }
+              }
+            }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/users/download": {
+      "get": {
+        "tags": ["User Management"],
+        "summary": "Downloads the tdei user details in CSV format",
+        "description": "Downloads the tdei user details in CSV format.",
+        "operationId": "downloadUsers",
+        "responses": {
+          "200": {
+            "description": "Returns the tdei user details in CSV format.",
+            "content": { "application/csv": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group/{projectGroupId}/referral-codes": {
+      "get": {
+        "tags": ["ProjectGroup"],
+        "summary": "Lists referral or invite codes for a project group",
+        "description": "Returns a paginated list of referral/promo codes for the specified project group.",
+        "operationId": "getProjectGroupReferralCodes",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Project group id whose referral codes should be retrieved",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Filter by referral code type. 1 = always available, 2 = limited time.",
+            "required": false,
+            "schema": { "type": "integer", "enum": [1, 2] }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Filter by referral code name (partial match).",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Filter by referral code value (partial match).",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page_no",
+            "in": "query",
+            "description": "Page number to fetch",
+            "required": false,
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Total records to fetch per page.",
+            "required": false,
+            "schema": { "type": "integer", "default": 10 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns a paginated list of referral codes.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeListResponse" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "post": {
+        "tags": ["ProjectGroup"],
+        "summary": "Creates a referral or invite code",
+        "description": "Creates a new referral/promo code for the specified project group.",
+        "operationId": "createProjectGroupReferralCode",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Project group id for which the referral code is being created",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeCreate" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Referral code created successfully.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeResponse" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    },
+    "/api/v1/project-group/{projectGroupId}/referral-codes/{code_id}": {
+      "put": {
+        "tags": ["ProjectGroup"],
+        "summary": "Updates an existing referral or invite code",
+        "description": "Updates an existing referral/promo code for the specified project group.",
+        "operationId": "updateProjectGroupReferralCode",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Project group id that owns the referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "code_id",
+            "in": "path",
+            "description": "Unique identifier of the referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeUpdate" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Referral code updated successfully.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReferralCodeResponse" } } }
+          },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "Referral code not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      },
+      "delete": {
+        "tags": ["ProjectGroup"],
+        "summary": "Deletes (soft deletes) a referral or invite code",
+        "description": "Marks the specified referral/promo code as inactive.",
+        "operationId": "deleteProjectGroupReferralCode",
+        "parameters": [
+          {
+            "name": "projectGroupId",
+            "in": "path",
+            "description": "Project group id that owns the referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "code_id",
+            "in": "path",
+            "description": "Unique identifier of the referral code",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Referral code deleted successfully." },
+          "400": { "description": "Invalid request." },
+          "401": { "description": "Unauthenticated request" },
+          "403": { "description": "Unauthorized request" },
+          "404": { "description": "Referral code not found." },
+          "500": { "description": "Internal server error." }
+        },
+        "security": [{ "AuthorizationToken": [] }]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ReferralLoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "object",
+            "properties": {
+              "access_token": { "type": "string" },
+              "expires_in": { "type": "integer" },
+              "refresh_expires_in": { "type": "integer" },
+              "refresh_token": { "type": "string" }
+            },
+            "description": "Describes a user registration details."
+          },
+          "instructions_url": {
+            "type": "string",
+            "description": "URL with instructions for next steps after referral login successful."
+          },
+          "redirect_url": { "type": "string", "description": "URL to redirect the user after login." }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string" },
+          "expires_in": { "type": "integer" },
+          "refresh_expires_in": { "type": "integer" },
+          "refresh_token": { "type": "string" }
+        },
+        "description": "Describes a user registration details."
+      },
+      "Login": {
+        "type": "object",
+        "properties": { "username": { "type": "string" }, "password": { "type": "string" } },
+        "description": "Describes a user registration details."
+      },
+      "ProjectGroupRoles": {
+        "type": "object",
+        "properties": {
+          "tdei_project_group_id": { "type": "string" },
+          "project_group_name": { "type": "string" },
+          "roles": {
+            "type": "array",
+            "description": "List of roles associated with project group.",
+            "items": { "type": "string", "description": "Role associated with project group." }
+          },
+          "data_viewer_config": {
+            "$ref": "#/components/schemas/data_viewer",
+            "description": "Configuration settings for the dataset viewer."
+          }
+        },
+        "description": "User associated project groups and roles."
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "User Id name of the user." },
+          "firstName": { "type": "string", "description": "First name of the user." },
+          "lastName": { "type": "string", "description": "Last name of the user." },
+          "email": { "type": "string", "description": "Email address of the user for communication." },
+          "phone": { "type": "string", "description": "Phone of the user for communication." }
+        },
+        "description": "Describes a user registration details."
+      },
+      "Register": {
+        "required": ["email"],
+        "type": "object",
+        "properties": {
+          "firstName": { "type": "string", "description": "First name of the user." },
+          "lastName": { "type": "string", "description": "Last name of the user." },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email address of the user for communication."
+          },
+          "phone": { "type": "string", "description": "Phone of the user for communication." },
+          "password": { "type": "string", "description": "Credential for the user login." }
+        },
+        "description": "Describes a user registration details."
+      },
+      "Roles": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Role name." },
+          "description": { "type": "string", "description": "Role description." }
+        },
+        "description": "Describes a user registration details."
+      },
+      "Service": {
+        "required": ["tdei_project_group_id", "service_name", "service_type"],
+        "type": "object",
+        "properties": {
+          "tdei_service_id": {
+            "type": "string",
+            "description": "Service Id uniquely represented in the TDEI system. System generated.",
+            "default": "0"
+          },
+          "tdei_project_group_id": { "type": "string", "description": "Project group id of the service." },
+          "service_name": { "type": "string", "description": "Name of the service." },
+          "service_type": {
+            "type": "string",
+            "description": "Service type",
+            "default": "flex",
+            "enum": ["flex", "pathways", "osw"]
+          },
+          "polygon": { "$ref": "#/components/schemas/Polygon" }
+        },
+        "description": "Describes a Service."
+      },
+      "ServiceUpdate": {
+        "required": ["tdei_service_id", "service_name"],
+        "type": "object",
+        "properties": {
+          "tdei_service_id": {
+            "type": "string",
+            "description": "Service Id uniquely represented in the TDEI system. System generated.",
+            "default": "0"
+          },
+          "service_name": { "type": "string", "description": "Name of the service." },
+          "polygon": { "$ref": "#/components/schemas/Polygon" }
+        },
+        "description": "Describes a Service update model."
+      },
+      "Response": {
+        "type": "object",
+        "properties": { "data": { "type": "string", "description": "Holds the response data" } },
+        "description": "Holds the response data"
+      },
+      "PointOfContact": {
+        "required": ["poc_user_name"],
+        "type": "object",
+        "properties": {
+          "tdei_project_group_id": {
+            "type": "string",
+            "description": "Project group id to which point of contact to be associated."
+          },
+          "poc_user_name": {
+            "type": "string",
+            "description": "Point of contact username. Username represents user uniquely in the TDEI system. User should be already registered in the TDEI system using [POST] /user API."
+          }
+        },
+        "description": "Describes a point of contact details."
+      },
+      "RoleDetails": {
+        "required": ["tdei_project_group_id", "roles", "user_name"],
+        "type": "object",
+        "properties": {
+          "tdei_project_group_id": {
+            "type": "string",
+            "description": "Project group id to which user to be associated."
+          },
+          "user_name": {
+            "type": "string",
+            "description": "Username represents user uniquely in the TDEI system.  User should be already registered in the TDEI system using [POST] /user API."
+          },
+          "roles": {
+            "type": "array",
+            "description": "List of roles to be assigned to the user.",
+            "items": { "type": "string", "description": "List of roles to be assigned to the user." }
+          }
+        },
+        "description": "Describes a user permissions."
+      },
+      "TdeiUser": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Id uniquely represented in the TDEI system.", "default": "0" },
+          "firstName": { "type": "string", "description": "First name of the user." },
+          "lastName": { "type": "string", "description": "Last name of the user." },
+          "username": { "type": "string", "description": "Login name of the user." },
+          "applicationRoles": {
+            "type": "array",
+            "description": "Roles assigned to this realm user, grouped by client in the tdei realm.",
+            "items": { "$ref": "#/components/schemas/UserApplicationRoles" }
+          }
+        },
+        "description": "A TDEI user and the user's application roles."
+      },
+      "UserClientRoles": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string", "description": "User id returned by GET /api/v1/users." },
+          "clientId": { "type": "string", "description": "Keycloak client id in the tdei realm." },
+          "roles": {
+            "type": "array",
+            "description": "Roles assigned to the user for this client.",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "ApplicationRole": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Role name unique within the application." },
+          "description": { "type": "string", "description": "Description of the role." }
+        }
+      },
+      "UserApplicationRoles": {
+        "type": "object",
+        "properties": {
+          "realm": { "type": "string", "description": "Keycloak realm. Always tdei. The user id is the realm user." },
+          "clientId": { "type": "string", "description": "Keycloak client id in the tdei realm." },
+          "name": { "type": "string", "description": "Display name of the application." },
+          "roles": {
+            "type": "array",
+            "description": "Roles assigned to the user for this application.",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "ApplicationRoles": {
+        "required": ["userId", "roles"],
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string", "description": "User id returned by GET /api/v1/users." },
+          "roles": {
+            "type": "array",
+            "description": "Roles defined for this application to add or remove.",
+            "items": { "type": "string" }
+          }
+        },
+        "description": "Application roles to add to or remove from a user."
+      },
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Id uniquely represented in the TDEI system. System generated.",
+            "default": "0"
+          },
+          "firstName": { "type": "string", "description": "First name of the user." },
+          "lastName": { "type": "string", "description": "Last name of the user." },
+          "email": { "type": "string", "description": "Email of the user." },
+          "phone": { "type": "string", "description": "Phone of the user." },
+          "apiKey": { "type": "string", "description": "Api key of the user." }
+        },
+        "description": "Describes a gtfs pathways station."
+      },
+      "ProjectGroup": {
+        "required": ["email", "project_group_name", "address"],
+        "type": "object",
+        "properties": {
+          "tdei_project_group_id": {
+            "type": "string",
+            "description": "Project group Id uniquely represented in the TDEI system. System generated.",
+            "default": "0"
+          },
+          "project_group_name": { "type": "string", "description": "Name of the project group." },
+          "phone": { "type": "string", "description": "Phone of the project group for communication." },
+          "url": { "type": "string", "description": "Url of the transit project group." },
+          "address": { "type": "string", "description": "Address of the transit project group." },
+          "polygon": { "$ref": "#/components/schemas/Polygon" }
+        },
+        "description": "Describes an Project Group."
+      },
+      "data_viewer": {
+        "type": "object",
+        "properties": {
+          "dataset_viewer_allowed": {
+            "type": "boolean",
+            "default": false,
+            "description": "Flag to indicate to allow all datasets within the project group to be viewed on the dataset viewer."
+          },
+          "feedback_turnaround_time": {
+            "required": ["number", "units"],
+            "type": "object",
+            "description": "Feedback turnaround time for the project group.",
+            "properties": {
+              "number": { "type": "integer", "description": "Number of days for feedback turnaround time." },
+              "units": {
+                "type": "string",
+                "enum": ["days", "months", "years"],
+                "description": "Unit of time for feedback turnaround time."
+              }
+            }
+          }
+        },
+        "description": "Describes an Project group."
+      },
+      "ProjectGroupList": {
+        "type": "object",
+        "properties": {
+          "tdei_project_group_id": {
+            "type": "string",
+            "description": "ProjectGroupId uniquely represented in the TDEI system. System generated.",
+            "default": "0"
+          },
+          "name": { "type": "string", "description": "Name of the project group." },
+          "phone": { "type": "string", "description": "Phone of the project group for communication." },
+          "url": { "type": "string", "description": "Url of the transit project group." },
+          "address": { "type": "string", "description": "Address of the transit project group." },
+          "polygon": { "$ref": "#/components/schemas/Polygon" },
+          "poc": {
+            "type": "array",
+            "description": "Project group POC details",
+            "items": { "$ref": "#/components/schemas/POC", "description": "POC details" }
+          },
+          "data_viewer": { "$ref": "#/components/schemas/data_viewer", "description": "Describes an Project group." }
+        }
+      },
+      "POC": {
+        "type": "object",
+        "properties": {
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "username": { "type": "string" },
+          "email": { "type": "string" }
+        },
+        "required": ["first_name", "last_name", "username", "email"]
+      },
+      "Polygon": {
+        "title": "GeoJSON FeatureCollection",
+        "type": "object",
+        "required": ["type", "features"],
+        "properties": {
+          "type": { "type": "string", "enum": ["FeatureCollection"] },
+          "features": {
+            "type": "array",
+            "items": {
+              "title": "GeoJSON Feature",
+              "type": "object",
+              "required": ["type", "properties", "geometry"],
+              "properties": {
+                "type": { "type": "string", "enum": ["Feature"] },
+                "id": { "oneOf": [{ "type": "number" }, { "type": "string" }] },
+                "properties": { "type": "object" },
+                "geometry": {
+                  "title": "GeoJSON Polygon",
+                  "type": "object",
+                  "required": ["type", "coordinates"],
+                  "properties": {
+                    "type": { "type": "string", "enum": ["Polygon"] },
+                    "coordinates": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "minItems": 4,
+                        "items": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": { "type": "number", "format": "double" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ProjectGroupUser": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "string" },
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "email": { "type": "string" },
+          "username": { "type": "string" },
+          "phone": { "type": "string" },
+          "roles": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["user_id", "first_name", "last_name", "email", "username", "phone", "roles"]
+      },
+      "ResetCredentialModel": {
+        "required": ["password", "username"],
+        "type": "object",
+        "properties": {
+          "username": { "type": "string", "description": "User name." },
+          "password": {
+            "pattern": "^(?=(.*[a-z]){1,})(?=(.*[A-Z]){1,})(?=(.*[0-9]){1,})(?=(.*[!@#$%^&*()\\-__+.]){1,}).{8,}$",
+            "type": "string",
+            "description": "password",
+            "example": "Password@123"
+          }
+        },
+        "description": "Describes a reset credential model."
+      },
+      "ReferralCode": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "Unique identifier for the referral code." },
+          "name": { "type": "string", "description": "Display name for the referral code." },
+          "type": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "Type of referral code. 1 = always available, 2 = limited time."
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start date/time from which the code is valid."
+          },
+          "code": { "type": "string", "description": "Referral or promo code value." },
+          "valid_to": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "End date/time for limited time codes."
+          },
+          "instructions_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri",
+            "description": "URL for post-registration instructions."
+          },
+          "project_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project group to which the code belongs."
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the user that last modified the code."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the code was created."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the code was last updated."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Additional information about the referral code."
+          },
+          "is_active": { "type": "boolean", "description": "Indicates whether the referral code is active." },
+          "redirect_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL to redirect user after applying the code."
+          }
+        },
+        "description": "Describes a referral or promo code."
+      },
+      "ReferralCodeCreate": {
+        "required": ["name", "type", "valid_from", "code"],
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Display name for the referral code." },
+          "type": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "Type of referral code. 1 = always available, 2 = limited time."
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start date/time from which the code is valid."
+          },
+          "code": { "type": "string", "description": "Referral or promo code value." },
+          "valid_to": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "End date/time for limited time codes."
+          },
+          "instructions_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri",
+            "description": "URL for post-registration instructions."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Additional information about the referral code."
+          },
+          "redirect_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL to redirect user after applying the code."
+          }
+        },
+        "description": "Request body for creating a referral or promo code."
+      },
+      "ReferralCodeUpdate": {
+        "required": ["id", "name", "type", "valid_from", "code"],
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "Unique identifier for the referral code." },
+          "name": { "type": "string", "description": "Display name for the referral code." },
+          "type": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "Type of referral code. 1 = always available, 2 = limited time."
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start date/time from which the code is valid."
+          },
+          "code": { "type": "string", "description": "Referral or promo code value." },
+          "valid_to": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "End date/time for limited time codes."
+          },
+          "instructions_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri",
+            "description": "URL for post-registration instructions."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Additional information about the referral code."
+          },
+          "redirect_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL to redirect user after applying the code."
+          }
+        },
+        "description": "Request body for updating a referral or promo code."
+      },
+      "ReferralCodeResponse": {
+        "type": "object",
+        "properties": { "data": { "$ref": "#/components/schemas/ReferralCode" } },
+        "description": "Response wrapper for a single referral code."
+      },
+      "ReferralCodeListResponse": {
+        "type": "object",
+        "properties": {
+          "total_items": { "type": "integer", "description": "Total number of matching referral codes." },
+          "per_page": { "type": "integer", "description": "Number of items returned per page." },
+          "current_page": { "type": "integer", "description": "Current page number." },
+          "total_pages": { "type": "integer", "description": "Total number of pages available." },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ReferralCode" },
+            "description": "List of referral codes."
+          }
+        },
+        "description": "Paginated response for referral codes."
+      },
+      "ReferralCodeLiteResponse": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Display name for the referral code." },
+          "type": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "Type of referral code. 1 = always available, 2 = limited time."
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start date/time from which the code is valid."
+          },
+          "code": { "type": "string", "description": "Referral or promo code value." },
+          "valid_to": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "End date/time for limited time codes."
+          },
+          "instructions_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri",
+            "description": "URL for post-registration instructions."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Additional information about the referral code."
+          },
+          "redirect_url": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri",
+            "description": "URL to redirect user after applying the code."
+          }
+        },
+        "description": "Request body for updating a referral or promo code."
+      }
+    },
+    "securitySchemes": { "AuthorizationToken": { "type": "http", "scheme": "bearer" } }
+  }
+}

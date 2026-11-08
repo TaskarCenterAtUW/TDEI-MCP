@@ -62,6 +62,8 @@ interface Handoff {
   role: string;
   /** What the model can still do through MCP afterwards. */
   after: string;
+  /** When the task also has MCP tools (User Management API), they come first and the web UI is the fallback. */
+  api?: string;
 }
 
 const HANDOFFS: Record<WebUiTask, Handoff> = {
@@ -78,6 +80,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
   },
   create_service: {
     task: "create or edit a TDEI service (OSW, Flex or Pathways) for a project group",
+    api: "use portal_create_service, portal_update_service and portal_set_service_active (list existing ones with tdei_list_services first; project group ids from tdei_list_my_project_groups). They need the poc role in that project group and the exact change confirmed with the user.",
     link: (e) => portalUrl(e, "/"),
     steps: [
       "Open the Portal and make the target project group the active one.",
@@ -90,6 +93,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
   },
   manage_project_group_members: {
     task: "add members to a project group or change their roles",
+    api: "use portal_assign_project_group_roles and portal_revoke_project_group_roles (valid roles from portal_list_roles, current members from portal_list_project_group_members). They need the poc role in that project group, the user must already have a TDEI account, and the email and roles must be confirmed twice.",
     link: (e) => portalUrl(e, "/"),
     steps: [
       "Open the Portal and make the target project group the active one.",
@@ -142,6 +146,13 @@ export function webUiHandoff(task: WebUiTask, env: NodeJS.ProcessEnv = process.e
   const h = HANDOFFS[task];
   const environment = resolveTdeiEnvironment(env);
   const steps = h.steps.map((step, i) => `${i + 1}) ${step}`).join(" ");
+  if (h.api) {
+    return (
+      `To ${h.task}: ${h.api} Only if those tools are not available in this session, or the user prefers the web UI, hand off instead: ` +
+      `give them this link (${environment}): ${h.link(environment)} and walk them through it: ${steps} Role needed: ${h.role}. ` +
+      `Say the labels may differ slightly if the UI changed; do not invent controls. When it is done, ${h.after}`
+    );
+  }
   return (
     `Web UI only, no MCP operation: to ${h.task}, give the user this link (${environment}): ${h.link(environment)} and walk them through it: ${steps} ` +
     `Role needed: ${h.role}. Say the labels may differ slightly if the UI changed; do not invent controls. When they are done, ${h.after}`

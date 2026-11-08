@@ -1,4 +1,5 @@
 import { lookupToolInstruction } from "../tdei-shared/register-openapi-tools.js";
+import { TDEI_USER_TOOL_INSTRUCTIONS } from "../tdei-user/tool-instructions.js";
 
 /**
  * Extra LLM-facing usage guidance appended to discovered TDEI OpenAPI tool
@@ -43,5 +44,9 @@ export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
 
 /** Append the matching TDEI instruction to a discovered tool description. */
 export function augmentTdeiToolDescription(operationName: string, description: string | undefined): string | undefined {
-  return lookupToolInstruction(TDEI_TOOL_INSTRUCTIONS, operationName, description);
+  return lookupToolInstruction(
+    { ...TDEI_TOOL_INSTRUCTIONS, ...TDEI_USER_TOOL_INSTRUCTIONS },
+    operationName,
+    description,
+  );
 }

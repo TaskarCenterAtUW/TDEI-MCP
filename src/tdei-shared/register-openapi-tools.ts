@@ -52,6 +52,8 @@ export interface OpenApiProfileOptions {
   label: string;
   /** Appends connector runbooks to a discovered tool description. */
   augmentDescription: (operationName: string, description: string | undefined) => string | undefined;
+  /** Operations that are never exposed, even when allow-listed (for example credentials). */
+  neverExposed?: ReadonlySet<string>;
   /** Raw operations to keep out of the tool catalog (e.g. covered by semantic tools). */
   catalogHidden?: (name: string, filter: EndpointFilter) => boolean;
 }
@@ -66,7 +68,9 @@ export async function registerOpenApiToolsForProfile(
 ): Promise<TdeiOpenApiToolRegistrationResult> {
   console.error(`[openapi-tools] discovering TDEI ${profile.label} OpenAPI tools`);
   const result = await registerOpenApiTools(server, client, {
-    hiddenOperations: CONNECTOR_MANAGED_AUTH_TOOLS,
+    hiddenOperations: profile.neverExposed
+      ? new Set([...CONNECTOR_MANAGED_AUTH_TOOLS, ...profile.neverExposed])
+      : CONNECTOR_MANAGED_AUTH_TOOLS,
     isAllowed: (name, tags) => isToolAllowed(name, filter, tags ?? []),
     ...(profile.catalogHidden ? { catalogHidden: (name: string) => profile.catalogHidden!(name, filter) } : {}),
     augmentDescription: profile.augmentDescription,

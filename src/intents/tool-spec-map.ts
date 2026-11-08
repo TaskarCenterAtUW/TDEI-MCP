@@ -54,6 +54,8 @@ export const TOOL_SPEC_BINDINGS: Readonly<Record<string, ToolSpecBinding>> = {
     extraRequired: ["dataType"],
   },
   tdei_get_my_identity: { ops: [] },
+  // Backed by the User Management API (GET /project-group-roles/{userId}), not the core spec.
+  tdei_my_project_group_roles: { ops: [] },
   // The spec requires a project group. The tool takes an id or a name (resolved against the caller's
   // groups), and only fans out across every group when told "all".
   tdei_list_jobs: {

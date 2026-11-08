@@ -402,6 +402,14 @@ export interface MyIdentity {
   groups: string[];
 }
 
+export interface MyProjectGroupRolesData {
+  authenticated: boolean;
+  projectGroups?: Array<{ tdei_project_group_id: string; project_group_name: string; roles: string[] }>;
+  /** Total reported by the API (X-Total-Count) when it exceeds what was returned. */
+  total?: number;
+  hint: string;
+}
+
 export interface GetMyIdentityData {
   authenticated: boolean;
   identity?: MyIdentity;

@@ -6,17 +6,23 @@
     {
       "name": "tdei-core-dev",
       "apiUrl": "https://api-dev.tdei.us",
-      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json"
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/dev/tdei-api-gateway.json",
+      "userApiUrl": "https://portal-api-dev.tdei.us",
+      "userSpecUrl": "https://portal-api-dev.tdei.us/api-docs/swagger.json"
     },
     {
       "name": "tdei-core-staging",
       "apiUrl": "https://api-stage.tdei.us",
-      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway-stage.json"
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/stage/tdei-api-gateway-stage.json",
+      "userApiUrl": "https://portal-api-stage.tdei.us",
+      "userSpecUrl": "https://portal-api-stage.tdei.us/api-docs/swagger.json"
     },
     {
       "name": "tdei-core-production",
       "apiUrl": "https://api.tdei.us",
-      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway-prod.json"
+      "specUrl": "https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-ExternalAPIs/main/tdei-api-gateway-prod.json",
+      "userApiUrl": "https://portal-api.tdei.us",
+      "userSpecUrl": "https://portal-api.tdei.us/api-docs/swagger.json"
     },
     {
       "name": "tdei-workspace-dev",

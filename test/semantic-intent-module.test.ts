@@ -245,7 +245,7 @@ test("project-group membership lists groups visible to the authenticated login",
       appliedFilters: { page: 1, pageSize: 50 },
       accessScope: "authenticated_user",
       scopeExplanation:
-        "These are all project groups visible to your login (an admin login sees all groups), NOT confirmed membership. TDEI reports only poc contacts per group, not members. For your login email call tdei_get_my_identity. For full membership check the TDEI portal user/role screen. Use searchText to narrow, do not POC-filter.",
+        "These are all project groups visible to your login (an admin login sees all groups), NOT confirmed membership. TDEI reports only poc contacts per group, not members. For your login email call tdei_get_my_identity. For the project groups you belong to and your role in each call tdei_my_project_group_roles. Use searchText to narrow, do not POC-filter.",
       apiOperation: "listProjectGroups",
       method: "GET",
       path: "/api/v1/project-groups",
