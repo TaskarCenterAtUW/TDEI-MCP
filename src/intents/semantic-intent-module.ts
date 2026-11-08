@@ -201,6 +201,9 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
+/** The jobs API returns at most this many records per call (page_size 1 to 50). */
+const JOBS_API_PAGE_SIZE = 50;
+
 export class SemanticIntentModule {
   private readonly readCache = new Map<string, { expires: number; value: Promise<unknown> }>();
 
@@ -670,7 +673,8 @@ export class SemanticIntentModule {
             ...(jobType ? { jobType } : {}),
             ...(input.status ? { status: input.status } : {}),
             page: 1,
-            pageSize,
+            // One call per group at the API maximum; the display limit is applied afterwards.
+            pageSize: JOBS_API_PAGE_SIZE,
           },
           context,
         );
@@ -679,6 +683,7 @@ export class SemanticIntentModule {
       }
     });
     const collected: Array<Record<string, unknown>> = perGroup.flat();
+    const apiPageFull = perGroup.some((jobs) => jobs.length >= JOBS_API_PAGE_SIZE);
     // Newest first across all groups, so the page holds the most recent jobs
     // rather than whatever the first groups happened to return. Jobs without
     // a timestamp sort last; the sort is stable so ties keep group order.
@@ -690,14 +695,24 @@ export class SemanticIntentModule {
       if (tb === undefined) return -1;
       return tb - ta;
     });
-    const filtered = (
+    const matching =
       cutoffMs === undefined
         ? newestFirst
         : newestFirst.filter((job) => {
             const ts = createdTimestampMs(job);
             return ts !== undefined && ts >= cutoffMs;
-          })
-    ).slice(0, pageSize);
+          });
+    const filtered = matching.slice(0, pageSize);
+    const mayHaveMore = apiPageFull || matching.length > filtered.length;
+    const truncation = {
+      returned: collected.length,
+      shown: filtered.length,
+      apiPageFull,
+      mayHaveMore,
+      note: mayHaveMore
+        ? `Showing ${filtered.length} jobs from one API page (the jobs API returns at most ${JOBS_API_PAGE_SIZE} per project group, has no total count and does not document its ordering; shown newest first by created_at). More matching jobs may exist. Do not call again to page: tell the user the list may be incomplete and ask them to narrow it, for example by status, job type, a specific job id, "submitted by me" versus the whole group, a recent-days filter, or a single project group.`
+        : `Complete for the filters used: ${filtered.length} job(s) matched.`,
+    };
     return {
       status: "complete",
       data: {
@@ -710,6 +725,7 @@ export class SemanticIntentModule {
           groupIds.length === 1
             ? "Jobs for the requested project group."
             : "Jobs searched across all of your accessible project groups, as requested.",
+        truncation,
       },
     };
   }

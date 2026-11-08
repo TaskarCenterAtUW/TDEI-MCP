@@ -19,6 +19,10 @@ test("companion notes send the user to the status page and ask for both servers"
     assert.match(note, /install BOTH servers/);
   }
   assert.match(coreCompanionNote({} as NodeJS.ProcessEnv), /root URL of the TDEI MCP host/);
+  for (const note of [coreCompanionNote(env), workspaceCompanionNote(env)]) {
+    assert.match(note, /ONLY if the user's request actually needs both servers/);
+    assert.match(note, /do not mention the other server or the status page/);
+  }
 });
 
 test("workspace tools that need core data carry the companion note", () => {
@@ -27,7 +31,11 @@ test("workspace tools that need core data carry the companion note", () => {
     "create_workspace_api_v1_workspaces_post",
     "create_workspace_from_file_api_v1_workspaces_from_file_post",
   ];
-  for (const op of ops) assert.match(augmentWorkspaceToolDescription(op, "base") ?? "", /Companion server required/);
+  for (const op of ops)
+    assert.match(
+      augmentWorkspaceToolDescription(op, "base") ?? "",
+      /Companion server required only for cross-server requests/,
+    );
 });
 
 test("create_workspace asks for name and project group and handles latest-by-place", () => {
@@ -40,11 +48,15 @@ test("create_workspace asks for name and project group and handles latest-by-pla
   assert.match(text, /Blank/);
 });
 
-test("ASR and externalAppAccess are explained without inventing the integer mapping", () => {
+test("ASR and externalAppAccess use the integer mapping from the Workspaces app", () => {
   const text = augmentWorkspaceToolDescription("update_workspace_api_v1_workspaces__workspace_id__patch", "base") ?? "";
   assert.match(text, /AVIV ScoutRoute/);
   assert.match(text, /OFF by default/);
-  assert.match(text, /never guess one/);
+  assert.match(text, /0 = Disabled, 1 = Public, 2 = Project Group Only/);
+  assert.match(
+    augmentWorkspaceToolDescription("resolve_changeset_api_v1_x_put", "") ?? "",
+    /Mark a changeset as reviewed/,
+  );
   assert.match(EXTERNAL_APP_ACCESS_HELP, /separate from making data public/);
   assert.match(
     augmentWorkspaceToolDescription(
@@ -62,12 +74,12 @@ test("contribution tools explain changesets and that there is no count endpoint"
         `${op}_api_v1_workspaces__workspace_id__tasking_projects__project_id__x_get`,
         "base",
       ) ?? "";
-    assert.match(text, /no contribution-count endpoint/);
+    assert.match(text, /no workspace-wide contribution-count endpoint/);
     assert.match(text, /changeset_submitted/);
-    assert.match(text, /Contributions' tab/);
+    assert.match(text, /PEOPLE \(the web UI Contributors\/Contributions tabs\)/);
   }
   const roles = augmentWorkspaceToolDescription("list_project_roles_api_v1_x_get", "base") ?? "";
-  assert.match(roles, /Contributors tab/);
+  assert.match(roles, /PEOPLE/);
 });
 
 test("operation names are shortened before the REST suffix", () => {
@@ -85,7 +97,10 @@ test("core dataset tools carry the workspace companion note and creation flow", 
   ] as const) {
     assert.match(SEMANTIC_TOOL_DESCRIPTIONS[key], /Companion server for workspace tasks/);
   }
-  assert.match(SEMANTIC_TOOL_DESCRIPTIONS.findDatasets, /Workspace creation flow/);
+  assert.match(
+    SEMANTIC_TOOL_DESCRIPTIONS.findDatasets,
+    /Only when the user wants to create a workspace: workspace creation flow/,
+  );
   for (const key of ["getDatasetDetails", "findDatasets"] as const) {
     assert.match(SEMANTIC_TOOL_DESCRIPTIONS[key], /no dataset-diff operation/);
     assert.match(SEMANTIC_TOOL_DESCRIPTIONS[key], /derived_from_dataset_id/);
@@ -98,7 +113,7 @@ test("core dataset tools carry the workspace companion note and creation flow", 
 });
 
 test("server instructions document the cross-server flow, ASR, export and contributions", () => {
-  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /Workspace tasks need the workspace server/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /Requests that span both servers \(workspace tasks\)/);
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /ASR = AVIV ScoutRoute/);
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /osw_data_generator/);
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /Upload to TDEI > Start/);
@@ -197,4 +212,69 @@ test("the server name wins over the API host and TDEI_ENVIRONMENT wins over both
     resolveTdeiEnvironment({ TDEI_ENVIRONMENT: "prod", TDEI_MCP_NAME: "tdei-core-dev" } as NodeJS.ProcessEnv),
     "prod",
   );
+});
+
+import { pendingFeaturesNote, pendingToolBanner } from "../src/tdei-workspace/pending-features.js";
+
+test("production tells the user the dev/stage-only features are in testing and coming once deployed", () => {
+  const prod = pendingFeaturesNote("prod");
+  assert.match(prod, /Not yet available in production/);
+  assert.match(prod, /check_workspace_create/);
+  assert.match(prod, /get_fixmes/);
+  assert.match(prod, /under testing on the dev and stage/);
+  assert.match(prod, /available once they are deployed to production/);
+  assert.match(prod, /do not call them a connection problem/);
+});
+
+test("dev and stage mark the same features as under testing", () => {
+  for (const env of ["dev", "stage"] as const) {
+    assert.match(
+      pendingFeaturesNote(env),
+      new RegExp(`available on this ${env} server but are not deployed to production yet`),
+    );
+    assert.match(pendingToolBanner(env), /Under testing/);
+  }
+  assert.match(pendingToolBanner("prod"), /not yet deployed to production/);
+});
+
+test("the pending-feature note reaches the workspace instructions and create_workspace", () => {
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /Features still in testing/);
+  assert.match(
+    augmentWorkspaceToolDescription("create_workspace_api_v1_workspaces_post", "") ?? "",
+    /check_workspace_create/,
+  );
+});
+
+test("companion notes are conditional and never push the other server on single-server requests", () => {
+  const env = {} as NodeJS.ProcessEnv;
+  for (const note of [coreCompanionNote(env), workspaceCompanionNote(env)]) {
+    // The trigger comes before the instruction to check or install anything.
+    assert.ok(note.indexOf("only") < note.indexOf("status page"), "condition precedes the status page redirect");
+    assert.match(note, /if it stays on this server, ignore this note/);
+  }
+  const listing = augmentWorkspaceToolDescription("get_my_workspaces_api_v1_workspaces_mine_get", "") ?? "";
+  assert.match(listing, /project group NAMES/);
+  assert.match(listing, /ONLY if the user's request actually needs both servers/);
+});
+
+test("instructions disambiguate 'project', 'roles' and 'contributions' per server and match the API", () => {
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /"project": on this server it means a TASKING project/);
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /gig_only=true/);
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /to_map, to_review, to_remap, completed/);
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /pagination\.total/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /a TDEI PROJECT GROUP/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /A dataset NAME is not an id/);
+  const audit = augmentWorkspaceToolDescription("list_project_audit_api_v1_x_get", "") ?? "";
+  assert.match(audit, /event_type=changeset_submitted/);
+  assert.match(audit, /page_size=1/);
+  assert.match(audit, /occurred_from/);
+  assert.match(audit, /last_mapper_id/);
+  assert.doesNotMatch(audit, /paginate fully/);
+  const mine = augmentWorkspaceToolDescription("get_my_workspaces_api_v1_workspaces_mine_get", "") ?? "";
+  assert.match(mine, /gig_only=true/);
+  assert.match(
+    augmentWorkspaceToolDescription("check_workspace_name_api_v1_workspaces_check_post", "") ?? "",
+    /Returns \{available\}/,
+  );
+  assert.match(augmentWorkspaceToolDescription("list_projects_api_v1_x_get", "") ?? "", /draft, open, done/);
 });

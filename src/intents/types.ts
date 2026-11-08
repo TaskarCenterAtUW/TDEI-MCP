@@ -122,6 +122,19 @@ export interface ListJobsData {
   method: "GET";
   path: "/api/v1/jobs";
   scopeNote: string;
+  /**
+   * The jobs API has no total count and no documented ordering, so the tool makes one call per project
+   * group (never loops) and reports whether the list may be incomplete.
+   */
+  truncation: {
+    /** Jobs returned by the API across the searched groups, before date filtering and the display limit. */
+    returned: number;
+    shown: number;
+    /** True when a group returned a full API page (50), so more matching jobs may exist. */
+    apiPageFull: boolean;
+    mayHaveMore: boolean;
+    note: string;
+  };
 }
 
 export type JobRecord = Record<string, unknown>;

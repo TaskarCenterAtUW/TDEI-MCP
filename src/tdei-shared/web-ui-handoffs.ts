@@ -86,8 +86,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
       "To change a service later use Edit (name or boundaries) or Deactivate on its row.",
     ],
     role: "the project group's Point of Contact (poc) role; other members see a read-only list",
-    after:
-      "Afterwards call tdei_list_services to confirm the new service and reuse its id for uploads or workspace export.",
+    after: "Afterwards call tdei_list_services to confirm the new service and reuse its id for uploads.",
   },
   manage_project_group_members: {
     task: "add members to a project group or change their roles",
@@ -111,7 +110,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
     ],
     role: "POC or osw_data_generator in at least one TDEI project group; otherwise Workspaces shows a permission message instead of the form",
     after:
-      "Export is not validation or publication: afterwards use tdei_find_datasets, tdei_validate_dataset and tdei_publish_dataset on the core server, and tdei_list_services to show candidate services.",
+      "Export is not validation or publication. Only if the user also wants to validate, publish or pick a service, that is a cross-server step on the matching tdei-core-* server (tdei_find_datasets, tdei_validate_dataset, tdei_publish_dataset, tdei_list_services): follow the companion-server rule if it is missing; otherwise do not bring it up.",
   },
   edit_workspace_features: {
     task: "edit map features in a workspace",
@@ -134,7 +133,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
     ],
     role: "validator or owner to mark changesets reviewed",
     after:
-      "MCP can fetch the augmented diff of a known changeset id (get_changeset_adiff) and list audit events, but cannot mark a changeset reviewed.",
+      "MCP can fetch the augmented diff of a known changeset id (get_changeset_adiff) and list audit events, and mark a changeset as reviewed with resolve_changeset (validator or owner), but detailed inspection and the per-feature edits view are web UI only.",
   },
 };
 
