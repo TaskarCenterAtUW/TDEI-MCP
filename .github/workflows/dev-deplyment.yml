@@ -66,6 +66,7 @@ jobs:
             ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:dev-latest
           build-args: |
             GIT_SHA=${{ github.sha }}
+            BUILD_VERSION=0.1.${{ github.run_number }}
 
   deploy:
     needs: build
