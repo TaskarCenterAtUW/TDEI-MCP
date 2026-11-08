@@ -45,8 +45,8 @@ const CREATION_METHODS =
   "Every method needs a workspace title and a project group; the source dataset or file is needed for (b) and (c). " +
   "Any member with access can work with workspace data, but reviewing changesets, changing settings and uploading an export to TDEI need the matching workspace or TDEI project-group role.";
 
-/** Export to TDEI is a web UI flow; there is no API operation for it. */
-export const EXPORT_TO_TDEI_HELP = webUiHandoff("export_workspace");
+/** Export to TDEI has no API operation: the web UI is the recommended way; an advanced API recipe (export-to-tdei.ts) exists. */
+export const EXPORT_TO_TDEI_HELP = `${webUiHandoff("export_workspace").replace("Web UI only, no MCP operation: to export", "Recommended: export from the Workspaces web app. To export")} Present this as the recommended option, not as something you cannot do. Do NOT run the API export recipe on your own; use it only if the user explicitly asks you to do the export yourself (see "Export a workspace to TDEI" in the server instructions).`;
 const EDIT_FEATURES_HELP = webUiHandoff("edit_workspace_features");
 const REVIEW_CHANGESETS_HELP = webUiHandoff("review_changesets");
 
@@ -76,6 +76,9 @@ export const TDEI_WORKSPACE_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> 
     "Checks whether a workspace title is available in a project group (requires title and tdeiProjectGroupId, a uuid). Returns {available}. Call before create_workspace and tell the user if the name is taken.",
   check_workspace_create: `${pendingToolBanner()} Checks whether a workspace can be created for a type, project group and optional tdeiRecordId (dataset id). If canCreate is false, report the reason and stop; most often the user lacks access to the project group or dataset.`,
   get_fixmes: `${pendingToolBanner()} Lists the fixmes of a workspace.`,
+
+  get_workspace_bbox:
+    "Bounds of all workspace data: min_lat, min_lon, max_lat, max_lon (204/empty when the workspace never held a node). Step 1 of exporting a workspace to TDEI: no bounds means nothing to export. To export, the recommended way is the Workspaces web UI (see get_workspace); the runbook in the server instructions is only for when the user asks you to do it yourself.",
 
   get_workspace: `Get one workspace (includes tdeiRecordId/tdeiServiceId lineage, role and importStatus). Note externalAppAccess: ${EXTERNAL_APP_ACCESS_HELP} ${EXPORT_TO_TDEI_HELP}`,
   update_workspace:
