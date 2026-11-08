@@ -480,6 +480,7 @@ export class OpenApiMcpClient {
 
     const tools: OpenApiToolDefinition[] = [];
     const operations = new Map<string, CompiledOperation>();
+    const rawIdByName = new Map<string, string>();
 
     for (const [path, pathItemValue] of Object.entries(paths)) {
       if (!isObject(pathItemValue)) continue;
@@ -492,6 +493,16 @@ export class OpenApiMcpClient {
         if (!operation.operationId) continue;
         const name = this.operationName(operation.operationId);
         if (operations.has(name)) {
+          // One operationId reused across methods or paths (FastAPI gives a multi-method
+          // route such as the workspace catch-all the same id for every method): keep the
+          // first and skip the rest instead of failing the whole spec. Two different ids
+          // that normalize to one name stay an error, since the tool would be ambiguous.
+          if (rawIdByName.get(name) === operation.operationId) {
+            this.logger(
+              `[openapi] duplicate operationId "${operation.operationId}" on ${method.toUpperCase()} ${path}: keeping the first operation`,
+            );
+            continue;
+          }
           throw new Error(
             `OpenAPI operation name collision: "${operation.operationId}" maps to existing MCP tool "${name}".`,
           );
@@ -524,6 +535,7 @@ export class OpenApiMcpClient {
           inputSchema: compiled.schema,
           ...(tags.length > 0 ? { tags: [...tags] } : {}),
         });
+        rawIdByName.set(name, operation.operationId);
         operations.set(name, {
           method,
           path,
