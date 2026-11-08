@@ -73,7 +73,8 @@ const BASE_SEMANTIC_TOOL_DESCRIPTIONS = {
     "System capabilities (upload limits) plus supported API versions. Always beautify the result for the user as a markdown table instead of raw JSON.",
   verifyEmail: "Send an email-verification link to an address (post-registration).",
   recoverPassword: "Send a password-recovery link to an email address.",
-  regenerateApiKey: "Regenerate the TDEI API key (invalidates the old key). Requires confirm:true.",
+  regenerateApiKey:
+    "Regenerate the TDEI API key (invalidates the old key; the new key appears in the chat, so warn the user first). Requires confirm:true.",
 } as const;
 
 /**

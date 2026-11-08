@@ -105,3 +105,10 @@ test("core instructions describe the dataset lifecycle and error behaviour", () 
   assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /409/);
   assert.doesNotMatch(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /response_props\.tdei_dataset_id/);
 });
+
+test("core instructions cover job filters, clone semantics and feedback rules", () => {
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /ABANDONED/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /Dataset-Road-Tag/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /Clone is synchronous/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /feedback_id, status/);
+});
