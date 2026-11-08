@@ -58,9 +58,11 @@ export function renderStatusPage(
   const npxBlock = npxCommand
     ? `<h3>Quick install with npx</h3>
 <p class="muted">Detects the MCP clients installed on this machine (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor), shows what it will change, and asks before writing. Installs the core and workspace connectors for this environment. Add <code>--profile ${e(profile)}</code> to install only ${e(mcpName)}. Needs Node 22+.</p>
+<p class="cmd-label"><strong>Install</strong> (adds the connectors):</p>
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx command">${copyIcons}</button><pre id="tdei-npx">${e(npxCommand)}</pre></div>
+<p class="cmd-label"><strong>Remove</strong> (only run this to uninstall; it does <em>not</em> install anything):</p>
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx cleanup command">${copyIcons}</button><pre>${e(npxPrefix)} cleanup</pre></div>
-<p class="muted">The second line removes every <code>tdei</code> / <code>tdei-*</code> entry from the detected clients and keeps all other servers.</p>
+<p class="muted">The Remove command removes every <code>tdei</code> / <code>tdei-*</code> entry from the detected clients and keeps all other servers.</p>
 <h3>Or install with a script</h3>`
     : "";
   return `<!doctype html>
@@ -79,7 +81,7 @@ main { max-width: 860px; margin: 0 auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #8883; font-size: 14px; }
 code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-pre { overflow-x: auto; padding: 12px; border: 1px solid #8884; border-radius: 8px; }
+pre { white-space: pre-wrap; word-break: break-all; padding: 12px; border: 1px solid #8884; border-radius: 8px; }
 button { cursor: pointer; }
 .muted { opacity: 0.75; font-size: 13px; }
 .build-line { font-size: 13px; margin: -4px 0 14px; }
@@ -87,6 +89,7 @@ button { cursor: pointer; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .cmd { position: relative; }
 .cmd pre { padding-right: 52px; margin: 0; }
+.cmd-label { margin: 14px 0 6px; font-size: 14px; }
 .copy-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px; border: 1px solid #8886; background: #fff; color: #606060; opacity: 0; transition: opacity 0.15s ease-in-out; }
 @media (prefers-color-scheme: dark) { .copy-btn { background: #28282e; color: #b8b8c0; border-color: #555; } }
 .cmd:hover .copy-btn, .cmd:focus-within .copy-btn, .copy-btn:focus-visible { opacity: 1; }
