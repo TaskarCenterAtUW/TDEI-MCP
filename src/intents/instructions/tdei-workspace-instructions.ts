@@ -1,4 +1,5 @@
 import { pendingFeaturesNote } from "../../tdei-workspace/pending-features.js";
+import { exportToTdeiRunbook } from "../../tdei-workspace/export-to-tdei.js";
 import { coreCompanionNote } from "../../tdei-shared/companion-servers.js";
 import { TDEI_SHARED_SERVER_INSTRUCTIONS } from "./tdei-shared-instructions.js";
 
@@ -26,7 +27,7 @@ Words that mean different things here, so resolve them before calling anything:
 - "contributions" / "how many edits": ask whether they mean people or activity, then count with page_size=1 and pagination.total (never page through everything).
 - "tasks": states are to_map, to_review, to_remap, completed. "lock/submit/reset a task": lock_task, submit_task, reset_task (reset only when explicitly asked).
 - "create a workspace": three methods (blank, From TDEI dataset, From File); always ask for the title and project group, and the source if it is not blank.
-- "export", "edit features", "review changesets", "mark reviewed": web UI only, hand off with the link and steps.
+- "export workspace to TDEI": recommend the Workspaces web UI handoff (link with ?workspace=<id>, steps, role, project group by name and id, edit/review reminders); use the advanced runbook below only if the user asks you to do it yourself. "edit features", "review changesets", "mark reviewed": web UI only, hand off with the link and steps.
 - A named workspace ("workspace Oak Harbor") needs its numeric id: find it in get_my_workspaces first; never guess an id. If several match, show them and ask.
 - Destructive or hard to undo (delete workspace/project/AOI, reset, remove a role): confirm the exact target with the user first.
 
@@ -43,10 +44,15 @@ Ask the user for the workspace name and the project group (if they do not know t
 ASR = AVIV ScoutRoute, the mobile app for collecting pedestrian and accessibility data. A workspace appears in ASR only when externalAppAccess is enabled (off by default, owner/POC only) and a Long Form Quest Definition (LFQD, JSON or URL) is configured. externalAppAccess is an integer: 0 = Disabled, 1 = Public (what the "Publish this workspace for external apps" switch sets), 2 = Project Group Only; read it first and confirm before changing. It is separate from making data public.
 
 ## Web UI only tasks
-Feature editing, changeset review (Mark as Reviewed, per-feature history and restore) and export to TDEI have no API. Never stop at "not supported": give the user the Workspaces link for their environment and the steps from the matching tool description, tell them which role they need, and offer to continue with MCP afterwards. Service creation, project-group members and account registration are TDEI Portal tasks (see the core server).
+Feature editing, changeset review (per-feature history and restore) and export to TDEI have no single API operation. Never stop at "not supported": give the user the Workspaces link for their environment and the steps from the matching tool description, tell them which role they need, and offer to continue with MCP afterwards. Service creation, project-group members and account registration are TDEI Portal tasks (see the core server).
 
 ## Export, roles and contributions
-- Export of a workspace to TDEI is not available through this API; it is a Workspaces web UI flow: Dashboard > workspace actions menu > Export > Upload to TDEI > Start, creating a NEW TDEI dataset. It needs the POC or osw_data_generator role in a TDEI project group. Export is neither validation nor publication; only if the user also wants to validate or publish the new dataset, that is a cross-server step on the core server (follow the companion-server rule if it is missing), otherwise do not bring it up.
+- Export of a workspace to TDEI has no API operation. RECOMMEND the Workspaces web UI: tell the user the recommended way to export is from the Workspaces web app (do not frame it as a limitation or say you cannot); give the dashboard link with ?workspace=<workspace_id>; the steps (workspace actions menu > Export > on the Export Workspace page choose Upload to TDEI > Start > follow the prompts), naming the target project group by name and id if the user gave one; the role needed (POC or osw_data_generator in a TDEI project group, check the user's role in that group with tdei_get_my_identity if useful); remind them to make any edits first (a workspace that is an unedited copy of its source dataset would upload a near-identical new dataset), to confirm the project group and review status on the export page, and that the labels may differ slightly. Export only uploads the dataset: it does not validate or publish it; offer to find the new dataset, validate or publish it, or check the upload job once they say it is done (cross-server on the core server; follow the companion-server rule if it is missing).
+- Only if the user explicitly asks you to perform the export yourself (and your client can run commands on their machine) follow the advanced "Export a workspace to TDEI" runbook below. Never start it on your own.
 - Workspace roles (lead, validator, contributor) are separate from TDEI project-group roles (POC, osw_data_generator, ...), which come from tdei_get_my_identity on the core server (mention these only when the user asks about project-group roles). Permission matrices are not defined by the API.
 - Contributions are changesets committed immediately and reviewed afterwards. There is no count endpoint: aggregate changeset_submitted audit events and task statuses per tasking project, and say which measure you used.
+
+## Export a workspace to TDEI (advanced; only when the user asks you to do it yourself)
+${exportToTdeiRunbook()}
+${coreCompanionNote()}
 `;

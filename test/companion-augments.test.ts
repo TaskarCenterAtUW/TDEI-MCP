@@ -117,7 +117,10 @@ test("server instructions document the cross-server flow, ASR, export and contri
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /ASR = AVIV ScoutRoute/);
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /osw_data_generator/);
   assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /Upload to TDEI > Start/);
-  assert.match(EXPORT_TO_TDEI_HELP, /Web UI only, no MCP operation/);
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /## Export a workspace to TDEI \(advanced/);
+  assert.match(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /RECOMMEND the Workspaces web UI/);
+  assert.match(EXPORT_TO_TDEI_HELP, /Recommended: export from the Workspaces web app/);
+  assert.match(EXPORT_TO_TDEI_HELP, /Do NOT run the API export recipe on your own/);
   assert.match(
     augmentWorkspaceToolDescription("get_workspace_api_v1_workspaces__workspace_id__get", "") ?? "",
     /Upload to TDEI/,

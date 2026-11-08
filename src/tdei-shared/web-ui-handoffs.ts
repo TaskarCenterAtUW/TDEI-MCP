@@ -108,7 +108,7 @@ const HANDOFFS: Record<WebUiTask, Handoff> = {
     task: "export a workspace to TDEI as a new dataset",
     link: (e) => workspacesUrl(e, "/dashboard"),
     steps: [
-      "Open the Workspaces dashboard and select the workspace.",
+      "Open the Workspaces dashboard with the workspace selected (add ?workspace=<workspace_id> to the link when the id is known).",
       "Open the workspace actions menu and choose Export.",
       "On the Export Workspace page choose Upload to TDEI, select Start and follow the prompts. First review the edits and confirm the workspace id, source lineage, target format, project group and review status.",
     ],
