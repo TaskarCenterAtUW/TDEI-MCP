@@ -1,3 +1,4 @@
+import { tdeiEnvironmentInstruction } from "./instructions/tdei-shared-instructions.js";
 import { TDEI_CORE_SERVER_INSTRUCTIONS } from "./instructions/tdei-core-instructions.js";
 import { TDEI_WORKSPACE_SERVER_INSTRUCTIONS } from "./instructions/tdei-workspace-instructions.js";
 
@@ -38,6 +39,7 @@ export function resolveTdeiServerProfile(input: TdeiServerProfileInput = {}): Td
 }
 
 /** The full server `instructions` string for a profile. */
-export function tdeiServerInstructions(profile: TdeiServerProfile): string {
-  return profile === "workspace" ? TDEI_WORKSPACE_SERVER_INSTRUCTIONS : TDEI_CORE_SERVER_INSTRUCTIONS;
+export function tdeiServerInstructions(profile: TdeiServerProfile, environment?: "dev" | "stage" | "prod"): string {
+  const base = profile === "workspace" ? TDEI_WORKSPACE_SERVER_INSTRUCTIONS : TDEI_CORE_SERVER_INSTRUCTIONS;
+  return environment ? `${base}\n\n${tdeiEnvironmentInstruction(environment)}` : base;
 }

@@ -1,3 +1,4 @@
+import { resolveTdeiEnvironment } from "./tdei-shared/web-ui-handoffs.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
@@ -144,7 +145,10 @@ export async function createServer(
       version: BUILD.serverVersion,
     },
     {
-      instructions: tdeiServerInstructions(profile),
+      instructions: tdeiServerInstructions(
+        profile,
+        resolveTdeiEnvironment({ ...process.env, TDEI_API_URL: process.env.TDEI_API_URL ?? getConfig().apiUrl }),
+      ),
     },
   );
   const openApiToolsLifecycle = new OpenApiToolsLifecycle(

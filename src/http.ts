@@ -1,3 +1,4 @@
+import { resolveTdeiEnvironment } from "./tdei-shared/web-ui-handoffs.js";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { WebStandardStreamableHTTPServerTransport, type McpServer } from "@modelcontextprotocol/server";
 
@@ -505,6 +506,11 @@ export async function serveHttp(
     explicit: process.env.TDEI_MCP_PROFILE,
     apiUrl: httpConfig.apiUrl,
   });
+  const serverEnvironment = resolveTdeiEnvironment({
+    ...process.env,
+    TDEI_MCP_NAME: process.env.TDEI_MCP_NAME || gatewaySlug,
+    TDEI_API_URL: httpConfig.apiUrl,
+  });
   const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
   const sessionOpenApiClient = createOpenApiClient({
@@ -528,8 +534,8 @@ export async function serveHttp(
     sessionAuth,
     sessionOpenApiClient,
     serverInstructions: gatewaySlug
-      ? withGatewaySignIn(tdeiServerInstructions(serverProfile))
-      : tdeiServerInstructions(serverProfile),
+      ? withGatewaySignIn(tdeiServerInstructions(serverProfile, serverEnvironment))
+      : tdeiServerInstructions(serverProfile, serverEnvironment),
     serverProfile,
   };
   const host = overrides.host ?? httpConfig.httpHost;
