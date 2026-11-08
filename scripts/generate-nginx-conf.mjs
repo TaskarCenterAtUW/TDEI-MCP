@@ -67,6 +67,14 @@ try {
   process.exit(1);
 }
 
+let setupTargets;
+try {
+  setupTargets = await import("../dist/setup/targets.js");
+} catch {
+  console.error("[nginx] dist/setup/targets.js not found — run `pnpm build` first.");
+  process.exit(1);
+}
+
 const filePath = resolve(process.cwd(), file);
 const parsed = multiConfig.loadMultiMcpFile(filePath);
 const servers = multiConfig.resolveMultiMcp(parsed);
@@ -238,21 +246,54 @@ ${serverBody}}
 `
   : conf;
 
-const serversJson = JSON.stringify(
-  servers.map((s) => ({
-    name: s.name,
-    slug: s.slug,
-    apiUrl: s.apiUrl,
-    mcp: s.basePath,
-    health: `/${s.slug}/health`,
-    setup: `${s.basePath}/setup`,
-  })),
-).replace(/</g, "\\u003c");
+const serverEntries = servers.map((s) => ({
+  id: s.slug,
+  name: s.name,
+  names: [s.name],
+  slug: s.slug,
+  apiUrl: s.apiUrl,
+  mcps: [s.basePath],
+  health: `/${s.slug}/health`,
+  setup: `${s.basePath}/setup`,
+  with: [],
+  npxEnv: setupTargets.setupEnvForServer(s.name) ?? "",
+  npxProfile: s.profile === "workspace" ? "workspace" : "core",
+}));
+
+// Combined entries: one per environment that has both a core and a workspace server.
+// Installing one adds both connectors (the core server's installer takes ?with=<workspace name>).
+const bundleEntries = setupTargets.SETUP_ENVS.flatMap((env) => {
+  const core = servers.find((s) => s.profile !== "workspace" && setupTargets.setupEnvForServer(s.name) === env);
+  const workspace = servers.find((s) => s.profile === "workspace" && setupTargets.setupEnvForServer(s.name) === env);
+  if (!core || !workspace) return [];
+  return [
+    {
+      id: `bundle-${env}`,
+      name: setupTargets.SETUP_ENV_LABELS[env],
+      names: [core.name, workspace.name],
+      slug: core.slug,
+      apiUrl: `${core.apiUrl} + ${workspace.apiUrl}`,
+      mcps: [core.basePath, workspace.basePath],
+      health: `/${core.slug}/health`,
+      setup: `${core.basePath}/setup`,
+      with: [workspace.name],
+      npxEnv: env,
+      npxProfile: "both",
+    },
+  ];
+});
+
+// Dropdown order: tdei-*-dev, tdei-*-staging, tdei-*-production, then the individual servers.
+const dropdownEntries = [...bundleEntries, ...serverEntries];
+// npx runs this repository from GitHub, pinned to the deployed commit (no npm publish).
+const npxPrefix = setupTargets.npxSetupCommand(buildSha);
+const serversJson = JSON.stringify(serverEntries).replace(/</g, "\\u003c");
+const entriesJson = JSON.stringify(dropdownEntries).replace(/</g, "\\u003c");
 
 const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-const serverOptions = servers
-  .map((s) => `<option value="${escapeHtml(s.slug)}">${escapeHtml(s.name)}</option>`)
+const serverOptions = dropdownEntries
+  .map((e) => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.name)}</option>`)
   .join("\n");
 const serverCards = servers
   .map(
@@ -334,13 +375,22 @@ button { cursor: pointer; }
 
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
-<p>No tokens are written to disk. Pick your MCP server, client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
-<div class="builder" role="group" aria-label="Command builder">
+<p>No tokens are written to disk. Pick your MCP server first — <code>tdei-*-&lt;env&gt;</code> installs both the core and the workspace connector for that environment. Then use the one-line npx command, or a per-client script below. After setup, ask your agent to use any TDEI tool: the first call starts the TDEI sign-in — approve the browser login and the call is retried. (Claude Code: run <code>/mcp</code> and authenticate the server if no prompt appears.)</p>
+<div class="builder" role="group" aria-label="MCP server">
 <label>MCP server
 <select id="tdei-server">
 ${serverOptions}
 </select>
 </label>
+</div>
+<h3>Quick install with npx</h3>
+<p class="muted">Detects the MCP clients installed on this machine (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor), shows what it will change, and asks before writing. Needs Node 22+.</p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx command">${copyIcons}</button><pre id="tdei-npx"></pre></div>
+<p class="muted" id="tdei-npx-hint"></p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx cleanup command">${copyIcons}</button><pre>${escapeHtml(npxPrefix)} cleanup</pre></div>
+<p class="muted">The line above removes every <code>tdei</code> / <code>tdei-*</code> entry from the detected clients and keeps all other servers.</p>
+<h3>Or install with a script</h3>
+<div class="builder" role="group" aria-label="Command builder">
 <label>Client / harness
 <select id="tdei-harness">
 <option value="codex">Codex</option>
@@ -387,7 +437,7 @@ ${serverOptions}
 
 <section class="card" aria-label="Sample questions">
 <h2>Try these example questions</h2>
-<p class="muted samples-intro">Once installed and logged in via <code>tdei_sso_login</code>, ask your agent any of these. Replace placeholders like <code>[dataset-id]</code> with real values. Top 10 tested use cases only.</p>
+<p class="muted samples-intro">Once installed and signed in (the first question starts the sign-in), ask your agent any of these. Replace placeholders like <code>[dataset-id]</code> with real values. Top 10 tested use cases only.</p>
 <div class="samples">
 
 <div class="sample-category">
@@ -427,14 +477,30 @@ ${serverCards}
 </main>
 <script>
 const TDEI_SERVERS = ${serversJson};
+const TDEI_ENTRIES = ${entriesJson};
+const TDEI_NPX_PREFIX = ${JSON.stringify(npxPrefix).replace(/</g, "\\u003c")};
 function tdeiHint(action, name) {
+  if (name.indexOf(',') !== -1) {
+    if (action === 'update') return 'Safe to re-run — replaces only the ' + name + ' entries, keeps every other entry. Run it, restart the app, start a new chat.';
+    if (action === 'uninstall') return 'Removes only the ' + name + ' entries — every other MCP server entry is kept. Restart the app afterwards.';
+    return 'Writes the ' + name + ' entries (core and workspace) for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
+  }
   if (action === 'update') return 'Safe to re-run — replaces only the ' + name + ' entry, keeps every other entry. Run it, restart the app, start a new chat.';
   if (action === 'uninstall') return 'Removes only the ' + name + ' entry — every other MCP server entry is kept. Restart the app afterwards.';
   return 'Writes the ' + name + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
 }
 function tdeiServer() {
-  const slug = document.getElementById('tdei-server').value;
-  return TDEI_SERVERS.find((s) => s.slug === slug) || TDEI_SERVERS[0];
+  const id = document.getElementById('tdei-server').value;
+  return TDEI_ENTRIES.find((s) => s.id === id) || TDEI_ENTRIES[0];
+}
+function tdeiNpxCommand(entry) {
+  if (!entry.npxEnv) return '';
+  let cmd = TDEI_NPX_PREFIX + ' --env ' + entry.npxEnv;
+  if (entry.npxProfile !== 'both') cmd += ' --profile ' + entry.npxProfile;
+  return cmd + ' --gateway ' + location.origin;
+}
+function tdeiQuote(url) {
+  return url.indexOf('?') === -1 ? url : "'" + url + "'";
 }
 function tdeiBuildCommand() {
   const server = tdeiServer();
@@ -443,15 +509,22 @@ function tdeiBuildCommand() {
   const action = document.getElementById('tdei-action').value;
   const setupBase = location.origin + server.setup;
   const scriptPath = action === 'install' ? client : action + '/' + client;
+  const withQuery = server.with.length > 0 ? '?with=' + server.with.join(',') : '';
   const cmd = os === 'ps1'
-    ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + setupBase + '/' + scriptPath + '.ps1 | iex'
-    : 'curl -fsSL ' + setupBase + '/' + scriptPath + ' | sh';
+    ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + tdeiQuote(setupBase + '/' + scriptPath + '.ps1' + withQuery) + ' | iex'
+    : 'curl -fsSL ' + tdeiQuote(setupBase + '/' + scriptPath + withQuery) + ' | sh';
+  const entryNames = server.names.join(', ');
   document.getElementById('tdei-command').textContent = cmd;
-  document.getElementById('tdei-hint').textContent = tdeiHint(action, server.name);
-  document.getElementById('tdei-entry-name').textContent = server.name;
-  document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = server.name; });
+  document.getElementById('tdei-hint').textContent = tdeiHint(action, entryNames);
+  const npx = tdeiNpxCommand(server);
+  document.getElementById('tdei-npx').textContent = npx || 'No npx shortcut for this entry — use the script below.';
+  document.getElementById('tdei-npx-hint').textContent = !npx ? '' : server.npxProfile === 'both'
+    ? 'Installs ' + entryNames + '. Add --profile core or --profile workspace to install just one.'
+    : 'Installs ' + entryNames + ' only. Drop --profile to install the core and workspace connectors together.';
+  document.getElementById('tdei-entry-name').textContent = entryNames;
+  document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = entryNames; });
   document.getElementById('tdei-details').innerHTML =
-    '<tr><th>MCP endpoint</th><td class="detail-cell"><code>' + location.origin + server.mcp + '</code></td></tr>' +
+    server.mcps.map((m) => '<tr><th>MCP endpoint</th><td class="detail-cell"><code>' + location.origin + m + '</code></td></tr>').join('') +
     '<tr><th>Upstream API</th><td class="detail-cell"><code>' + server.apiUrl.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</code></td></tr>' +
     '<tr><th>Health JSON</th><td class="detail-cell"><code>' + location.origin + server.health + '</code></td></tr>' +
     '<tr><th>Setup catalogue</th><td class="detail-cell"><code>' + setupBase + '</code></td></tr>';

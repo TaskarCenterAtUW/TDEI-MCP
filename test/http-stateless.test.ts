@@ -223,6 +223,7 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
     const notThisChild = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(notThisChild.status, 404);
 
+    // Lazy auth: connecting and listing tools never needs a sign-in.
     const anonymousList = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
     assert.equal(anonymousList.status, 200);
 

@@ -254,15 +254,46 @@ Uninstall (removes only that server's entry, such as `tdei-core-dev`, and keeps 
 
     curl -fsSL http://127.0.0.1:3000/mcp/setup/uninstall/codex | sh
 
+Clean up (removes **every** `tdei` / `tdei-*` entry — `tdei`, `tdei-core-dev`,
+`tdei-core-production`, `tdei-workspace-dev`, … — from the chosen client and
+keeps all other MCP servers; Claude Code's per-project entries are included).
+Use a client name, or `all` to sweep every supported client on the machine:
+
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/cleanup/claude-desktop | sh
+    curl -fsSL http://127.0.0.1:3000/mcp/setup/cleanup/all | sh       # .ps1 on Windows
+
+Combined install (the core and the workspace connector of one environment in a
+single command). The gateway page lists `tdei-*-dev`, `tdei-*-staging` and
+`tdei-*-production` first; each adds `?with=<workspace entry>` to the core
+server's installer, so install / update / uninstall all handle both entries
+(quote the URL):
+
+    curl -fsSL 'https://<gateway>/tdei-core-dev/mcp/setup/claude-desktop?with=tdei-workspace-dev' | sh
+
+One command that detects the installed clients itself. It runs this repository
+straight from GitHub (no npm publish); the status pages pin it to the deployed
+commit, for example `github:TaskarCenterAtUW/TDEI-MCP#<sha>`, and `#dev` is the
+fallback. The first run installs dependencies and compiles `dist/` through the
+`prepare` script, so it takes a minute. `--env` picks dev, stage or prod, and
+both connectors are installed unless `--profile core|workspace` is given. Set
+`TDEI_NPX_PACKAGE` to change the package spec the pages show (for example
+`tdei-mcp` once it is published on npm):
+
+    npx -y github:TaskarCenterAtUW/TDEI-MCP#dev setup --env dev
+    npx -y github:TaskarCenterAtUW/TDEI-MCP#dev setup cleanup      # remove every tdei / tdei-* entry
+
 Fix-it flow for a colleague: 1) run the update command, 2) fully restart the
 app (Desktop: Cmd+Q / File > Exit — closing the window is not enough),
-3) start a NEW chat and log in again via `tdei_sso_login`. Still broken?
+3) start a NEW chat and approve the TDEI sign-in when the first tool call asks. Still broken?
 Uninstall, restart, reinstall.
 
-After running a script, start the MCP client and ask it to log in to TDEI
-(calls `tdei_sso_login`). Open the returned login URL. The browser returns
-to this server and the page says login complete. No callback URL is pasted
-back into the client.
+After running a script, start the MCP client and ask it to use any TDEI tool.
+Tools are listed without signing in; the first call that needs it starts the
+TDEI sign-in (Claude Code: run `/mcp` and authenticate the server if no prompt
+appears). Approve the browser login — the browser returns to this server, the
+page says login complete, and the call is retried. No callback URL is pasted
+back into the client. The `tdei_sso_login` tool exists only on single-user
+servers (stdio, or a loopback server without a gateway).
 
 ### Docker deployment
 

@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -79,7 +79,7 @@ test("overview advertises sh (mac/ubuntu) and ps1 (windows) installers", () => {
   // Restart instructions must be in clear view, not buried.
   assert.match(overview, /RESTART REQUIRED/);
   assert.match(overview, /Claude Desktop:.*Cmd\+Q/);
-  assert.match(overview, /tdei_sso_login/);
+  assert.match(overview, /first call starts the TDEI sign-in/);
 });
 
 test("ps1 installer carries defaults and cleans up its temp file", () => {
@@ -193,7 +193,7 @@ test("installer stdout prints a clear restart step for every client", () => {
       ).toString();
       assert.match(out, /RESTART REQUIRED/, `${client} must print a restart banner`);
       assert.match(out, expected[client], `${client} must print its own restart step`);
-      assert.match(out, /tdei_sso_login/);
+      assert.match(out, /first call starts the TDEI sign-in/);
     }
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -205,7 +205,8 @@ test("status page shows per-client restart steps in clear view", () => {
   assert.match(html, /Restart required/);
   assert.match(html, /Cmd\+Q/);
   assert.match(html, /Reload Window/);
-  assert.match(html, /tdei_sso_login/);
+  assert.match(html, /first call starts the TDEI sign-in/);
+  assert.doesNotMatch(html, /tdei_sso_login/);
 });
 
 test("status page builder generates install/update/uninstall commands with no manual edits", () => {
@@ -291,6 +292,22 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     assert.equal(uninstallPs.status, 200);
     assert.match(await uninstallPs.text(), /\$Action = 'uninstall'/);
 
+    const cleanup = await fetch(`${handle.url}/mcp/setup/cleanup/claude-desktop`);
+    assert.equal(cleanup.status, 200);
+    assert.match(await cleanup.text(), /ACTION="cleanup"/);
+
+    const cleanupAll = await fetch(`${handle.url}/mcp/setup/cleanup/all`);
+    assert.equal(cleanupAll.status, 200);
+    assert.match(await cleanupAll.text(), /CLIENT="all"/);
+
+    const cleanupAllPs = await fetch(`${handle.url}/mcp/setup/cleanup/all.ps1`);
+    assert.equal(cleanupAllPs.status, 200);
+    assert.match(await cleanupAllPs.text(), /\$Action = 'cleanup'/);
+
+    // "all" is only valid for cleanup.
+    assert.equal((await fetch(`${handle.url}/mcp/setup/all`)).status, 404);
+    assert.equal((await fetch(`${handle.url}/mcp/setup/update/all`)).status, 404);
+
     const updateBogus = await fetch(`${handle.url}/mcp/setup/update/bogus`);
     assert.equal(updateBogus.status, 404);
     assert.match(await updateBogus.text(), /TDEI_SETUP_CLIENT_UNKNOWN/);
@@ -303,6 +320,7 @@ test("setup action helpers accept install/update/uninstall paths", () => {
   assert.equal(isSetupScriptAction("install"), true);
   assert.equal(isSetupScriptAction("update"), true);
   assert.equal(isSetupScriptAction("uninstall"), true);
+  assert.equal(isSetupScriptAction("cleanup"), true);
   assert.equal(isSetupScriptAction("bogus"), false);
   assert.equal(setupActionPath("codex"), "codex");
   assert.equal(setupActionPath("codex", "install"), "codex");
@@ -323,7 +341,7 @@ test("sh and ps1 wrappers pass the action through to the node program", () => {
     const uninstallSh = renderClientSetupScript(client, "http://h:1", 8765, "uninstall");
     assert.match(uninstallSh, /ACTION="uninstall"/);
     assert.match(uninstallSh, /SERVER_NAME="tdei"/);
-    assert.match(uninstallSh, /"\$ACTION" "\$SERVER_NAME" "\$PROFILE" <<'EOF'/);
+    assert.match(uninstallSh, /"\$ACTION" "\$SERVER_NAME" "\$PROFILE" \$EXTRA_ENTRIES <<'EOF'/);
 
     const updatePs = renderClientSetupPowershell(client, "http://h:1", 8765, "update");
     assert.match(updatePs, /\$Action = 'update'/);
@@ -573,5 +591,229 @@ test("TDEI_PUBLIC_BASE_URL override wins over proxy headers", async () => {
     if (prev === undefined) delete process.env.TDEI_PUBLIC_BASE_URL;
     else process.env.TDEI_PUBLIC_BASE_URL = prev;
     await handle.close();
+  }
+});
+
+test("cleanup removes every tdei / tdei-* entry across clients and keeps other servers", () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-cleanup-"));
+  try {
+    const desktop =
+      process.platform === "darwin"
+        ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+        : process.platform === "win32"
+          ? join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+          : join(home, ".config", "Claude", "claude_desktop_config.json");
+    mkdirSync(dirname(desktop), { recursive: true });
+    writeFileSync(
+      desktop,
+      JSON.stringify({
+        mcpServers: {
+          tdei: { command: "npx" },
+          "tdei-core-dev": { command: "npx" },
+          "tdei-workspace-prod": { command: "npx" },
+          "tdei-workspace": { command: "npx" },
+          tdeiish: { command: "keep" },
+          github: { command: "keep" },
+        },
+      }),
+    );
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({
+        mcpServers: { "tdei-core-stage": { type: "http" }, other: { type: "http" } },
+        projects: { "/p": { mcpServers: { "tdei-core-dev": { type: "http" }, mine: { type: "http" } } } },
+      }),
+    );
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      [
+        'model = "x"',
+        "",
+        "[mcp_servers.tdei-core-dev]",
+        'url = "https://a/mcp"',
+        "",
+        "[mcp_servers.tdei-core-dev.env]",
+        'A = "1"',
+        "",
+        "[mcp_servers.keepme]",
+        'url = "https://keep/mcp"',
+        "",
+        "[mcp_servers.tdei]",
+        'url = "https://b/mcp"',
+        "",
+      ].join("\n"),
+    );
+
+    const sh = renderClientSetupScript("all", "http://192.168.50.11:8080", 8765, "cleanup");
+    const js = sh.split("<<'EOF'\n")[1]!.split("\nEOF")[0]!;
+    const tmp = join(home, "setup.cjs");
+    writeFileSync(tmp, `${js}\n`);
+    const out = execFileSync(
+      process.execPath,
+      [
+        tmp,
+        "all",
+        "http://192.168.50.11:8080/mcp",
+        "http://192.168.50.11:8080/auth/callback",
+        "8765",
+        "cleanup",
+        "tdei",
+      ],
+      { env: { ...process.env, HOME: home }, encoding: "utf-8" },
+    );
+
+    const d = JSON.parse(readFileSync(desktop, "utf-8")) as { mcpServers: Record<string, unknown> };
+    assert.deepEqual(Object.keys(d.mcpServers).sort(), ["github", "tdeiish"]);
+
+    const c = JSON.parse(readFileSync(join(home, ".claude.json"), "utf-8")) as {
+      mcpServers: Record<string, unknown>;
+      projects: Record<string, { mcpServers: Record<string, unknown> }>;
+    };
+    assert.deepEqual(Object.keys(c.mcpServers), ["other"]);
+    assert.deepEqual(Object.keys(c.projects["/p"]!.mcpServers), ["mine"]);
+
+    const toml = readFileSync(join(home, ".codex", "config.toml"), "utf-8");
+    assert.doesNotMatch(toml, /tdei/);
+    assert.match(toml, /\[mcp_servers\.keepme\]/);
+    assert.match(toml, /model = "x"/);
+
+    assert.match(out, /RESTART REQUIRED/);
+    assert.match(out, /Removed 5 TDEI MCP entries|Removed \d+ TDEI MCP entries/);
+
+    // Re-running is a clean no-op.
+    const again = execFileSync(
+      process.execPath,
+      [tmp, "claude-desktop", "http://x/mcp", "http://x/auth/callback", "8765", "cleanup", "tdei"],
+      { env: { ...process.env, HOME: home }, encoding: "utf-8" },
+    );
+    assert.match(again, /nothing to do/);
+    assert.match(again, /Removed 0 TDEI MCP entries/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("combined installer configures, updates and removes core + workspace entries together", () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-combined-"));
+  try {
+    const run = (action: "install" | "update" | "uninstall") =>
+      execFileSync(
+        "sh",
+        [
+          "-c",
+          renderClientSetupScript(
+            "claude-cli",
+            "https://gw.example.org",
+            8765,
+            action,
+            "/tdei-core-dev/mcp",
+            "tdei-core-dev",
+            "core",
+            ["tdei-workspace-dev", "tdei-workspace-dev", "bad name!", "tdei-core-dev"],
+          ),
+        ],
+        { env: { ...process.env, HOME: home, TDEI_NO_RELAY: "1" }, encoding: "utf-8" },
+      );
+    const entries = () =>
+      (JSON.parse(readFileSync(join(home, ".claude.json"), "utf-8")) as { mcpServers: Record<string, { url: string }> })
+        .mcpServers;
+
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { other: { type: "http", url: "x" } } }));
+    const out = run("install");
+    assert.deepEqual(entries(), {
+      other: { type: "http", url: "x" },
+      "tdei-core-dev": { type: "http", url: "https://gw.example.org/tdei-core-dev/mcp" },
+      "tdei-workspace-dev": { type: "http", url: "https://gw.example.org/tdei-workspace-dev/mcp" },
+    });
+    assert.match(out, /Configured claude-cli \(tdei-core-dev\)/);
+    assert.match(out, /Configured claude-cli \(tdei-workspace-dev\)/);
+    assert.match(out, /tdei_list_my_project_groups/);
+    assert.match(out, /get_my_workspaces/);
+    assert.equal(out.match(/RESTART REQUIRED/g)?.length, 1);
+
+    run("update");
+    assert.equal(Object.keys(entries()).length, 3);
+
+    assert.match(run("uninstall"), /Removed tdei-workspace-dev/);
+    assert.deepEqual(Object.keys(entries()), ["other"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("?with= on the setup route adds the other entry to sh and ps1 installers", async () => {
+  const handle = await serveTestHttp({ gatewaySlug: "tdei-core-dev" });
+  try {
+    const sh = await (await fetch(`${handle.url}/mcp/setup/claude-desktop?with=tdei-workspace-dev`)).text();
+    assert.match(sh, /EXTRA_ENTRIES="tdei-workspace-dev\|workspace\|http:\/\/[^"]+\/tdei-workspace-dev\/mcp"/);
+    const ps = await (await fetch(`${handle.url}/mcp/setup/update/claude-desktop.ps1?with=tdei-workspace-dev`)).text();
+    assert.match(ps, /\$ExtraEntries = @\('tdei-workspace-dev\|workspace\|http:\/\/[^']+\/tdei-workspace-dev\/mcp'\)/);
+    assert.match(ps, /@ExtraEntries/);
+    const plain = await (await fetch(`${handle.url}/mcp/setup/claude-desktop`)).text();
+    assert.match(plain, /EXTRA_ENTRIES=""/);
+  } finally {
+    await handle.close();
+  }
+});
+
+test("server status page shows the npx installer above the script builder", () => {
+  const html = renderStatusPage("https://gw.example.org", "/tdei-core-dev/mcp", "tdei-core-dev", "core");
+  const npx = html.indexOf("npx -y github:TaskarCenterAtUW/TDEI-MCP#");
+  assert.match(
+    html,
+    /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup --env dev --gateway https:\/\/gw\.example\.org/,
+  );
+  const builder = html.indexOf('aria-label="Command builder"');
+  assert.ok(npx > 0, "npx command present");
+  assert.ok(npx < builder, "npx block comes before the sh/ps1 builder");
+  assert.match(html, /github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup cleanup/);
+  assert.match(html, /--profile core/);
+
+  const staging = renderStatusPage(
+    "https://gw.example.org",
+    "/tdei-workspace-stage/mcp",
+    "tdei-workspace-stage",
+    "workspace",
+  );
+  assert.match(staging, /setup --env stage --gateway/);
+  assert.match(staging, /--profile workspace/);
+
+  // A name that maps to no environment gets no npx block rather than a wrong command.
+  const unknown = renderStatusPage("https://gw.example.org", "/mcp", undefined, "core");
+  assert.doesNotMatch(unknown, /id="tdei-npx"/);
+});
+
+// The generator imports the compiled output, which a clean checkout only has after `pnpm build`.
+const hasBuild = existsSync(new URL("../dist/setup/targets.js", import.meta.url));
+
+test("gateway page lists tdei-*-dev/staging/production first and installs both connectors", { skip: !hasBuild }, () => {
+  const sp = mkdtempSync(join(tmpdir(), "tdei-gw-page-"));
+  try {
+    const out = join(sp, "gateway.html");
+    execFileSync(
+      process.execPath,
+      [
+        "scripts/generate-nginx-conf.mjs",
+        "--file",
+        "mcps.json",
+        "--out",
+        join(sp, "nginx.conf"),
+        "--html-out",
+        out,
+        "--direct",
+      ],
+      { encoding: "utf-8" },
+    );
+    const html = readFileSync(out, "utf-8");
+    const options = [...html.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((m) => m[2]);
+    const servers = options.slice(0, options.indexOf("Codex"));
+    assert.deepEqual(servers.slice(0, 4), ["tdei-*-dev", "tdei-*-staging", "tdei-*-production", "tdei-core-dev"]);
+    assert.ok(html.indexOf('id="tdei-npx"') < html.indexOf('aria-label="Command builder"'));
+    assert.match(html, /"with":\["tdei-workspace-dev"\]/);
+    assert.match(html, /"with":\["tdei-workspace-stage"\]/);
+    assert.match(html, /"with":\["tdei-workspace-prod"\]/);
+  } finally {
+    rmSync(sp, { recursive: true, force: true });
   }
 });
