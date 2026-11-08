@@ -17,6 +17,7 @@
     "types": "warn"
   },
   "ignoreDependencies": [
-    "@stryker-mutator/command-runner"
+    "@stryker-mutator/command-runner",
+    "husky"
   ]
 }

@@ -17,6 +17,9 @@ import { serveHttp, type HttpServeOptions } from "../../src/http.js";
  *   sessions and cannot leak from one test into another.
  */
 let helperOwned = false;
+
+/** Specs are never downloaded in tests: servers start with no raw operations unless a test supplies its own. */
+const EMPTY_SPEC = { openapi: "3.0.0", info: { title: "test", version: "1" }, paths: {} };
 export function serveTestHttp(options: HttpServeOptions = {}): Promise<{
   close(): Promise<void>;
   url: string;
@@ -27,5 +30,8 @@ export function serveTestHttp(options: HttpServeOptions = {}): Promise<{
     process.env.TDEI_SESSION_DIR = mkdtempSync(join(tmpdir(), "tdei-test-sessions-"));
     helperOwned = true;
   }
-  return serveHttp({ ...options, ssoCallbackListener: false }, { port: 0, host: "127.0.0.1" });
+  return serveHttp(
+    { ...options, ssoCallbackListener: false, loadOpenApiSpec: options.loadOpenApiSpec ?? (async () => EMPTY_SPEC) },
+    { port: 0, host: "127.0.0.1" },
+  );
 }

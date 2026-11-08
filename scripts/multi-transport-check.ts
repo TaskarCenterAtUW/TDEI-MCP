@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * Transport-level check for already-running multi MCP servers.
+ * Transport-level check for already-running multi MCP servers (gateway children:
+ * lazy auth, so tools list without a sign-in and the first protected call is challenged).
  * Uses the real MCP client (Streamable HTTP) against each resolved
  * server URL from mcps.json — no raw curl, full initialize handshake.
  *
@@ -43,29 +44,37 @@ for (const s of servers) {
     record(s.name, "handshake (initialize)", false, e instanceof Error ? e.message : String(e));
     continue;
   }
+  // Gateway children use lazy auth: connecting and listing tools never needs a
+  // sign-in, and the first protected call is answered with an OAuth challenge.
+  let firstTool: string | undefined;
   try {
     const { tools } = await client.listTools();
-    const names = new Set(tools.map((t) => t.name));
-    record(s.name, "tools/list reachable", true, `${tools.length} tools`);
-    for (const need of ["tdei_sso_login", "tdei_auth_status", "tdei_test_authentication"]) {
-      record(s.name, `has ${need}`, names.has(need));
-    }
+    firstTool = tools.find((t) => !t.name.startsWith("tdei_sso_") && t.name !== "tdei_health")?.name;
+    record(s.name, "tools/list reachable without sign-in", tools.length > 0, `${tools.length} tools`);
   } catch (e) {
-    record(s.name, "tools/list reachable", false, e instanceof Error ? e.message : String(e));
+    record(s.name, "tools/list reachable without sign-in", false, e instanceof Error ? e.message : String(e));
   }
-  for (const tool of ["tdei_auth_status", "tdei_test_authentication"] as const) {
+  if (firstTool) {
     try {
-      const res = await client.callTool({ name: tool, arguments: {} });
-      const text = (res.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => (c as { text?: string }).text ?? "")
-        .join("\n");
-      // tdei_test_authentication signed-out returns isError with
-      // TDEI_SSO_REQUIRED — still a successful transport round-trip.
-      const ok = tool === "tdei_auth_status" ? !res.isError : text.includes("SSO login is required");
-      record(s.name, `call ${tool} (signed-out safe)`, ok, text.slice(0, 100).replace(/\n/g, " "));
+      const res = await fetch(s.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: firstTool, arguments: {} },
+        }),
+      });
+      const challenge = res.headers.get("www-authenticate") ?? "";
+      record(
+        s.name,
+        `protected call "${firstTool}" is challenged for sign-in`,
+        res.status === 401 && /resource_metadata=/.test(challenge),
+        `HTTP ${res.status}`,
+      );
     } catch (e) {
-      record(s.name, `call ${tool}`, false, e instanceof Error ? e.message : String(e));
+      record(s.name, "protected call challenge", false, e instanceof Error ? e.message : String(e));
     }
   }
   try {

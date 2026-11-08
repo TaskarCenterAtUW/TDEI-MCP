@@ -3,6 +3,7 @@ import { installCopy } from "./tdei-shared/install-copy.js";
 import { BUILD } from "./build-info.js";
 import { clientMcpName } from "./http-setup-script.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { npxSetupCommand, setupEnvForServer } from "./setup/targets.js";
 
 interface StatusPageUrls {
   origin: string;
@@ -50,6 +51,18 @@ export function renderStatusPage(
   // fetch; the status table refreshes it from GET /health.
   const buildVersion = BUILD.sha && BUILD.sha !== "unknown" ? `${BUILD.version}+${BUILD.sha}` : BUILD.version;
   const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  // One-line npx installer for this server's environment (core + workspace together).
+  const npxEnv = setupEnvForServer(mcpName);
+  const npxPrefix = npxSetupCommand(BUILD.sha);
+  const npxCommand = npxEnv ? `${npxPrefix} --env ${npxEnv} --gateway ${urls.origin}` : undefined;
+  const npxBlock = npxCommand
+    ? `<h3>Quick install with npx</h3>
+<p class="muted">Detects the MCP clients installed on this machine (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor), shows what it will change, and asks before writing. Installs the core and workspace connectors for this environment. Add <code>--profile ${e(profile)}</code> to install only ${e(mcpName)}. Needs Node 22+.</p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx command">${copyIcons}</button><pre id="tdei-npx">${e(npxCommand)}</pre></div>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx cleanup command">${copyIcons}</button><pre>${e(npxPrefix)} cleanup</pre></div>
+<p class="muted">The second line removes every <code>tdei</code> / <code>tdei-*</code> entry from the detected clients and keeps all other servers.</p>
+<h3>Or install with a script</h3>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -109,7 +122,8 @@ button { cursor: pointer; }
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
 <p class="muted">${e(mcpName)}: ${e(copy.summary)}</p>
-<p>No tokens are written to disk. Pick your client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to call <code>tdei_sso_login</code> and open the login URL.</p>
+<p>No tokens are written to disk. Pick your client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to use any TDEI tool: the first call starts the TDEI sign-in — approve the browser login and the call is retried. (Claude Code: run <code>/mcp</code> and authenticate this server if no prompt appears.)</p>
+${npxBlock}
 <div class="builder" role="group" aria-label="Command builder">
 <label>Client / harness
 <select id="tdei-harness">
@@ -166,7 +180,7 @@ button { cursor: pointer; }
 <ol>
 <li>Pick your client, OS, and command in the builder above, copy the generated command, and run it on the <em>client</em> machine (macOS/Linux needs <code>sh</code> + <code>node 22+</code>; Windows needs PowerShell + <code>node</code>).</li>
 <li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>; Cursor — quit + reopen.</li>
-<li>Ask the agent to log in: it calls <code>tdei_sso_login</code> and gives you a browser URL.</li>
+<li>Ask the agent to use any TDEI tool. The first call starts the sign-in: approve the browser login and the call is retried.</li>
 <li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>). First call: <code>${e(copy.firstCall)}</code>.</li>
 <li>MCP broken later (server moved, entry stale)? Pick <em>Update / reinstall</em> in the builder, run it, restart the app, start a new chat. To remove TDEI instead, pick <em>Uninstall</em>.</li>
 </ol>

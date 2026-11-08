@@ -49,7 +49,9 @@ if (isEntryPoint()) {
   const command = process.argv[2];
   const isSetupCommand =
     ["init", "switch", "--help", "-h"].includes(command ?? "") || (command !== undefined && !command.startsWith("--"));
-  if (isSetupCommand) {
+  if (command === "setup") {
+    await import("./setup.js");
+  } else if (isSetupCommand) {
     await import("./init.js");
   } else {
     const transportFlag = flagValue("--transport")?.toLowerCase();

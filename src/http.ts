@@ -1,5 +1,5 @@
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
+import { WebStandardStreamableHTTPServerTransport, type McpServer } from "@modelcontextprotocol/server";
 
 import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
 import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/auth-manager.js";
@@ -34,6 +34,11 @@ import {
   type TdeiServerProfile,
 } from "./intents/server-instructions.js";
 import { BUILD } from "./build-info.js";
+import { requestBearer } from "./auth/request-bearer.js";
+import { loadConfigFile } from "./config-file.js";
+import { withGatewaySignIn } from "./intents/instructions/tdei-shared-instructions.js";
+import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-openapi-tools.js";
+import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
 import { setSignInMode, signInText, tokenExpiredText } from "./mcp/errors.js";
 import type { PlaceResolver } from "./intents/place-resolver.js";
 import { createOpenApiClient } from "./tdei-user/client.js";
@@ -41,6 +46,8 @@ import type { OpenApiClientLike } from "./tdei-user/composite-client.js";
 
 export interface HttpServeOptions {
   fetchImpl?: typeof fetch;
+  /** Test hook: supplies OpenAPI spec documents instead of downloading them. */
+  loadOpenApiSpec?: (specUrl: string) => Promise<Record<string, unknown>>;
   requireBearerAuth?: boolean;
   /**
    * Bind the loopback SSO callback listener on tdei_sso_login/logout
@@ -254,6 +261,46 @@ export function mcpRequestNeedsAuth(parsed: unknown): boolean {
   return isProtectedToolCallEntry(parsed);
 }
 
+function sendGatewayChallenge(
+  response: ServerResponse,
+  publicBaseUrl: string,
+  gatewaySlug: string,
+  mcpPath: string,
+): void {
+  sendJson(
+    response,
+    401,
+    {
+      code: "TDEI_SSO_REQUIRED",
+      message:
+        "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
+    },
+    {
+      "WWW-Authenticate": oauthChallengeHeader(oauthEndpoints(publicBaseUrl, gatewaySlug, mcpPath)),
+      "Cache-Control": "no-store",
+    },
+  );
+}
+
+/**
+ * A multi-user server builds a fresh MCP server per request, so the OpenAPI
+ * tools are registered on each one from the shared, cached client. The caller's
+ * own token is bound per call through `requestBearer`. Core registers the raw
+ * operations its semantic tools do not cover (for example the portal_* ones);
+ * workspace registers all of its operations. A spec that cannot be loaded leaves
+ * the server with the tools it already has instead of failing the request.
+ */
+async function attachOpenApiTools(server: McpServer, options: ResolvedHttpOptions): Promise<void> {
+  const register = options.serverProfile === "workspace" ? registerTdeiWorkspaceOpenApiTools : registerTdeiOpenApiTools;
+  try {
+    await register(server, options.sessionOpenApiClient, loadConfigFile().filter);
+  } catch (error) {
+    console.error(
+      `[openapi-tools] could not register ${options.serverProfile} OpenAPI tools: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 async function handleMcpRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -305,6 +352,7 @@ async function handleMcpRequest(
   const needsAuth = mcpRequestNeedsAuth(parsed);
 
   let server;
+  let callerBearer: string | undefined;
   if (!needsAuth && !sharedSession) {
     // Handshake on a multi-user server: list tools, but attach no login. Tool
     // calls arrive with their own bearer token and are handled below.
@@ -339,6 +387,7 @@ async function handleMcpRequest(
       return;
     }
     const bearer = match[1].trim();
+    callerBearer = bearer;
 
     const ephemeralAuth = injectAccessToken(bearer);
     try {
@@ -391,20 +440,7 @@ async function handleMcpRequest(
     unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
     return;
   } else if (options.gatewaySlug && (!sharedSession || !options.sessionAuth.getStatus().authenticated)) {
-    const endpoints = oauthEndpoints(publicBaseUrl, options.gatewaySlug, mcpPath);
-    sendJson(
-      response,
-      401,
-      {
-        code: "TDEI_SSO_REQUIRED",
-        message:
-          "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
-      },
-      {
-        "WWW-Authenticate": oauthChallengeHeader(endpoints),
-        "Cache-Control": "no-store",
-      },
-    );
+    sendGatewayChallenge(response, publicBaseUrl, options.gatewaySlug, mcpPath);
     return;
   } else if (options.requireBearerAuth) {
     unauthorized(response, "TDEI_SSO_REQUIRED", `TDEI SSO login is required. ${signInText()}`, { retryable: false });
@@ -425,13 +461,19 @@ async function handleMcpRequest(
     });
   }
 
+  // Multi-user requests (handshake or bearer) get the OpenAPI tools; the
+  // single-user paths register their own through the OpenAPI lifecycle.
+  if (!sharedSession) await attachOpenApiTools(server, options);
+
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
     await server.connect(transport);
-    const webResponse = await transport.handleRequest(
-      toWebRequest(request, bodyText, host),
-      parsed === undefined ? undefined : { parsedBody: parsed },
-    );
+    const handle = () =>
+      transport.handleRequest(
+        toWebRequest(request, bodyText, host),
+        parsed === undefined ? undefined : { parsedBody: parsed },
+      );
+    const webResponse = await (callerBearer === undefined ? handle() : requestBearer.run(callerBearer, handle));
     await sendWebResponse(response, webResponse);
   } finally {
     await transport.close().catch(() => undefined);
@@ -469,9 +511,12 @@ export async function serveHttp(
     config: httpConfig,
     profile: serverProfile,
     headersProvider: async () => ({
-      Authorization: `Bearer ${await sessionAuth.getAccessToken()}`,
+      // A multi-user request carries its own validated token; only the
+      // single-user path falls back to the process login.
+      Authorization: `Bearer ${requestBearer.getStore() ?? (await sessionAuth.getAccessToken())}`,
     }),
     fetchImpl: options.fetchImpl,
+    loadSpec: options.loadOpenApiSpec,
   });
   const resolved: ResolvedHttpOptions = {
     fetchImpl: options.fetchImpl,
@@ -482,7 +527,9 @@ export async function serveHttp(
     gatewaySlug,
     sessionAuth,
     sessionOpenApiClient,
-    serverInstructions: tdeiServerInstructions(serverProfile),
+    serverInstructions: gatewaySlug
+      ? withGatewaySignIn(tdeiServerInstructions(serverProfile))
+      : tdeiServerInstructions(serverProfile),
     serverProfile,
   };
   const host = overrides.host ?? httpConfig.httpHost;
@@ -593,17 +640,42 @@ export async function serveHttp(
             action = parts[0];
             clientSlug = parts[1];
           }
-          const client = clientSlug !== undefined ? normalizeSetupClientTarget(clientSlug) : undefined;
+          const client =
+            clientSlug === "all" && action === "cleanup"
+              ? ("all" as const)
+              : clientSlug !== undefined
+                ? normalizeSetupClientTarget(clientSlug)
+                : undefined;
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall or uninstall/ to remove the ${mcpName} entry, e.g. update/codex.`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (cleanup/all covers every client), e.g. update/codex.`,
             });
             return;
           }
+          // ?with=<name>[,<name>] adds more entries on this gateway (the combined core + workspace install).
+          const withNames = (url.searchParams.get("with") ?? "").split(",");
           const script = wantsPowershell
-            ? renderClientSetupPowershell(client, publicBaseUrl, callbackPort, action, basePath, mcpName, serverProfile)
-            : renderClientSetupScript(client, publicBaseUrl, callbackPort, action, basePath, mcpName, serverProfile);
+            ? renderClientSetupPowershell(
+                client,
+                publicBaseUrl,
+                callbackPort,
+                action,
+                basePath,
+                mcpName,
+                serverProfile,
+                withNames,
+              )
+            : renderClientSetupScript(
+                client,
+                publicBaseUrl,
+                callbackPort,
+                action,
+                basePath,
+                mcpName,
+                serverProfile,
+                withNames,
+              );
           response.writeHead(200, {
             "Content-Type": wantsPowershell ? "text/plain; charset=utf-8" : "text/x-shellscript; charset=utf-8",
             "Cache-Control": "no-store",
