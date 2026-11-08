@@ -30,7 +30,8 @@ COPY mcps.json ./mcps.json
 # Bakes the CI commit SHA into the gateway page at build time; the runtime
 # stage repeats it so the entrypoint regenerates the same value at boot.
 ARG GIT_SHA=unknown
-ENV TDEI_MCP_BUILD_SHA=$GIT_SHA
+ARG BUILD_VERSION=
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION
 RUN pnpm build \
   && node scripts/generate-nginx-conf.mjs --file mcps.json --out nginx/nginx.conf --direct
 
@@ -55,7 +56,8 @@ RUN chmod +x scripts/docker-entrypoint.sh
 # loopback-only child ports — nginx on $PORT is the single public entrypoint.
 ENV PORT=3000 TDEI_TRANSPORT=http
 ARG GIT_SHA=unknown
-ENV TDEI_MCP_BUILD_SHA=$GIT_SHA
+ARG BUILD_VERSION=
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION
 EXPOSE 3000
 # Gateway landing page proves nginx is up and serving the generated routes.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

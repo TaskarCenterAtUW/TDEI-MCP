@@ -57,7 +57,8 @@ const rootDir = flagValue("--root") ?? "/usr/share/nginx/html";
 // baked; the page's health fetch then fills in version + full SHA at runtime.
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 const buildSha = (process.env.TDEI_MCP_BUILD_SHA ?? "").trim();
-const buildVersion = buildSha && buildSha !== "unknown" ? `${pkg.version}+${buildSha}` : pkg.version;
+const baseVersion = (process.env.TDEI_MCP_BUILD_VERSION ?? "").trim() || pkg.version;
+const buildVersion = buildSha && buildSha !== "unknown" ? `${baseVersion}+${buildSha}` : baseVersion;
 
 let multiConfig;
 try {
