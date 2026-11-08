@@ -98,3 +98,10 @@ test("workspace servers do not register the core semantic tdei_* tools", async (
     [],
   );
 });
+
+test("core instructions describe the dataset lifecycle and error behaviour", () => {
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /response_props\.tdei_dataset_id/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /valid_from or valid_to/);
+  assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /409/);
+  assert.doesNotMatch(TDEI_WORKSPACE_SERVER_INSTRUCTIONS, /response_props\.tdei_dataset_id/);
+});

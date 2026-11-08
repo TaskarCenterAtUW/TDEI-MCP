@@ -59,3 +59,12 @@ test("TDEI instructions are appended to the matching raw tool descriptions", asy
 test("dashed operation ids fall back to the normalized instruction key", () => {
   assert.equal(augmentTdeiToolDescription("job-download", "desc"), `desc\n\n${TDEI_TOOL_INSTRUCTIONS.job_download}`);
 });
+
+test("lifecycle runbooks cover upload fields, metadata dates and spatial-join inputs", () => {
+  assert.match(TDEI_TOOL_INSTRUCTIONS.uploadOswFile, /response_props\.tdei_dataset_id/);
+  assert.match(TDEI_TOOL_INSTRUCTIONS.editMetadata, /PUT \/api\/v1\/metadata/);
+  assert.match(TDEI_TOOL_INSTRUCTIONS.editMetadata, /valid_from and valid_to/);
+  assert.match(TDEI_TOOL_INSTRUCTIONS.oswOnDemandFormat, /source_format and target_format/);
+  assert.match(TDEI_TOOL_INSTRUCTIONS["osw-spatial-join"], /join_condition/);
+  assert.match(augmentTdeiToolDescription("osw-union", "desc") ?? "", /tdei_dataset_id_one/);
+});

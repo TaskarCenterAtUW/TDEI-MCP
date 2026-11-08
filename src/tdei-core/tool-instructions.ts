@@ -34,6 +34,20 @@ export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
     "Tag quality metrics on an OSW dataset. Requires tdei_dataset_id and a tag-quality file. The response returns a job_id; poll with tdei_list_jobs and fetch the completed result with job_download (GET /api/v1/job/download/<job_id>).",
   sanitizeOswFile:
     "Sanitize an OSW ZIP. MCP never accepts file bytes: ask for the absolute path of the .zip on the CLIENT machine and run the upload via curl from that machine. The response returns a job_id; poll with tdei_list_jobs and fetch the completed result with job_download (GET /api/v1/job/download/<job_id>).",
+  uploadOswFile:
+    "Multipart upload (POST /api/v1/osw/upload/{tdei_project_group_id}/{tdei_service_id}): parts dataset (zip) and metadata (metadata.json) are required, changeset is optional; derived_from_dataset_id is an optional query parameter. Ask for the absolute paths on the CLIENT machine. The response is 202 with a job id; when the job is COMPLETED the new dataset id is response_props.tdei_dataset_id. Publishing later needs valid_from and valid_to set in the metadata.",
+  editMetadata:
+    "PUT /api/v1/metadata/{tdei_dataset_id} with one multipart part file (metadata.json). Returns 200. Set valid_from and valid_to here before publishing, or publish returns 400.",
+  cloneDataset:
+    "POST /api/v1/dataset/clone/{tdei_dataset_id}/{tdei_project_group_id}/{tdei_service_id} with one multipart part file (metadata.json). All three ids are required; resolve them first rather than guessing.",
+  oswOnDemandFormat:
+    "Multipart parts file, source_format and target_format are all required (osw to osm, or osm to osw). Returns 202 with a job id; poll, then fetch with job_download.",
+  datasetTagRoad:
+    "Query parameters source_dataset_id and target_dataset_id are both required. The target must be a pre-release dataset (a published target returns 400). Returns 202 with a job id.",
+  "osw-union":
+    "JSON body tdei_dataset_id_one and tdei_dataset_id_two (both required, OSW datasets the user can access). Returns 202 with a job id; 404 for an unknown id.",
+  "osw-spatial-join":
+    "JSON body: required target_dataset_id, source_dataset_id, target_dimension, source_dimension, join_condition (for example ST_Contains(ST_Buffer(geometry_target, 5), geometry_source)); optional join_filter_target, join_filter_source, aggregate, assignment_method. 400 for empty or invalid values or non-OSW datasets, 404 for unknown ids. Returns 202 with a job id.",
   job_download:
     "Download the result/output file for a completed job (GET /api/v1/job/download/{job_id}). " +
     "job_id is required: if missing, ask which job to download or look it up with tdei_list_jobs. " +
