@@ -21,6 +21,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Deploy runs on merge, and CI runs on the PR — nothing else gates dev
+      # (branch is unprotected), so refuse to ship a tree whose ci checks did
+      # not pass. Filter by workflow name: this workflow's own check-runs are
+      # attached to the same PR head SHA and would otherwise deadlock the gate.
+      - name: Require the merged PR's ci checks to have passed
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          result="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json statusCheckRollup \
+            --jq '[.statusCheckRollup[] | select((.workflowName // "") == "ci")] |
+                  if length == 0 then "none"
+                  elif all(.[]; .conclusion == "SUCCESS") then "ok"
+                  else ([.[] | "\(.name)=\(.conclusion // .status)"] | join(", "))
+                  end')"
+          case "$result" in
+            ok)
+              echo "ci passed for PR #$PR_NUMBER — deploying."
+              ;;
+            none)
+              echo "::error::No ci check-runs found for PR #$PR_NUMBER (skipped run?). Re-run ci, or dispatch this workflow manually to deploy."
+              exit 1
+              ;;
+            *)
+              echo "::error::ci did not pass for PR #$PR_NUMBER: $result"
+              exit 1
+              ;;
+          esac
       - uses: docker/login-action@v3
         with:
           registry: ${{ secrets.REGISTRY_DOMAIN }}

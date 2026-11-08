@@ -1,11 +1,15 @@
 name: ci
+# PR-time only: the merge commit's tree is the tree this run already tested,
+# so a push-triggered re-run on dev was pure duplication (removed 2026-11).
 on:
-  push:
-    branches: [main, dev]
   pull_request:
     branches: [main, dev]
+# A new push to the same PR supersedes this run; stop paying for the old one.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,10 +21,37 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      # dist/ first: the gateway-page test in test/http-setup-script.test.ts
+      # skips itself when dist/setup/targets.js is absent.
+      - run: pnpm build
+      - run: pnpm test:coverage
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm knip
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm audit
       - name: Secret scan
         uses: trufflesecurity/trufflehog@main
@@ -29,4 +60,3 @@ jobs:
           # detectors by default (unlike the filesystem workaround in
           # scripts/secret-scan.sh). Verified-only keeps it low-noise.
           extra_args: --results verified
-      - run: pnpm test:coverage
