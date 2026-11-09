@@ -1,0 +1,17 @@
+{
+  "name": "tdei-mcp-acceptance",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "description": "Black-box acceptance suite for a deployed TDEI-MCP gateway. Scripts only; no dependencies of its own.",
+  "scripts": {
+    "auth:login": "node --experimental-strip-types --no-warnings src/cli.ts auth login",
+    "auth:status": "node --experimental-strip-types --no-warnings src/cli.ts auth status",
+    "auth:logout": "node --experimental-strip-types --no-warnings src/cli.ts auth logout",
+    "acceptance_tests": "node --experimental-strip-types --no-warnings src/cli.ts acceptance",
+    "run:part1": "node --experimental-strip-types --no-warnings src/cli.ts run --part 1",
+    "run:part2": "node --experimental-strip-types --no-warnings src/cli.ts run --part 2",
+    "snapshot": "node --experimental-strip-types --no-warnings src/cli.ts snapshot",
+    "selftest": "node --experimental-strip-types --no-warnings src/cli.ts selftest"
+  }
+}
