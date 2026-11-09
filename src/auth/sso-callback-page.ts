@@ -70,8 +70,14 @@ p { margin: 8px 0; }
 ${icon}
 <h1>${heading}</h1>
 <p>${message}</p>
-<p class="muted">You can close this tab.</p>
+<p class="muted">If this tab did not close itself, you can close it.</p>
 </main>
+<script>
+// Closes the tab when the harness opened it programmatically (its own
+// popup/redirect round-trip). Browsers ignore this for manually opened tabs,
+// where the message above is the fallback.
+try { window.close(); } catch {}
+</script>
 </body>
 </html>`;
 }
