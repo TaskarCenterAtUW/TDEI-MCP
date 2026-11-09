@@ -1,3 +1,4 @@
+import { resolveTdeiEnvironment } from "./tdei-shared/web-ui-handoffs.js";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { WebStandardStreamableHTTPServerTransport, type McpServer } from "@modelcontextprotocol/server";
 
@@ -36,6 +37,7 @@ import {
 import { BUILD } from "./build-info.js";
 import { requestBearer } from "./auth/request-bearer.js";
 import { loadConfigFile } from "./config-file.js";
+import { renderSsoErrorPage, renderSsoResultPage } from "./auth/sso-callback-page.js";
 import { withGatewaySignIn } from "./intents/instructions/tdei-shared-instructions.js";
 import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-openapi-tools.js";
 import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
@@ -505,6 +507,11 @@ export async function serveHttp(
     explicit: process.env.TDEI_MCP_PROFILE,
     apiUrl: httpConfig.apiUrl,
   });
+  const serverEnvironment = resolveTdeiEnvironment({
+    ...process.env,
+    TDEI_MCP_NAME: process.env.TDEI_MCP_NAME || gatewaySlug,
+    TDEI_API_URL: httpConfig.apiUrl,
+  });
   const mcpName = clientMcpName(process.env.TDEI_MCP_NAME?.trim() || gatewaySlug);
   const sessionAuth = new AuthManager();
   const sessionOpenApiClient = createOpenApiClient({
@@ -528,8 +535,8 @@ export async function serveHttp(
     sessionAuth,
     sessionOpenApiClient,
     serverInstructions: gatewaySlug
-      ? withGatewaySignIn(tdeiServerInstructions(serverProfile))
-      : tdeiServerInstructions(serverProfile),
+      ? withGatewaySignIn(tdeiServerInstructions(serverProfile, serverEnvironment))
+      : tdeiServerInstructions(serverProfile, serverEnvironment),
     serverProfile,
   };
   const host = overrides.host ?? httpConfig.httpHost;
@@ -769,20 +776,30 @@ export async function serveHttp(
           // children. A real exchange failure stays 401 so nginx stops.
           if (loginReturn && authState !== "login_pending") {
             response.writeHead(404, {
-              "Content-Type": "text/plain; charset=utf-8",
+              "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end("No TDEI SSO login is pending on this server");
+            response.end(
+              renderSsoErrorPage(
+                "No sign-in in progress",
+                "This server has no TDEI login waiting for that callback. It may have finished already, timed out, or belong to another server.",
+              ),
+            );
             return;
           }
           if (!loginReturn && authState !== "logout_pending") {
             response.writeHead(404, {
-              "Content-Type": "text/plain; charset=utf-8",
+              "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end("No TDEI SSO logout is pending on this server");
+            response.end(
+              renderSsoErrorPage(
+                "No sign-out in progress",
+                "This server has no TDEI logout waiting for that callback.",
+              ),
+            );
             return;
           }
           try {
@@ -795,24 +812,20 @@ export async function serveHttp(
               await sessionAuth.completeSsoLogin(expectedCallback.toString());
               void sessionOpenApiClient.listTools().catch(() => undefined);
             }
-            const title = loggingOut ? "TDEI logout complete" : "TDEI login complete";
-            const heading = loggingOut ? "Logout complete" : "Login complete";
             response.writeHead(200, {
               "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end(
-              `<!doctype html><title>${title}</title><h1>${heading}</h1><p>You may close this window and return to your agent.</p>`,
-            );
+            response.end(renderSsoResultPage(loggingOut ? "logout" : "login"));
           } catch (error) {
             const detail = sanitizeAuthErrorDetail(error instanceof Error ? error.message : String(error));
             response.writeHead(401, {
-              "Content-Type": "text/plain; charset=utf-8",
+              "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end(detail);
+            response.end(renderSsoErrorPage("Sign-in could not be completed", `${detail}.`));
           }
           return;
         }

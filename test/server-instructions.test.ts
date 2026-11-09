@@ -112,3 +112,21 @@ test("core instructions cover job filters, clone semantics and feedback rules", 
   assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /Clone is synchronous/);
   assert.match(TDEI_CORE_SERVER_INSTRUCTIONS, /feedback_id, status/);
 });
+
+test("instructions tell each server its environment and require the user to pick one", () => {
+  for (const profile of ["core", "workspace"] as const) {
+    const shared = tdeiServerInstructions(profile);
+    assert.match(shared, /has not named one, ask which environment/);
+    assert.match(shared, /for the rest of the conversation/);
+    assert.match(shared, /Never silently fall back to another environment/);
+    assert.match(shared, /core and workspace servers of the SAME environment/);
+    assert.match(shared, /Never pass an id from one environment to a server of a different environment/);
+
+    const dev = tdeiServerInstructions(profile, "dev");
+    const prod = tdeiServerInstructions(profile, "prod");
+    assert.match(dev, /This server is the dev \(development\) environment/);
+    assert.match(prod, /This server is the prod \(production, live data\) environment/);
+    assert.doesNotMatch(dev, /This server is the prod/);
+  }
+  assert.equal(tdeiServerInstructions("core"), TDEI_CORE_SERVER_INSTRUCTIONS);
+});

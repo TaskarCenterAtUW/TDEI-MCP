@@ -29,11 +29,25 @@ test("installer relays the registered loopback callback to the gateway", () => {
   assert.match(js, /127\.0\.0\.1/);
 });
 
-test("installer relay is one-shot: exits after the callback or after 300s", () => {
+test("installer relay is on-demand and one-shot: quits after the callback or after 300s", () => {
   const js = getClientSetupJs();
   assert.match(js, /IDLE_MS = 300000/);
   assert.match(js, /process\.exit\(0\)/);
   assert.match(js, /clearTimeout\(idle\)/);
+});
+
+test("installer relay fans one loopback port out to every installed gateway", () => {
+  const js = getClientSetupJs();
+  // Targets live in a shared file so dev + staging + production installs
+  // accumulate; the running relay re-reads it on every callback.
+  assert.match(js, /sso-callback-targets\.json/);
+  assert.match(js, /remoteCallbackUrl\]\.concat/);
+  // A 404 means "no sign-in pending on this gateway" — try the next one and
+  // replay the first non-404 answer to the browser.
+  assert.match(js, /statusCode === 404/);
+  assert.match(js, /tryNext/);
+  // The loopback port stays fixed (Keycloak registers a single port across envs).
+  assert.match(js, /const port = 8765;/);
 });
 
 const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
@@ -209,25 +223,48 @@ test("status page shows per-client restart steps in clear view", () => {
   assert.doesNotMatch(html, /tdei_sso_login/);
 });
 
-test("status page builder generates install/update/uninstall commands with no manual edits", () => {
+test("status page builder generates install/update/remove commands with no manual edits", () => {
   const html = renderStatusPage("http://192.168.50.11:3000", "/mcp");
-  for (const id of ["tdei-harness", "tdei-os", "tdei-action", "tdei-command", "tdei-hint"]) {
+  for (const id of [
+    "tdei-env",
+    "tdei-spec",
+    "tdei-method",
+    "tdei-harness",
+    "tdei-os",
+    "tdei-action",
+    "tdei-command",
+    "tdei-hint",
+  ]) {
     assert.match(html, new RegExp(`id="${id}"`), `builder must render #${id}`);
+  }
+  for (const env of ["dev", "stage", "prod"]) {
+    assert.match(html, new RegExp(`<option value="${env}">`), `env dropdown must offer ${env}`);
+  }
+  for (const spec of ["both", "core", "workspace"]) {
+    assert.match(html, new RegExp(`<option value="${spec}">`), `connectors dropdown must offer ${spec}`);
+  }
+  for (const method of ["npx", "script"]) {
+    assert.match(html, new RegExp(`<option value="${method}">`), `method dropdown must offer ${method}`);
   }
   for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"]) {
     assert.match(html, new RegExp(`<option value="${client}">`), `client dropdown must offer ${client}`);
   }
   for (const action of ["install", "update", "uninstall"]) {
-    assert.match(html, new RegExp(`<option value="${action}">`), `command dropdown must offer ${action}`);
+    assert.match(html, new RegExp(`<option value="${action}">`), `purpose dropdown must offer ${action}`);
   }
   assert.match(html, /<option value="sh">/, "os dropdown must offer macOS / Linux");
   assert.match(html, /<option value="ps1">/, "os dropdown must offer Windows");
-  // Default (no-JS) command is a working installer, and the live builder
+  // Default (no-JS) command is a working npx installer, and the live builder
   // covers every combination without the user editing the command text.
-  assert.match(html, /curl -fsSL http:\/\/192\.168\.50\.11:3000\/mcp\/setup\/codex \| sh/);
-  assert.match(html, /TDEI_SETUP_BASE/);
-  assert.match(html, /action \+ '\/' \+ client|action === 'install' \? client/);
-  assert.match(html, /\.ps1 \| iex/);
+  assert.match(
+    html,
+    /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup --env dev --gateway http:\/\/192\.168\.50\.11:3000/,
+  );
+  assert.match(html, /TDEI_SERVER_NAMES/);
+  assert.match(html, /TDEI_NPX_PREFIX/);
+  assert.match(html, /action === 'install' \? client/);
+  assert.match(html, /\.ps1/);
+  assert.match(html, /\| iex/);
 });
 
 test("setup script for a named gateway registers that mcps.json name", async () => {
@@ -757,21 +794,41 @@ test("?with= on the setup route adds the other entry to sh and ps1 installers", 
   }
 });
 
-test("server status page shows the npx installer above the script builder", () => {
+test("server status page is a 3-step installer with one generated command", () => {
   const html = renderStatusPage("https://gw.example.org", "/tdei-core-dev/mcp", "tdei-core-dev", "core");
-  const npx = html.indexOf("npx -y github:TaskarCenterAtUW/TDEI-MCP#");
+  // Step 1: environment + connectors.
+  for (const id of ["tdei-env", "tdei-spec"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `step 1 must render #${id}`);
+  }
+  for (const env of ["dev", "stage", "prod"]) {
+    assert.match(html, new RegExp(`<option value="${env}">`), `env dropdown must offer ${env}`);
+  }
+  for (const spec of ["both", "core", "workspace"]) {
+    assert.match(html, new RegExp(`<option value="${spec}">`), `connectors dropdown must offer ${spec}`);
+  }
+  // Step 2: method + purpose (+ client/os for the script method).
+  for (const id of ["tdei-method", "tdei-harness", "tdei-os", "tdei-action"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `step 2 must render #${id}`);
+  }
+  assert.match(html, /<option value="npx">/, "method dropdown must offer npx");
+  assert.match(html, /<option value="script">/, "method dropdown must offer script");
+  // Step 3: one generated command with a copy button.
+  assert.match(html, /id="tdei-command"/, "step 3 must render #tdei-command");
+  // No-JS default is a working npx install for this environment (both connectors).
   assert.match(
     html,
     /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup --env dev --gateway https:\/\/gw\.example\.org/,
   );
-  const builder = html.indexOf('aria-label="Command builder"');
-  assert.ok(npx > 0, "npx command present");
-  assert.ok(npx < builder, "npx block comes before the sh/ps1 builder");
-  assert.match(html, /github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup cleanup/);
-  assert.match(html, /--profile core/);
+  // The live builder covers every combination: npx install/update plus the
+  // global cleanup for Remove, and the per-client sh/ps1 scripts.
+  assert.match(html, /TDEI_NPX_PREFIX \+ ' cleanup'/);
+  assert.match(html, /--profile ' \+ spec|--profile "\s*\+ spec|\+ ' --profile ' \+ spec/);
+  assert.match(html, /action === 'install' \? client/);
+  assert.match(html, /\.ps1/);
+  assert.match(html, /\| iex/);
   assert.match(html, /white-space: pre-wrap/);
-  assert.ok(html.indexOf("<strong>Install</strong>") < html.indexOf('id="tdei-npx"'));
-  assert.ok(html.indexOf("<strong>Remove</strong>") < html.indexOf("setup cleanup"));
+  assert.doesNotMatch(html, /id="tdei-npx"/);
+  assert.doesNotMatch(html, /id="tdei-details"/);
 
   const staging = renderStatusPage(
     "https://gw.example.org",
@@ -780,17 +837,16 @@ test("server status page shows the npx installer above the script builder", () =
     "workspace",
   );
   assert.match(staging, /setup --env stage --gateway/);
-  assert.match(staging, /--profile workspace/);
 
-  // A name that maps to no environment gets no npx block rather than a wrong command.
+  // A name that maps to no environment still renders a working installer (dev default).
   const unknown = renderStatusPage("https://gw.example.org", "/mcp", undefined, "core");
-  assert.doesNotMatch(unknown, /id="tdei-npx"/);
+  assert.match(unknown, /setup --env dev --gateway/);
 });
 
 // The generator imports the compiled output, which a clean checkout only has after `pnpm build`.
 const hasBuild = existsSync(new URL("../dist/setup/targets.js", import.meta.url));
 
-test("gateway page lists tdei-*-dev/staging/production first and installs both connectors", { skip: !hasBuild }, () => {
+test("gateway page is a 3-step installer for every environment", { skip: !hasBuild }, () => {
   const sp = mkdtempSync(join(tmpdir(), "tdei-gw-page-"));
   try {
     const out = join(sp, "gateway.html");
@@ -809,20 +865,36 @@ test("gateway page lists tdei-*-dev/staging/production first and installs both c
       { encoding: "utf-8" },
     );
     const html = readFileSync(out, "utf-8");
-    const options = [...html.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((m) => m[2]);
-    const servers = options.slice(0, options.indexOf("Codex"));
-    assert.deepEqual(servers.slice(0, 4), ["tdei-*-dev", "tdei-*-staging", "tdei-*-production", "tdei-core-dev"]);
-    assert.ok(html.indexOf('id="tdei-npx"') < html.indexOf('aria-label="Command builder"'));
-    // Commands wrap (no horizontal scroll hides the tail) and the cleanup
-    // command is labelled Remove, not mistaken for a second install line.
+    // Step 1: environment + connectors. Step 2: method + purpose (+ client/os).
+    // Step 3: one generated command.
+    for (const id of [
+      "tdei-env",
+      "tdei-spec",
+      "tdei-method",
+      "tdei-action",
+      "tdei-harness",
+      "tdei-os",
+      "tdei-command",
+      "tdei-hint",
+    ]) {
+      assert.match(html, new RegExp(`id="${id}"`), `gateway page must render #${id}`);
+    }
+    for (const env of ["dev", "stage", "prod"]) {
+      assert.match(html, new RegExp(`<option value="${env}">`), `env dropdown must offer ${env}`);
+    }
+    // Commands wrap (no horizontal scroll hides the tail).
     assert.match(html, /white-space: pre-wrap/);
     assert.doesNotMatch(html, /overflow-x: auto/);
-    assert.ok(html.indexOf("<strong>Install</strong>") < html.indexOf('id="tdei-npx"'));
-    assert.ok(html.indexOf("<strong>Remove</strong>") < html.indexOf("setup cleanup"));
-    assert.doesNotMatch(html, /The line above removes/);
-    assert.match(html, /"with":\["tdei-workspace-dev"\]/);
-    assert.match(html, /"with":\["tdei-workspace-stage"\]/);
-    assert.match(html, /"with":\["tdei-workspace-prod"\]/);
+    assert.doesNotMatch(html, /id="tdei-npx"/);
+    assert.doesNotMatch(html, /id="tdei-details"/);
+    // Connector choices resolve to the right entries: both installs the core
+    // setup plus the workspace companion, Remove maps to the global cleanup.
+    assert.match(html, /"workspace":\{"name":"tdei-workspace-dev"/);
+    assert.match(html, /\?with=' \+|with=.*\.join/);
+    assert.match(html, /TDEI_NPX_PREFIX \+ ' cleanup'/);
+    // One copy button per generated command plus restarts + sign-in explanation.
+    assert.match(html, /Restart required/);
+    assert.match(html, /first call starts the TDEI sign-in/);
   } finally {
     rmSync(sp, { recursive: true, force: true });
   }

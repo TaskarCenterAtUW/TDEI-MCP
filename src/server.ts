@@ -1,3 +1,4 @@
+import { resolveTdeiEnvironment } from "./tdei-shared/web-ui-handoffs.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
@@ -144,7 +145,10 @@ export async function createServer(
       version: BUILD.serverVersion,
     },
     {
-      instructions: tdeiServerInstructions(profile),
+      instructions: tdeiServerInstructions(
+        profile,
+        resolveTdeiEnvironment({ ...process.env, TDEI_API_URL: process.env.TDEI_API_URL ?? getConfig().apiUrl }),
+      ),
     },
   );
   const openApiToolsLifecycle = new OpenApiToolsLifecycle(
@@ -237,7 +241,8 @@ export async function createServer(
                   status: "login_pending",
                   loginUrl: login.loginUrl,
                   callbackUrl: login.callbackUrl,
-                  message: "Open loginUrl in your browser to sign in to TDEI.",
+                  message:
+                    "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead.",
                 },
                 null,
                 2,

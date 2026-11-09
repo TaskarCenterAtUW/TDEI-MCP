@@ -1,6 +1,10 @@
 import { resolveTdeiServerProfile, type TdeiServerProfile } from "./intents/server-instructions.js";
 import { installCopy } from "./tdei-shared/install-copy.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { buildRelayProgram, RELAY_PORT, RELAY_TARGETS_NAME } from "./setup/relay.js";
+
+/** Relay source baked into installer scripts (fallback list empty: the installer writes the targets file first). */
+const EMBEDDED_RELAY_SOURCE = JSON.stringify(buildRelayProgram([], RELAY_PORT));
 
 export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
 
@@ -537,40 +541,28 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
   const relayDir = path.join(home, ".tdei-mcp");
   fs.mkdirSync(relayDir, { recursive: true });
   const relayScript = path.join(relayDir, "sso-callback-relay.cjs");
-  const relayCode = \`const http = require("node:http");
-const targetBase = \${JSON.stringify(remoteCallbackUrl)};
-const port = Number(\${JSON.stringify(callbackPortRaw)}) || 8765;
-// One-shot: quit as soon as the browser has been handed the callback, or after 300s if no sign-in happens.
-const IDLE_MS = 300000;
-const idle = setTimeout(() => process.exit(0), IDLE_MS);
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
-  if (url.pathname === "/callback" || url.pathname === "/auth/callback") {
-    const dest = new URL(targetBase);
-    dest.search = url.search;
-    res.writeHead(302, { Location: dest.toString(), "Cache-Control": "no-store" });
-    res.end(() => { clearTimeout(idle); setTimeout(() => process.exit(0), 200); });
-    return;
-  }
-  if (url.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, targetBase }));
-    return;
-  }
-  res.writeHead(404);
-  res.end("Not found");
-});
-server.on("error", () => process.exit(0));
-server.listen(port, "127.0.0.1");
-\`;
-  fs.writeFileSync(relayScript, relayCode, "utf-8");
+  const relaySource = ${EMBEDDED_RELAY_SOURCE};
+  // One relay serves every environment: merge this gateway into the shared
+  // targets file (most-recent-first) before (re)writing the script. The
+  // running relay — if any — picks the updated file up on the next callback.
+  const relayTargetsFile = path.join(relayDir, ${JSON.stringify(RELAY_TARGETS_NAME)});
+  let relayCallbacks = [];
+  try {
+    const parsedTargets = JSON.parse(fs.readFileSync(relayTargetsFile, "utf-8"));
+    if (parsedTargets && typeof parsedTargets === "object" && Array.isArray(parsedTargets.callbacks)) {
+      relayCallbacks = parsedTargets.callbacks.filter(function (entry) { return typeof entry === "string" && entry.length > 0; });
+    }
+  } catch {}
+  relayCallbacks = [remoteCallbackUrl].concat(relayCallbacks.filter(function (entry) { return entry !== remoteCallbackUrl; })).slice(0, 5);
+  try { fs.writeFileSync(relayTargetsFile, JSON.stringify({ callbacks: relayCallbacks }, null, 2) + "\\n", "utf-8"); } catch {}
+  fs.writeFileSync(relayScript, relaySource, "utf-8");
   const child = spawn(process.execPath, [relayScript], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
   });
   child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback -> \${remoteCallbackUrl}\`);
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (one-shot: quits after the login; forwards to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 
