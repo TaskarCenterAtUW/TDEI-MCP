@@ -1,7 +1,7 @@
 import { resolveTdeiServerProfile, type TdeiServerProfile } from "./intents/server-instructions.js";
 import { installCopy } from "./tdei-shared/install-copy.js";
 import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
-import { buildRelayProgram, RELAY_PORT, RELAY_TARGETS_NAME } from "./setup/relay.js";
+import { buildRelayProgram, RELAY_PID_NAME, RELAY_PORT, RELAY_TARGETS_NAME } from "./setup/relay.js";
 
 /** Relay source baked into installer scripts (fallback list empty: the installer writes the targets file first). */
 const EMBEDDED_RELAY_SOURCE = JSON.stringify(buildRelayProgram([], RELAY_PORT));
@@ -556,13 +556,21 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
   relayCallbacks = [remoteCallbackUrl].concat(relayCallbacks.filter(function (entry) { return entry !== remoteCallbackUrl; })).slice(0, 5);
   try { fs.writeFileSync(relayTargetsFile, JSON.stringify({ callbacks: relayCallbacks }, null, 2) + "\\n", "utf-8"); } catch {}
   fs.writeFileSync(relayScript, relaySource, "utf-8");
+  // Replace a relay from an earlier install so it runs the current program
+  // (the pid is written next to the script by the relay itself).
+  try {
+    const oldPid = Number.parseInt(fs.readFileSync(path.join(relayDir, ${JSON.stringify(RELAY_PID_NAME)}), "utf-8").trim(), 10);
+    if (Number.isInteger(oldPid) && oldPid > 0) {
+      try { process.kill(oldPid); } catch {}
+    }
+  } catch {}
   const child = spawn(process.execPath, [relayScript], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
   });
   child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (quits after 5 minutes idle; redirects the browser to this gateway and any other installed TDEI gateway)\`);
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (stays running so client-initiated sign-ins always find it; redirects the browser to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 

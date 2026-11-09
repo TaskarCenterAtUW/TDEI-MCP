@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 
 import { TDEI_SSO_CLIENT_ID } from "../config.js";
 import { REGISTERED_SSO_REDIRECT_URI } from "../sso-public-callback.js";
-import { renderSsoErrorPage } from "../auth/sso-callback-page.js";
+import { renderSsoFailurePage, renderSsoPreflightPage, type SsoFailureKind } from "../auth/sso-callback-page.js";
 import type { TokenResponse } from "../auth/types.js";
 
 const COOKIE_NAME = "tdei_oauth";
@@ -293,7 +293,7 @@ function textResult(status: number, body: string, extraHeaders?: Record<string, 
   };
 }
 
-function pageResult(status: number, heading: string, message: string): OAuthHttpResult {
+function htmlResult(status: number, body: string): OAuthHttpResult {
   return {
     status,
     headers: {
@@ -301,7 +301,7 @@ function pageResult(status: number, heading: string, message: string): OAuthHttp
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
-    body: renderSsoErrorPage(heading, message),
+    body,
   };
 }
 
@@ -403,15 +403,11 @@ async function authorize(input: OAuthDispatchInput, secure: boolean): Promise<OA
     codeChallenge: challenge,
     exp: Date.now() + COOKIE_TTL_SECONDS * 1000,
   };
-  return {
-    status: 302,
-    headers: {
-      Location: ssoRedirectUrl(input.apiUrl),
-      "Set-Cookie": issueOAuthCookie(pending, input.apiUrl, secure),
-      "Cache-Control": "no-store",
-    },
-    body: "",
-  };
+  const page = htmlResult(
+    200,
+    renderSsoPreflightPage(ssoRedirectUrl(input.apiUrl), new URL("/health", REGISTERED_SSO_REDIRECT_URI).toString()),
+  );
+  return { ...page, headers: { ...page.headers, "Set-Cookie": issueOAuthCookie(pending, input.apiUrl, secure) } };
 }
 
 async function token(input: OAuthDispatchInput): Promise<OAuthHttpResult> {
@@ -458,15 +454,15 @@ export async function oauthCallbackResult(input: {
   const secure = input.origin.startsWith("https://");
   const pending = readOAuthCookie(input.cookieHeader, input.apiUrl, input.slug);
   if (!pending) return undefined;
-  const fail = (status: number, heading: string, message: string): OAuthHttpResult => {
-    const page = pageResult(status, heading, message);
+  const fail = (status: number, kind: SsoFailureKind): OAuthHttpResult => {
+    const page = htmlResult(status, renderSsoFailurePage(kind));
     return { ...page, headers: { ...page.headers, "Set-Cookie": clearOAuthCookie(secure) } };
   };
   const providerError = input.url.searchParams.get("error");
-  if (providerError) return fail(401, "Sign-in was declined", "The TDEI sign-in was declined before it completed.");
+  if (providerError) return fail(401, providerError === "access_denied" ? "declined" : "failed");
   const code = input.url.searchParams.get("code")?.trim() ?? "";
   const state = input.url.searchParams.get("state")?.trim() ?? "";
-  if (!code || !state) return fail(400, "Sign-in callback is incomplete", "The callback is missing its code or state.");
+  if (!code || !state) return fail(400, "failed");
   try {
     const tokens = await input.exchangeCode(code, state);
     const issued = sealAuthorizationCode(tokens, pending.redirectUri, pending.codeChallenge);
@@ -483,7 +479,7 @@ export async function oauthCallbackResult(input: {
       body: "",
     };
   } catch {
-    return fail(401, "Sign-in could not be completed", "TDEI could not complete this sign-in.");
+    return fail(401, "expired");
   }
 }
 

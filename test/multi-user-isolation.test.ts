@@ -70,8 +70,8 @@ test("gateway: one user's saved login is never handed to the next person", async
   try {
     // User B starts a login. They must be sent to SSO, not given A's tokens.
     const res = await authorize(handle.url, "tdei-core-dev");
-    assert.equal(res.status, 302);
-    const location = res.headers.get("location") ?? "";
+    assert.equal(res.status, 200);
+    const location = (await res.text()).match(/var loginUrl = ("[^"]*");/)?.[1] ?? "";
     assert.match(location, /api\/v1\/sso-redirect/, "B must authenticate as themselves");
     assert.ok(!location.includes("code="), "no sealed authorization code for A's session");
   } finally {

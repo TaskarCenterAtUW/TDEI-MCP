@@ -7,7 +7,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { buildRelayProgram, mergeRelayTargets, RELAY_PORT, writeRelayFiles } from "../src/setup/relay.js";
+import {
+  buildRelayProgram,
+  mergeRelayTargets,
+  RELAY_PORT,
+  stopCallbackRelay,
+  writeRelayFiles,
+} from "../src/setup/relay.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +42,8 @@ test("relay program is syntactically valid and pins the single loopback port", a
     assert.match(src, /const port = 8765;/);
     assert.match(src, /sso-callback-targets\.json/);
     assert.match(src, /sso-callback-relay\.pid/);
+    // It must stay up: client-initiated OAuth cannot start it on demand.
+    assert.doesNotMatch(src, /IDLE_MS/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -171,6 +179,23 @@ test("relay redirects the browser so each gateway receives its own login cookie"
   } finally {
     relay?.kill();
     for (const server of gateways) await new Promise((resolve) => server.close(resolve));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("stopCallbackRelay stops the pid recorded by the previous install", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-relay-stop-"));
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(home, ".tdei-mcp"), { recursive: true });
+    writeFileSync(join(home, ".tdei-mcp", "sso-callback-relay.pid"), String(child.pid), "utf-8");
+    assert.equal(stopCallbackRelay(home), true);
+    await exited;
+    assert.equal(child.signalCode, "SIGTERM");
+  } finally {
+    child.kill();
     rmSync(home, { recursive: true, force: true });
   }
 });

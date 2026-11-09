@@ -29,10 +29,15 @@ test("installer relays the registered loopback callback to the gateway", () => {
   assert.match(js, /127\.0\.0\.1/);
 });
 
-test("installer relay is on-demand and one-shot: quits after 300s idle", () => {
+test("installer relay stays running for client-initiated sign-ins", () => {
   const js = getClientSetupJs();
-  assert.match(js, /IDLE_MS = 300000/);
-  assert.match(js, /process\.exit\(0\)/);
+  // Client-initiated OAuth (Claude Desktop etc.) opens the loopback callback
+  // with no agent hook to start anything, so the relay must not self-exit.
+  assert.doesNotMatch(js, /IDLE_MS/);
+  assert.doesNotMatch(js, /setTimeout\(\(\) => process\.exit/);
+  // A reinstall replaces a relay from the previous install.
+  assert.match(js, /sso-callback-relay\.pid/);
+  assert.match(js, /process\.kill\(oldPid\)/);
 });
 
 test("installer relay hands the browser to every installed gateway in turn", () => {
