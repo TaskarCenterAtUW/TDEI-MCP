@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { WebStandardStreamableHTTPServerTransport, type McpServer } from "@modelcontextprotocol/server";
 
 import { getConfig, TdeiConfigError, TDEI_SSO_CLIENT_ID } from "./config.js";
-import { AuthManager, injectAccessToken, sanitizeAuthErrorDetail } from "./auth/auth-manager.js";
+import { AuthManager, injectAccessToken } from "./auth/auth-manager.js";
 import { createHttpSemanticServer, createReadyHttpSemanticServer } from "./http-semantic-server.js";
 import { renderStatusPage } from "./http-status-page.js";
 import { checkHealth } from "./server.js";
@@ -38,7 +38,12 @@ import {
 import { BUILD } from "./build-info.js";
 import { requestBearer } from "./auth/request-bearer.js";
 import { loadConfigFile } from "./config-file.js";
-import { renderSsoErrorPage, renderSsoRelayRetryPage, renderSsoResultPage } from "./auth/sso-callback-page.js";
+import {
+  renderSsoErrorPage,
+  renderSsoFailurePage,
+  renderSsoRelayRetryPage,
+  renderSsoResultPage,
+} from "./auth/sso-callback-page.js";
 import { withGatewaySignIn } from "./intents/instructions/tdei-shared-instructions.js";
 import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-openapi-tools.js";
 import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
@@ -781,10 +786,7 @@ export async function serveHttp(
             // callback to the next installed gateway instead of dead-ending
             // here. The response stays 404 so nginx can try sibling
             // connectors first; only the last child's page reaches the user.
-            let body = renderSsoErrorPage(
-              "No sign-in in progress",
-              "This server has no TDEI login waiting for that callback. It may have finished already, timed out, or belong to another server.",
-            );
+            let body = renderSsoFailurePage("expired");
             if (url.searchParams.has(RELAY_TRY_PARAM)) {
               const next = new URL(REGISTERED_SSO_REDIRECT_URI);
               next.search = url.search;
@@ -828,14 +830,13 @@ export async function serveHttp(
               "Cache-Control": "no-store",
             });
             response.end(renderSsoResultPage(loggingOut ? "logout" : "login"));
-          } catch (error) {
-            const detail = sanitizeAuthErrorDetail(error instanceof Error ? error.message : String(error));
+          } catch {
             response.writeHead(401, {
               "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end(renderSsoErrorPage("Sign-in could not be completed", `${detail}.`));
+            response.end(renderSsoFailurePage("failed"));
           }
           return;
         }
