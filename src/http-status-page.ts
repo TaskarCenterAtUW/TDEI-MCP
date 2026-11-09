@@ -2,8 +2,8 @@ import type { TdeiServerProfile } from "./intents/server-instructions.js";
 import { installCopy } from "./tdei-shared/install-copy.js";
 import { BUILD } from "./build-info.js";
 import { clientMcpName } from "./http-setup-script.js";
-import { publicAuthCallbackUrl, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
-import { npxSetupCommand, setupEnvForServer } from "./setup/targets.js";
+import { REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { npxSetupCommand, SETUP_SERVER_NAMES, setupEnvForServer } from "./setup/targets.js";
 
 interface StatusPageUrls {
   origin: string;
@@ -51,20 +51,13 @@ export function renderStatusPage(
   // fetch; the status table refreshes it from GET /health.
   const buildVersion = BUILD.sha && BUILD.sha !== "unknown" ? `${BUILD.version}+${BUILD.sha}` : BUILD.version;
   const copyIcons = `<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 5.5v-3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.5"/></svg><svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  // One-line npx installer for this server's environment (core + workspace together).
-  const npxEnv = setupEnvForServer(mcpName);
+  // This page serves one environment; the installer still lets the user pick
+  // which connectors of that environment to add.
+  const defaultEnv = setupEnvForServer(mcpName) ?? "dev";
   const npxPrefix = npxSetupCommand(BUILD.sha);
-  const npxCommand = npxEnv ? `${npxPrefix} --env ${npxEnv} --gateway ${urls.origin}` : undefined;
-  const npxBlock = npxCommand
-    ? `<h3>Quick install with npx</h3>
-<p class="muted">Detects the MCP clients installed on this machine (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor), shows what it will change, and asks before writing. Installs the core and workspace connectors for this environment. Add <code>--profile ${e(profile)}</code> to install only ${e(mcpName)}. Needs Node 22+.</p>
-<p class="cmd-label"><strong>Install</strong> (adds the connectors):</p>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx command">${copyIcons}</button><pre id="tdei-npx">${e(npxCommand)}</pre></div>
-<p class="cmd-label"><strong>Remove</strong> (only run this to uninstall; it does <em>not</em> install anything):</p>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy npx cleanup command">${copyIcons}</button><pre>${e(npxPrefix)} cleanup</pre></div>
-<p class="muted">The Remove command removes every <code>tdei</code> / <code>tdei-*</code> entry from the detected clients and keeps all other servers.</p>
-<h3>Or install with a script</h3>`
-    : "";
+  const defaultCommand = `${npxPrefix} --env ${defaultEnv} --gateway ${urls.origin}`;
+  const entryNames = SETUP_SERVER_NAMES[defaultEnv];
+  const defaultEntries = `${entryNames.core}, ${entryNames.workspace}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -86,10 +79,10 @@ button { cursor: pointer; }
 .muted { opacity: 0.75; font-size: 13px; }
 .build-line { font-size: 13px; margin: -4px 0 14px; }
 .build-line code { word-break: break-all; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.step { margin: 20px 0 4px; font-size: 16px; }
+.step-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: #8883; font-size: 13px; margin-right: 8px; vertical-align: baseline; }
 .cmd { position: relative; }
 .cmd pre { padding-right: 52px; margin: 0; }
-.cmd-label { margin: 14px 0 6px; font-size: 14px; }
 .copy-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px; border: 1px solid #8886; background: #fff; color: #606060; opacity: 0; transition: opacity 0.15s ease-in-out; }
 @media (prefers-color-scheme: dark) { .copy-btn { background: #28282e; color: #b8b8c0; border-color: #555; } }
 .cmd:hover .copy-btn, .cmd:focus-within .copy-btn, .copy-btn:focus-visible { opacity: 1; }
@@ -101,11 +94,11 @@ button { cursor: pointer; }
 .copy-btn.copied { opacity: 1; color: #22a06b; }
 .copy-btn.copied .icon-check { display: block; }
 .copy-btn.copied .icon-copy { display: none; }
-.copy-btn.inline { position: static; margin-left: 8px; width: 28px; height: 28px; vertical-align: middle; opacity: 1; }
-.detail-cell code { word-break: break-all; }
 .builder { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
 .builder label { display: block; font-size: 13px; font-weight: 600; }
 .builder select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font-size: 14px; border-radius: 8px; border: 1px solid #8886; background: inherit; color: inherit; }
+.next ol { margin: 8px 0; padding-left: 22px; }
+.next li { margin: 6px 0; }
 </style>
 </head>
 <body>
@@ -117,18 +110,49 @@ button { cursor: pointer; }
 <section class="card" aria-label="Server status">
 <h2><span id="dot" class="dot pending"></span>Server status <span id="ok" class="muted">checking&hellip;</span></h2>
 <table>
-<tbody id="rows"><tr><td>Loading <code>/health</code>&hellip;</td></tr></tbody>
+<tbody id="rows"><tr><td>Loading <code>/health</code>&hellip;</td></tr>
 </table>
 <p class="muted">Auto-refreshes every 15s. Source: <code>${e(urls.healthUrl)}</code> &middot; <span id="updated"></span></p>
 </section>
 
 <section class="card" aria-label="Install">
 <h2>Install on a client machine</h2>
-<p class="muted">${e(mcpName)}: ${e(copy.summary)}</p>
-<p>No tokens are written to disk. Pick your client, OS, and command below — copy the generated command and run it as-is on the client machine. After setup, ask your agent to use any TDEI tool: the first call starts the TDEI sign-in — approve the browser login and the call is retried. (Claude Code: run <code>/mcp</code> and authenticate this server if no prompt appears.)</p>
-${npxBlock}
-<div class="builder" role="group" aria-label="Command builder">
-<label>Client / harness
+<p class="muted">No tokens are written to disk. Three steps, about two minutes. ${e(copy.summary)}</p>
+
+<h3 class="step"><span class="step-num">1</span>What to install</h3>
+<div class="builder" role="group" aria-label="Environment and connectors">
+<label>Environment
+<select id="tdei-env">
+<option value="dev">Development (dev)</option>
+<option value="stage">Staging (stage)</option>
+<option value="prod">Production (prod)</option>
+</select>
+</label>
+<label>Connectors
+<select id="tdei-spec">
+<option value="both">Both: core + workspace (recommended)</option>
+<option value="core">Core only</option>
+<option value="workspace">Workspace only</option>
+</select>
+</label>
+</div>
+
+<h3 class="step"><span class="step-num">2</span>How to install</h3>
+<div class="builder" role="group" aria-label="Install method">
+<label>Method
+<select id="tdei-method">
+<option value="npx">Automatic with npx (recommended)</option>
+<option value="script">Per-client script</option>
+</select>
+</label>
+<label>Purpose
+<select id="tdei-action">
+<option value="install">Install (first-time setup)</option>
+<option value="update">Update / reinstall (fixes most issues)</option>
+<option value="uninstall">Remove (uninstall)</option>
+</select>
+</label>
+<label data-script-only>Client / harness
 <select id="tdei-harness">
 <option value="codex">Codex</option>
 <option value="opencode">OpenCode</option>
@@ -138,56 +162,36 @@ ${npxBlock}
 <option value="cursor">Cursor</option>
 </select>
 </label>
-<label>Operating system
+<label data-script-only>Operating system
 <select id="tdei-os">
 <option value="sh">macOS / Linux</option>
 <option value="ps1">Windows</option>
 </select>
 </label>
-<label>Command
-<select id="tdei-action">
-<option value="install">Install</option>
-<option value="update">Update / reinstall (fixes most issues)</option>
-<option value="uninstall">Uninstall</option>
-</select>
-</label>
 </div>
-<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command">curl -fsSL ${e(urls.setupBase)}/codex | sh</pre></div>
-<p class="muted" id="tdei-hint">Writes the ${e(mcpName)} entry for your client. Needs sh + node 22+ on the client machine.</p>
-<h3>Restart required — do this right after the installer</h3>
-<p>The client only picks up the new <code>${e(mcpName)}</code> entry on a full restart. Closing a chat window is not enough — restart the app, then start a <strong>new</strong> chat/session:</p>
+
+<h3 class="step"><span class="step-num">3</span>Run this command</h3>
+<p class="muted">Copy and run it as-is on the client machine. Needs <code>node 22+</code> (<code>sh</code> on macOS / Linux, PowerShell on Windows).</p>
+<div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command">${e(defaultCommand)}</pre></div>
+<p class="muted" id="tdei-hint">Installs <code>${e(defaultEntries)}</code>. Detects your MCP clients, shows what it will change, and asks before writing.</p>
+
+<h3>What happens next</h3>
+<div class="next">
+<ol>
+<li><strong>Restart required.</strong> The client only picks up the new <code data-entry-name>${e(defaultEntries)}</code> entry on a full restart. Closing a chat window is not enough &mdash; quit the app fully, reopen it, then start a <strong>new</strong> chat/session.</li>
+<li><strong>Sign in when asked.</strong> Ask your agent to use any TDEI tool (for example, <code>${e(copy.firstCall)}</code>). The first call starts the TDEI sign-in &mdash; approve the browser login and the call is retried. (Claude Code: run <code>/mcp</code> and authenticate this server if no prompt appears.)</li>
+</ol>
 <table>
 <tbody>
-<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code>${e(mcpName)}</code>).</td></tr>
+<tr><th>Codex</th><td>Quit and reopen Codex, then new chat (run <code>/mcp</code> to verify <code data-entry-name>${e(defaultEntries)}</code>).</td></tr>
 <tr><th>OpenCode</th><td>Quit and reopen OpenCode, then start a new session.</td></tr>
 <tr><th>Claude Code</th><td>Exit Claude Code and start a new session (reloads <code>~/.claude.json</code>).</td></tr>
 <tr><th>Claude Desktop</th><td>Fully quit with <code>Cmd+Q</code> (macOS) or <code>File &gt; Exit</code> (Windows), reopen it, then start a new chat.</td></tr>
 <tr><th>VS Code</th><td><code>Cmd/Ctrl+Shift+P</code> &rarr; <code>Developer: Reload Window</code> (or quit + reopen).</td></tr>
-<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code>${e(mcpName)}</code>).</td></tr>
+<tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code data-entry-name>${e(defaultEntries)}</code>).</td></tr>
 </tbody>
 </table>
-<h3>Details</h3>
-<table>
-<tbody>
-<tr><th>MCP endpoint</th><td class="detail-cell" data-copy-wrap><code>${e(urls.mcpUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy MCP endpoint">${copyIcons}</button></td></tr>
-<tr><th>Keycloak redirect</th><td class="detail-cell" data-copy-wrap><code>${e(urls.callbackUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy Keycloak redirect URL">${copyIcons}</button></td></tr>
-<tr><th>Gateway receives relay at</th><td class="detail-cell"><code>${e(publicAuthCallbackUrl(publicBaseUrl))}</code></td></tr>
-<tr><th>Health JSON</th><td class="detail-cell" data-copy-wrap><code>${e(urls.healthUrl)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy health URL">${copyIcons}</button></td></tr>
-<tr><th>Setup catalogue</th><td class="detail-cell" data-copy-wrap><code>${e(urls.setupBase)}</code><button type="button" class="copy-btn inline" data-copy title="Copy" aria-label="Copy setup catalogue URL">${copyIcons}</button></td></tr>
-</tbody>
-</table>
-</section>
-
-<section class="card" aria-label="Readme">
-<h2>Installation readme (short)</h2>
-<ol>
-<li>Pick your client, OS, and command in the builder above, copy the generated command, and run it on the <em>client</em> machine (macOS/Linux needs <code>sh</code> + <code>node 22+</code>; Windows needs PowerShell + <code>node</code>).</li>
-<li><strong>Restart the app (required):</strong> Codex/OpenCode — quit + reopen; Claude Code — new session; <strong>Claude Desktop — fully quit with <code>Cmd+Q</code> / <code>File &gt; Exit</code>, reopen, new chat</strong>; VS Code — <code>Developer: Reload Window</code>; Cursor — quit + reopen.</li>
-<li>Ask the agent to use any TDEI tool. The first call starts the sign-in: approve the browser login and the call is retried.</li>
-<li>Complete SSO in the browser, then call tools (health: <code>tdei_health</code>, status: <code>tdei_auth_status</code>). First call: <code>${e(copy.firstCall)}</code>.</li>
-<li>MCP broken later (server moved, entry stale)? Pick <em>Update / reinstall</em> in the builder, run it, restart the app, start a new chat. To remove TDEI instead, pick <em>Uninstall</em>.</li>
-</ol>
-<p class="muted">Full guide lives in <code>README.md</code> of the TDEI-MCP repo. ${e(copy.fileTransfer)}</p>
+</div>
 </section>
 </main>
 <script>
@@ -231,26 +235,69 @@ async function copyTextFromButton(btn) {
 document.querySelectorAll('[data-copy]').forEach((btn) => {
   btn.addEventListener('click', () => copyTextFromButton(btn));
 });
+const TDEI_ORIGIN = ${JSON.stringify(urls.origin).replace(/</g, "\\u003c")};
 const TDEI_SETUP_BASE = ${JSON.stringify(urls.setupBase).replace(/</g, "\\u003c")};
 const TDEI_MCP_NAME = ${JSON.stringify(mcpName).replace(/</g, "\\u003c")};
+const TDEI_NPX_PREFIX = ${JSON.stringify(npxPrefix).replace(/</g, "\\u003c")};
+const TDEI_DEFAULT_ENV = ${JSON.stringify(defaultEnv).replace(/</g, "\\u003c")};
+const TDEI_SERVER_NAMES = ${JSON.stringify(SETUP_SERVER_NAMES).replace(/</g, "\\u003c")};
 const TDEI_BUILD = ${JSON.stringify(buildVersion).replace(/</g, "\\u003c")};
-const TDEI_ACTION_HINTS = {
-  install: 'Writes the ' + TDEI_MCP_NAME + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).',
-  update: 'Safe to re-run — replaces only the ' + TDEI_MCP_NAME + ' entry, keeps every other entry. Run it, restart the app, start a new chat.',
-  uninstall: 'Removes only the ' + TDEI_MCP_NAME + ' entry — every other MCP server entry is kept. Restart the app afterwards.'
-};
+function tdeiNames(env, spec) {
+  const pair = TDEI_SERVER_NAMES[env] || TDEI_SERVER_NAMES[TDEI_DEFAULT_ENV];
+  if (spec === 'core') return { primary: pair.core, extra: [] };
+  if (spec === 'workspace') return { primary: pair.workspace, extra: [] };
+  return { primary: pair.core, extra: [pair.workspace] };
+}
+function tdeiSetupBase(primary) {
+  // This page knows its own setup path exactly; sibling environments follow
+  // the conventional /<entry-name>/mcp layout on the same gateway.
+  if (primary === TDEI_MCP_NAME) return TDEI_SETUP_BASE;
+  return TDEI_ORIGIN + '/' + primary + '/mcp/setup';
+}
+function tdeiHint(method, action, entryNames) {
+  if (method === 'npx') {
+    if (action === 'uninstall') return 'Removes every tdei / tdei-* entry from the detected clients (all environments) and keeps all other servers. Only run this to uninstall.';
+    if (action === 'update') return 'Re-run of the install for ' + entryNames + ': replaces only those entries, keeps every other entry. Restart the app afterwards.';
+    return 'Installs ' + entryNames + '. Detects your MCP clients, shows what it will change, and asks before writing. Needs Node 22+.';
+  }
+  if (action === 'update') return 'Safe to re-run — replaces only the ' + entryNames + ' entry, keeps every other entry. Run it, restart the app, start a new chat.';
+  if (action === 'uninstall') return 'Removes only the ' + entryNames + ' entry — every other MCP server entry is kept. Restart the app afterwards.';
+  return 'Writes the ' + entryNames + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
+}
+function tdeiQuote(url) {
+  return url.indexOf('?') === -1 ? url : "'" + url + "'";
+}
 function tdeiBuildCommand() {
+  const env = document.getElementById('tdei-env').value;
+  const spec = document.getElementById('tdei-spec').value;
+  const method = document.getElementById('tdei-method').value;
+  const action = document.getElementById('tdei-action').value;
   const client = document.getElementById('tdei-harness').value;
   const os = document.getElementById('tdei-os').value;
-  const action = document.getElementById('tdei-action').value;
-  const scriptPath = action === 'install' ? client : action + '/' + client;
-  const cmd = os === 'ps1'
-    ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + TDEI_SETUP_BASE + '/' + scriptPath + '.ps1 | iex'
-    : 'curl -fsSL ' + TDEI_SETUP_BASE + '/' + scriptPath + ' | sh';
+  const names = tdeiNames(env, spec);
+  const entryNames = spec === 'both' ? names.primary + ', ' + names.extra.join(', ') : names.primary;
+  let cmd;
+  if (method === 'npx') {
+    cmd = action === 'uninstall'
+      ? TDEI_NPX_PREFIX + ' cleanup'
+      : TDEI_NPX_PREFIX + ' --env ' + env + (spec === 'both' ? '' : ' --profile ' + spec) + ' --gateway ' + TDEI_ORIGIN;
+  } else {
+    const setupBase = tdeiSetupBase(names.primary);
+    const scriptPath = action === 'install' ? client : action + '/' + client;
+    const withQuery = names.extra.length > 0 ? '?with=' + names.extra.join(',') : '';
+    const url = setupBase + '/' + scriptPath + withQuery;
+    cmd = os === 'ps1'
+      ? 'Set-ExecutionPolicy Bypass -Scope Process -Force; irm ' + tdeiQuote(url + '.ps1') + ' | iex'
+      : 'curl -fsSL ' + tdeiQuote(url) + ' | sh';
+  }
   document.getElementById('tdei-command').textContent = cmd;
-  document.getElementById('tdei-hint').textContent = TDEI_ACTION_HINTS[action] || '';
+  document.getElementById('tdei-hint').textContent = tdeiHint(method, action, entryNames);
+  document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = entryNames; });
+  const showClient = method === 'script';
+  document.querySelectorAll('[data-script-only]').forEach((el) => { el.style.display = showClient ? '' : 'none'; });
 }
-['tdei-harness', 'tdei-os', 'tdei-action'].forEach((id) => {
+document.getElementById('tdei-env').value = TDEI_DEFAULT_ENV;
+['tdei-env', 'tdei-spec', 'tdei-method', 'tdei-harness', 'tdei-os', 'tdei-action'].forEach((id) => {
   document.getElementById(id).addEventListener('change', tdeiBuildCommand);
 });
 tdeiBuildCommand();

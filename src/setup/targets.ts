@@ -54,6 +54,16 @@ export const SETUP_ENV_LABELS: Record<SetupEnv, string> = {
   prod: "tdei-*-production",
 };
 
+/** Human-readable environment names for the install pages. */
+export const SETUP_ENV_NAMES: Record<SetupEnv, string> = {
+  dev: "Development",
+  stage: "Staging",
+  prod: "Production",
+};
+
+/** Hosted connector entry names per environment (used by the install pages to build script URLs). */
+export const SETUP_SERVER_NAMES: Record<SetupEnv, { core: string; workspace: string }> = SERVER_NAMES;
+
 /** Which environment a server name belongs to (tdei-core-dev -> dev, tdei-workspace-stage -> stage, ...). */
 export function setupEnvForServer(name: string): SetupEnv | undefined {
   for (const env of SETUP_ENVS) {

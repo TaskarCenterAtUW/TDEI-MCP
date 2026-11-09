@@ -191,7 +191,7 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
                     loginUrl: login.loginUrl,
                     callbackUrl: browserRedirectUri ?? login.callbackUrl,
                     message:
-                      "Open loginUrl in your browser to sign in to TDEI. Keycloak returns the browser to http://127.0.0.1:8765/callback. The client installer runs a local relay there that forwards the login to this gateway. When the page says login complete, return here.",
+                      "Sign-in needs the local callback relay on the CLIENT machine (one-shot: it quits by itself after the login). Start it in the background first: `node ~/.tdei-mcp/sso-callback-relay.cjs` (sh: append `&`; PowerShell: `Start-Process -NoNewWindow node $HOME/.tdei-mcp/sso-callback-relay.cjs`). If that file is missing, re-run your TDEI install command. Then open loginUrl in your browser and approve the sign-in. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead.",
                   },
                   null,
                   2,

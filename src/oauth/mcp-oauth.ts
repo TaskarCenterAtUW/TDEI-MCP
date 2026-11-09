@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 
 import { TDEI_SSO_CLIENT_ID } from "../config.js";
 import { REGISTERED_SSO_REDIRECT_URI } from "../sso-public-callback.js";
+import { renderSsoErrorPage } from "../auth/sso-callback-page.js";
 import type { TokenResponse } from "../auth/types.js";
 
 const COOKIE_NAME = "tdei_oauth";
@@ -292,6 +293,18 @@ function textResult(status: number, body: string, extraHeaders?: Record<string, 
   };
 }
 
+function pageResult(status: number, heading: string, message: string): OAuthHttpResult {
+  return {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+    body: renderSsoErrorPage(heading, message),
+  };
+}
+
 export async function dispatchOAuth(input: OAuthDispatchInput): Promise<OAuthHttpResult | undefined> {
   const endpoints = oauthEndpoints(input.origin, input.slug, input.mcpPath);
   const pathname = input.url.pathname;
@@ -445,15 +458,15 @@ export async function oauthCallbackResult(input: {
   const secure = input.origin.startsWith("https://");
   const pending = readOAuthCookie(input.cookieHeader, input.apiUrl, input.slug);
   if (!pending) return undefined;
-  const fail = (status: number, body: string): OAuthHttpResult =>
-    textResult(status, body, {
-      "Set-Cookie": clearOAuthCookie(secure),
-    });
+  const fail = (status: number, heading: string, message: string): OAuthHttpResult => {
+    const page = pageResult(status, heading, message);
+    return { ...page, headers: { ...page.headers, "Set-Cookie": clearOAuthCookie(secure) } };
+  };
   const providerError = input.url.searchParams.get("error");
-  if (providerError) return fail(401, "TDEI sign-in was declined.");
+  if (providerError) return fail(401, "Sign-in was declined", "The TDEI sign-in was declined before it completed.");
   const code = input.url.searchParams.get("code")?.trim() ?? "";
   const state = input.url.searchParams.get("state")?.trim() ?? "";
-  if (!code || !state) return fail(400, "TDEI sign-in callback is missing code or state.");
+  if (!code || !state) return fail(400, "Sign-in callback is incomplete", "The callback is missing its code or state.");
   try {
     const tokens = await input.exchangeCode(code, state);
     const issued = sealAuthorizationCode(tokens, pending.redirectUri, pending.codeChallenge);
@@ -470,7 +483,7 @@ export async function oauthCallbackResult(input: {
       body: "",
     };
   } catch {
-    return fail(401, "TDEI sign-in could not be completed.");
+    return fail(401, "Sign-in could not be completed", "TDEI could not complete this sign-in.");
   }
 }
 

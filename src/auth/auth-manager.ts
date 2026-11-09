@@ -1,9 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 import { getConfig, TDEI_SSO_CLIENT_ID } from "../config.js";
 import { clearSharedSession, expiresAtForTokens, loadSharedSession, saveSharedSession } from "./shared-session.js";
 import { preflightSsoLogin } from "./sso-preflight.js";
+import { renderSsoErrorPage, renderSsoResultPage } from "./sso-callback-page.js";
+import { RELAY_PID_NAME, relayDir } from "../setup/relay.js";
 import type {
   AuthStatus,
   SsoLoginOptions,
@@ -34,6 +39,43 @@ const CALLBACK_SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Cache-Control": "no-store",
 } as const;
+
+function isRelayPortConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "EADDRINUSE"
+  );
+}
+
+/**
+ * Stops the TDEI SSO relay previously started on this machine (by an
+ * installer or an earlier on-demand start), if it is still running. The
+ * relay records its pid next to the targets file; anything else holding the
+ * loopback port is left alone.
+ */
+async function stopOwnRelay(): Promise<boolean> {
+  let pid: number | undefined;
+  try {
+    pid = Number.parseInt(readFileSync(join(relayDir(homedir()), RELAY_PID_NAME), "utf-8").trim(), 10);
+  } catch {
+    return false;
+  }
+  if (!Number.isInteger(pid)) return false;
+  try {
+    process.kill(pid);
+  } catch {
+    return false;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 export function sanitizeAuthErrorDetail(raw: string, maxLength = MAX_AUTH_ERROR_DETAIL_LENGTH): string {
   const withoutTags = raw.replace(/<[^>]*>/g, " ");
@@ -268,30 +310,47 @@ export class AuthManager {
           await this.completeSsoLogin(requestUrl.toString());
 
           response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-          response.end(
-            "<!doctype html><title>TDEI login complete</title><h1>Login complete</h1><p>You may close this window and return to your agent.</p>",
-          );
+          response.end(renderSsoResultPage("login"));
         } catch (error) {
           const loginError = error instanceof Error ? error : new Error(String(error));
-          response.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-          response.end(sanitizeAuthErrorDetail(loginError.message));
+          response.writeHead(401, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
+          response.end(
+            renderSsoErrorPage("Sign-in could not be completed", `${sanitizeAuthErrorDetail(loginError.message)}.`),
+          );
         }
       });
 
+      // Bind the loopback listener, retrying once after stopping our own stale
+      // SSO relay: an installer-started relay holds the same 127.0.0.1:8765
+      // port, and this login replaces it (the relay is one-shot and starts
+      // again on demand at the next login).
+      const bindLoopback = async (): Promise<void> => {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const onError = (error: Error) => {
+              listener.off("listening", onListening);
+              reject(error);
+            };
+            const onListening = () => {
+              listener.off("error", onError);
+              resolve();
+            };
+            listener.once("error", onError);
+            listener.once("listening", onListening);
+            listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
+          });
+        } catch (error) {
+          if (!isRelayPortConflict(error) || !(await stopOwnRelay())) throw error;
+          await new Promise<void>((resolve, reject) => {
+            listener.once("error", reject);
+            listener.once("listening", () => resolve());
+            listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
+          });
+        }
+      };
+
       try {
-        await new Promise<void>((resolve, reject) => {
-          const onError = (error: Error) => {
-            listener.off("listening", onListening);
-            reject(error);
-          };
-          const onListening = () => {
-            listener.off("error", onError);
-            resolve();
-          };
-          listener.once("error", onError);
-          listener.once("listening", onListening);
-          listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
-        });
+        await bindLoopback();
       } catch (error) {
         throw new Error(
           `Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`,
@@ -599,9 +658,7 @@ export class AuthManager {
 
               resolveCompletion();
               response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CALLBACK_SECURITY_HEADERS });
-              response.end(
-                "<!doctype html><title>TDEI logout complete</title><h1>Logout complete</h1><p>You may close this window and return to your agent.</p>",
-              );
+              response.end(renderSsoResultPage("logout"));
             });
 
             const onError = (error: Error) => {

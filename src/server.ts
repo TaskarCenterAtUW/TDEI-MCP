@@ -241,7 +241,8 @@ export async function createServer(
                   status: "login_pending",
                   loginUrl: login.loginUrl,
                   callbackUrl: login.callbackUrl,
-                  message: "Open loginUrl in your browser to sign in to TDEI.",
+                  message:
+                    "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead.",
                 },
                 null,
                 2,
