@@ -9,11 +9,11 @@ import { publicAuthCallbackUrl } from "../sso-public-callback.js";
  * http://127.0.0.1:8765/callback, so a small relay on the CLIENT machine
  * forwards that hit to the hosted gateway(s).
  *
- * Lifecycle is strictly on-demand: nothing starts the relay except an
- * install/update (covers the first login right after setup) or the agent at
- * login time (`tdei_sso_login` tells it the one-line start command). The
- * relay quits after 300s idle and is never kept running. Starting it twice is
- * safe: the second copy exits silently when the port is already held.
+ * Lifecycle: the installer starts the relay and it stays running. A
+ * client-initiated OAuth flow opens the browser at the loopback callback with
+ * no agent hook to start anything first, so an on-demand-only relay produces
+ * ERR_CONNECTION_REFUSED on every later login. Starting it twice is safe: a
+ * new install replaces the previous relay before binding the port.
  *
  * One relay serves every environment. Installers merge their gateway into
  * ~/.tdei-mcp/sso-callback-targets.json (most-recent-first); the relay reads
@@ -93,14 +93,13 @@ function targets() {
   return FALLBACK;
 }
 
-// One-shot: quit after 5 minutes without a callback. The relay stays up long
-// enough to bounce the browser between gateways: every hop is a browser
-// navigation (302), never a server-side proxy, because the gateway's pending
-// login lives in an origin-scoped tdei_oauth cookie that only the browser can
-// send. Proxying the callback drops that cookie and the gateway answers
-// "No sign-in in progress".
-const IDLE_MS = 300000;
-setTimeout(() => process.exit(0), IDLE_MS);
+// Long-lived listener. Client-initiated OAuth (Claude Desktop/Cursor/VS Code)
+// redirects the browser to this loopback URL without any chance for the agent
+// to start a helper first, so the relay must already be listening. It is
+// started by the installer and stays up until the machine restarts or another
+// install replaces it. Every hop is a browser navigation (302), never a
+// server-side proxy, because the gateway's pending login lives in an
+// origin-scoped tdei_oauth cookie that only the browser can send.
 try { fs.mkdirSync(relayDir, { recursive: true }); } catch {}
 try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch {}
 
@@ -158,7 +157,17 @@ const server = http.createServer((req, res) => {
   res.writeHead(404);
   res.end("Not found");
 });
-server.on("error", () => process.exit(0));
+let listenRetries = 0;
+server.on("error", (error) => {
+  // A reinstall kills the previous relay just before starting this one; give
+  // that process a moment to release the port instead of silently exiting.
+  if (error && error.code === "EADDRINUSE" && listenRetries < 20) {
+    listenRetries += 1;
+    setTimeout(() => server.listen(port, "127.0.0.1"), 250);
+    return;
+  }
+  process.exit(0);
+});
 server.listen(port, "127.0.0.1");
 `;
 }
@@ -189,10 +198,34 @@ export function writeRelayFiles(
 }
 
 /**
- * Writes the relay files and starts the relay detached. The relay quits by
- * itself after one callback or 300s idle. Returns the script path.
+ * Stops the relay this machine's previous install started, if it is still
+ * running. The pid is written next to the relay script. Used before starting
+ * a fresh relay so an install picks up the current program instead of leaving
+ * a stale listener bound to 127.0.0.1:8765.
+ */
+export function stopCallbackRelay(home: string): boolean {
+  let pid: number;
+  try {
+    pid = Number.parseInt(readFileSync(join(relayDir(home), RELAY_PID_NAME), "utf-8").trim(), 10);
+  } catch {
+    return false;
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes the relay files and starts the relay detached. It stays running so
+ * a client-initiated sign-in can reach the loopback callback at any time.
+ * Returns the script path.
  */
 export function startCallbackRelay(home: string, gatewayOrigin: string, port = RELAY_PORT): string {
+  stopCallbackRelay(home);
   const { script } = writeRelayFiles(home, gatewayOrigin, port);
   spawn(process.execPath, [script], { detached: true, stdio: "ignore", windowsHide: true }).unref();
   return script;
