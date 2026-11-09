@@ -562,7 +562,7 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
     windowsHide: true,
   });
   child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (one-shot: quits after the login; forwards to this gateway and any other installed TDEI gateway)\`);
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (quits after 5 minutes idle; redirects the browser to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 

@@ -227,6 +227,13 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
   try {
     const notThisChild = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(notThisChild.status, 404);
+    // A relay-forwarded callback bounces back to the loopback relay so it can
+    // try the next installed gateway. 404 is preserved for the nginx fan-out.
+    const bounce = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456&tdei_relay_try=1`);
+    assert.equal(bounce.status, 404);
+    const bounceBody = await bounce.text();
+    assert.match(bounceBody, /127\.0\.0\.1:8765\/callback\?code=auth-code-123/);
+    assert.match(bounceBody, /tdei_relay_try=1/);
 
     // Lazy auth: connecting and listing tools never needs a sign-in.
     const anonymousList = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));

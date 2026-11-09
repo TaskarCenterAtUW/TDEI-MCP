@@ -17,6 +17,7 @@ import {
   type SetupScriptAction,
 } from "./http-setup-script.js";
 import { isAuthCallbackPath, REGISTERED_SSO_REDIRECT_URI } from "./sso-public-callback.js";
+import { RELAY_TRY_PARAM } from "./setup/relay.js";
 import { expiresAtForTokens, saveSharedSession } from "./auth/shared-session.js";
 import { sharedSessionAllowed } from "./auth/session-sharing.js";
 import {
@@ -37,7 +38,7 @@ import {
 import { BUILD } from "./build-info.js";
 import { requestBearer } from "./auth/request-bearer.js";
 import { loadConfigFile } from "./config-file.js";
-import { renderSsoErrorPage, renderSsoResultPage } from "./auth/sso-callback-page.js";
+import { renderSsoErrorPage, renderSsoRelayRetryPage, renderSsoResultPage } from "./auth/sso-callback-page.js";
 import { withGatewaySignIn } from "./intents/instructions/tdei-shared-instructions.js";
 import { registerTdeiWorkspaceOpenApiTools } from "./tdei-workspace/register-openapi-tools.js";
 import { registerTdeiOpenApiTools } from "./tdei-core/register-openapi-tools.js";
@@ -775,17 +776,26 @@ export async function serveHttp(
           // 404 means "not this child". The gateway retries the other
           // children. A real exchange failure stays 401 so nginx stops.
           if (loginReturn && authState !== "login_pending") {
+            // A callback that came through the loopback relay carries the
+            // relay's try marker. Bounce it back so the relay can offer the
+            // callback to the next installed gateway instead of dead-ending
+            // here. The response stays 404 so nginx can try sibling
+            // connectors first; only the last child's page reaches the user.
+            let body = renderSsoErrorPage(
+              "No sign-in in progress",
+              "This server has no TDEI login waiting for that callback. It may have finished already, timed out, or belong to another server.",
+            );
+            if (url.searchParams.has(RELAY_TRY_PARAM)) {
+              const next = new URL(REGISTERED_SSO_REDIRECT_URI);
+              next.search = url.search;
+              body = renderSsoRelayRetryPage(next.toString());
+            }
             response.writeHead(404, {
               "Content-Type": "text/html; charset=utf-8",
               "X-Content-Type-Options": "nosniff",
               "Cache-Control": "no-store",
             });
-            response.end(
-              renderSsoErrorPage(
-                "No sign-in in progress",
-                "This server has no TDEI login waiting for that callback. It may have finished already, timed out, or belong to another server.",
-              ),
-            );
+            response.end(body);
             return;
           }
           if (!loginReturn && authState !== "logout_pending") {

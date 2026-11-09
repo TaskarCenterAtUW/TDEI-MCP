@@ -33,6 +33,43 @@ p { margin: 8px 0; }
 }
 
 /**
+ * Browser page served by a gateway that has no login waiting for a callback
+ * that arrived through the loopback relay. It sends the browser back to the
+ * relay with the same query so the relay can try the next known gateway.
+ * Served with status 404: nginx must still offer the callback to sibling
+ * connectors before this page is shown.
+ */
+export function renderSsoRelayRetryPage(nextUrl: string): string {
+  const href = nextUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const jsonUrl = JSON.stringify(nextUrl).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="refresh" content="0;url=${href}" />
+<title>Trying the next TDEI gateway</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; line-height: 1.5; display: flex; min-height: 90vh; align-items: center; justify-content: center; }
+.card { max-width: 520px; text-align: center; border: 1px solid #8884; border-radius: 16px; padding: 36px 32px; }
+h1 { font-size: 24px; margin: 16px 0 8px; }
+p { margin: 8px 0; }
+.muted { opacity: 0.75; font-size: 14px; }
+</style>
+</head>
+<body>
+<main class="card">
+<h1>Checking the next TDEI environment&hellip;</h1>
+<p>This gateway had no sign-in waiting for that callback. Redirecting to the next TDEI gateway.</p>
+<p class="muted">If nothing happens, <a href="${href}">continue</a>.</p>
+</main>
+<script>location.replace(${jsonUrl});</script>
+</body>
+</html>`;
+}
+
+/**
  * Browser page shown after the SSO callback finishes (login or logout).
  * Tells the user the sign-in worked and to go back to their client: the
  * agent retries the tool call that triggered the login, so nothing else is

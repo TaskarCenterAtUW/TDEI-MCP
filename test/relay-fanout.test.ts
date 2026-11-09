@@ -41,18 +41,26 @@ test("relay program is syntactically valid and pins the single loopback port", a
   }
 });
 
-function startFakeGateway(handler: (url: URL) => { status: number; body: string; location?: string }): Promise<{
+interface FakeResponse {
+  status: number;
+  body?: string;
+  headers?: Record<string, string>;
+}
+
+function startFakeGateway(
+  handler: (url: URL, headers: Record<string, string | string[] | undefined>) => FakeResponse,
+): Promise<{
   server: Server;
   url: string;
 }> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const out = handler(url);
+    const out = handler(url, req.headers);
     res.writeHead(out.status, {
       "Content-Type": "text/html; charset=utf-8",
-      ...(out.location ? { Location: out.location } : {}),
+      ...out.headers,
     });
-    res.end(out.body);
+    res.end(out.body ?? "");
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
@@ -61,6 +69,35 @@ function startFakeGateway(handler: (url: URL) => { status: number; body: string;
       resolve({ server, url: `http://127.0.0.1:${port}` });
     });
   });
+}
+
+/** Minimal browser: follows redirects and keeps cookies per origin. */
+async function browserVisit(
+  startUrl: string,
+  jar: Map<string, string>,
+): Promise<{ status: number; body: string; url: string }> {
+  let current = startUrl;
+  for (let hop = 0; hop < 10; hop += 1) {
+    const origin = new URL(current).origin;
+    const cookie = jar.get(origin);
+    const res = await fetch(current, {
+      redirect: "manual",
+      headers: cookie ? { cookie } : {},
+    });
+    for (const setCookie of res.headers.getSetCookie()) {
+      const value = setCookie.split(";")[0]?.trim();
+      if (value) jar.set(origin, value);
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) throw new Error(`redirect without Location from ${current}`);
+      current = new URL(location, current).toString();
+      await res.arrayBuffer();
+      continue;
+    }
+    return { status: res.status, body: await res.text(), url: current };
+  }
+  throw new Error(`too many redirects starting at ${startUrl}`);
 }
 
 async function runRelayOn(port: number, home: string, fallback: readonly string[]): Promise<ChildProcess> {
@@ -84,17 +121,26 @@ async function runRelayOn(port: number, home: string, fallback: readonly string[
   throw new Error(`relay did not come up on 127.0.0.1:${port}`);
 }
 
-test("relay forwards one loopback callback to the gateway holding the login", async () => {
+test("relay redirects the browser so each gateway receives its own login cookie", async () => {
   const home = mkdtempSync(join(tmpdir(), "tdei-relay-home-"));
+  const relayPort = 18765;
   let relay: ChildProcess | undefined;
   const gateways: Server[] = [];
   try {
-    const wrong = await startFakeGateway(() => ({ status: 404, body: "no pending login here" }));
+    // The first gateway has no pending login: it bounces the browser back to
+    // the relay, exactly like the real gateway's no-pending-login page.
+    const wrong = await startFakeGateway((url) => {
+      const back = new URL(`http://127.0.0.1:${relayPort}/callback`);
+      back.search = url.search;
+      return { status: 302, headers: { Location: back.toString() } };
+    });
     gateways.push(wrong.server);
-    const right = await startFakeGateway((url) =>
-      url.pathname === "/auth/callback" && url.searchParams.has("code")
-        ? { status: 200, body: "<h1>Login complete</h1>" }
-        : { status: 404, body: "nope" },
+    // The second gateway only completes when the BROWSER sends its own
+    // origin-scoped tdei_oauth cookie. A server-side relay proxy cannot.
+    const right = await startFakeGateway((_url, headers) =>
+      headers.cookie === "tdei_oauth=ready"
+        ? { status: 200, headers: { "Set-Cookie": "tdei_done=1; Path=/" }, body: "<h1>Login complete</h1>" }
+        : { status: 404, body: "no pending login" },
     );
     gateways.push(right.server);
     // The relay reads its targets from HOME/.tdei-mcp on every callback; the
@@ -106,10 +152,22 @@ test("relay forwards one loopback callback to the gateway holding the login", as
       JSON.stringify({ callbacks: [`${wrong.url}/auth/callback`, `${right.url}/auth/callback`] }),
       "utf-8",
     );
-    relay = await runRelayOn(18765, home, []);
-    const res = await fetch("http://127.0.0.1:18765/callback?code=abc&state=def");
-    assert.equal(res.status, 200);
-    assert.match(await res.text(), /Login complete/);
+    relay = await runRelayOn(relayPort, home, []);
+
+    // First hop is a redirect, not a proxied request.
+    const first = await fetch(`http://127.0.0.1:${relayPort}/callback?code=abc&state=def`, { redirect: "manual" });
+    assert.equal(first.status, 302);
+    const location = new URL(first.headers.get("location") ?? "");
+    assert.equal(location.origin, wrong.url);
+    assert.equal(location.searchParams.get("tdei_relay_try"), "1");
+    assert.equal(location.searchParams.get("code"), "abc");
+    await first.arrayBuffer();
+
+    // Browser-like follow: wrong gateway bounces, right gateway sees its cookie.
+    const jar = new Map<string, string>([[right.url, "tdei_oauth=ready"]]);
+    const result = await browserVisit(`http://127.0.0.1:${relayPort}/callback?code=abc&state=def`, jar);
+    assert.equal(result.status, 200);
+    assert.match(result.body, /Login complete/);
   } finally {
     relay?.kill();
     for (const server of gateways) await new Promise((resolve) => server.close(resolve));
