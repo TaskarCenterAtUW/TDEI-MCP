@@ -265,8 +265,16 @@ const serverEntries = servers.map((s) => ({
 // install (?with=<workspace name>), so "both" installs the two connectors.
 const envSetup = {};
 for (const env of setupTargets.SETUP_ENVS) {
-  const core = servers.find((s) => s.profile !== "workspace" && setupTargets.setupEnvForServer(s.name) === env);
-  const workspace = servers.find((s) => s.profile === "workspace" && setupTargets.setupEnvForServer(s.name) === env);
+  // Build from serverEntries, not the raw resolved servers: `setup` is a
+  // page-only field derived from basePath. Reading it off the raw server
+  // yields `undefined`, which the page then concatenates onto the origin
+  // (e.g. https://host.ioundefined/claude-desktop).
+  const core = serverEntries.find(
+    (s) => s.npxProfile !== "workspace" && setupTargets.setupEnvForServer(s.name) === env,
+  );
+  const workspace = serverEntries.find(
+    (s) => s.npxProfile === "workspace" && setupTargets.setupEnvForServer(s.name) === env,
+  );
   if (core && workspace) {
     envSetup[env] = {
       core: { name: core.name, setup: core.setup },
