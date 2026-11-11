@@ -74,6 +74,7 @@ function freePort(): Promise<number> {
 }
 async function waitForHttp(base: string, ms: number): Promise<boolean> {
   const deadline = Date.now() + ms;
+  /* oxlint-disable no-await-in-loop -- polling a server that is still starting; each attempt must settle before the delay */
   while (Date.now() < deadline) {
     try {
       const r = await fetchTimeout(`${base}/`, {}, 2000);
@@ -83,6 +84,7 @@ async function waitForHttp(base: string, ms: number): Promise<boolean> {
     }
     await new Promise((r) => setTimeout(r, 300));
   }
+  /* oxlint-enable no-await-in-loop */
   return false;
 }
 
@@ -194,6 +196,7 @@ async function checkHttpEndpoint(base: string, label: string): Promise<void> {
     return;
   }
   // 2. Setup installers (regression: https hosts must advertise https, not http)
+  /* oxlint-disable no-await-in-loop -- one installer target at a time so each check is recorded in order */
   for (const target of ["codex", "opencode"]) {
     try {
       const r = await fetchTimeout(`${base}/mcp/setup/${target}`, {}, 10_000);
@@ -217,6 +220,7 @@ async function checkHttpEndpoint(base: string, label: string): Promise<void> {
       record(`${label}: GET /mcp/setup/${target}`, false, e instanceof Error ? e.message : String(e));
     }
   }
+  /* oxlint-enable no-await-in-loop */
   // 3. JSON-RPC tools/list (no auth in default session mode)
   try {
     const r = await fetchTimeout(

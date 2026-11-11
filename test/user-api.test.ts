@@ -231,7 +231,8 @@ test("the real User API spec compiles into the friendly tool names", async () =>
     operationName: userOperationName,
   });
   const names = (await client.listTools()).tools.map((tool) => tool.name);
-  for (const name of Object.values(USER_API_TOOL_NAMES)) assert.ok(names.includes(name), name);
+  const nameSet = new Set(names);
+  for (const name of Object.values(USER_API_TOOL_NAMES)) assert.ok(nameSet.has(name), name);
   assert.ok(names.includes("refresh_token"));
 });
 

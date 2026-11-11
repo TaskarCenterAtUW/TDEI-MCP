@@ -210,9 +210,12 @@ test("setup auto-detects, honours --dry-run, needs --yes off a TTY, then install
 
 test("npx package spec pins the deployed commit, falls back to dev, and can be overridden", () => {
   const sha = "fe14c294021b4d5f8a1c0a0d9b3b7c2e6f1a8d90";
-  assert.equal(npxPackageSpec(sha, {}), `github:TaskarCenterAtUW/TDEI-MCP#${sha}`);
+  // Abbreviated, never the full 40 characters: npm 10's npx cannot install a
+  // git dependency pinned to a full SHA when the package has a prepare script.
+  assert.equal(npxPackageSpec(sha, {}), "github:TaskarCenterAtUW/TDEI-MCP#fe14c294021b");
   assert.equal(npxPackageSpec("unknown", {}), "github:TaskarCenterAtUW/TDEI-MCP#dev");
   assert.equal(npxPackageSpec(undefined, {}), "github:TaskarCenterAtUW/TDEI-MCP#dev");
   assert.equal(npxPackageSpec(sha, { TDEI_NPX_PACKAGE: "tdei-mcp" }), "tdei-mcp");
-  assert.equal(npxSetupCommand(sha, {}), `npx -y github:TaskarCenterAtUW/TDEI-MCP#${sha} setup`);
+  assert.equal(npxPackageSpec(sha, { TDEI_NPX_PACKAGE: "tdei-mcp@1.2.3" }), "tdei-mcp@1.2.3");
+  assert.equal(npxSetupCommand(sha, {}), "npx -y github:TaskarCenterAtUW/TDEI-MCP#fe14c294021b setup");
 });

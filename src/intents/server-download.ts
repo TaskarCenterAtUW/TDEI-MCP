@@ -12,7 +12,7 @@ import { pipeline } from "node:stream/promises";
  * allowed when the server runs on the user's machine (stdio, or HTTP bound to
  * loopback), because it writes to the host filesystem.
  */
-export type DownloadMode = "client" | "server";
+type DownloadMode = "client" | "server";
 
 export interface DownloadSettings {
   mode: DownloadMode;

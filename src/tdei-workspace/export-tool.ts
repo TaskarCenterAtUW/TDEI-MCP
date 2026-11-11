@@ -12,7 +12,7 @@ const exportSchema = z.object({
   method: z.enum(["web_ui", "api_runbook"]).optional(),
 });
 
-export const EXPORT_WORKSPACE_TOOL_DESCRIPTION =
+const EXPORT_WORKSPACE_TOOL_DESCRIPTION =
   "Export a workspace to TDEI core as a NEW dataset (the Workspaces 'Export > Upload to TDEI' action). Call this whenever the user asks to export, publish or push a workspace to TDEI core. " +
   "It does not upload anything itself: it returns the instructions to follow. method web_ui (default) gives the Workspaces web UI link and steps, the recommended way. " +
   "method api_runbook returns the step-by-step recipe, with the user's sign-in already embedded in its commands and sensible defaults for every detail (output folder, dataset metadata, project group, service), so you can run the export without asking the user for anything but the workspace. Use it when the user asks you to export (for example 'export it' or 'do it now') and you can run commands on their machine; do not ask them to choose or to fetch a token. " +

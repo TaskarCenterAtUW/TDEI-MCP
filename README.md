@@ -179,11 +179,11 @@ If the tdei tools disappear from VS Code, the workspace entry in `.vscode/mcp.js
 
 Use your client's stdio server settings with these values:
 
-| Setting | Value |
-| --- | --- |
-| Command | Absolute path to the Node.js executable |
+| Setting   | Value                                                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------------------- |
+| Command   | Absolute path to the Node.js executable                                                                              |
 | Arguments | `--env-file=/absolute/path/to/project/.env` and `/absolute/path/to/project/dist/index.js`, as two separate arguments |
-| Transport | stdio |
+| Transport | stdio                                                                                                                |
 
 The client process needs only Node.js and network access to the configured specification and API URLs.
 
@@ -276,15 +276,51 @@ commit, for example `github:TaskarCenterAtUW/TDEI-MCP#<sha>`, and `#dev` is the
 fallback. The first run installs dependencies and compiles `dist/` through the
 `prepare` script, so it takes a minute. `--env` picks dev, stage or prod, and
 both connectors are installed unless `--profile core|workspace` is given. Set
-`TDEI_NPX_PACKAGE` to change the package spec the pages show (for example
-`tdei-mcp` once it is published on npm):
+`TDEI_NPX_PACKAGE` to change the package spec the pages show (see
+[Distributing the setup CLI on npm](#distributing-the-setup-cli-on-npm)):
 
     npx -y github:TaskarCenterAtUW/TDEI-MCP#dev setup --env dev
     npx -y github:TaskarCenterAtUW/TDEI-MCP#dev setup cleanup      # remove every tdei / tdei-* entry
 
+The GitHub spec is a fallback, not the recommended distribution. It needs git
+and a TypeScript build on the client machine, and npm 10 (bundled with Node 22)
+cannot install a full-SHA git spec for a package with a `prepare` script — the
+`GitFetcher requires an Arborist constructor` error. The pages therefore pin a
+12-character commit prefix. The standard install path is the npm registry, see
+below.
+
+#### Distributing the setup CLI on npm
+
+Publishing the package makes the installer the same one-line command every Node
+CLI uses, on every npm version, with no git and no client-side build:
+
+    npx -y tdei-mcp@0.1.0 setup --env dev
+
+`.github/workflows/publish.yml` publishes on a `v*` tag (or a manual dispatch)
+with npm trusted publishing and a provenance attestation, so no long-lived
+`NPM_TOKEN` is stored. One-time setup, done by whoever owns the npm package:
+
+1. Claim the `tdei-mcp` name (it is currently unregistered) or change `name` in
+   `package.json` to a scope you own, then update the workflow's package name.
+   The very first publish has to come from a maintainer's machine
+   (`pnpm build && npm publish --access public`, logged in with 2FA); npm only
+   offers trusted-publisher settings once the package exists.
+2. On npmjs.com: package → Settings → Trusted publisher → GitHub Actions,
+   repository `TaskarCenterAtUW/TDEI-MCP`, workflow `publish.yml`. From then on
+   the workflow publishes with OIDC and no stored token.
+3. Bump `version` in `package.json`, then `git tag v<version> && git push origin v<version>`.
+   The workflow refuses a tag/version mismatch and refuses to overwrite an
+   existing version.
+
+Then point the gateway at the published version so its pages and error messages
+switch automatically: set `TDEI_NPX_PACKAGE=tdei-mcp@<version>` in the gateway
+environment (`docker run -e ...`, the Container App env, or the
+`TDEI_NPX_PACKAGE` repository variable read by the deploy workflow). Until it is
+set, pages keep the pinned git fallback. A bare `tdei-mcp` is also accepted, but
+pinning the exact version keeps the CLI aligned with the deployed gateway.
+
 Fix-it flow for a colleague: 1) run the update command, 2) fully restart the
-app (Desktop: Cmd+Q / File > Exit — closing the window is not enough),
-3) start a NEW chat and approve the TDEI sign-in when the first tool call asks. Still broken?
+app (Desktop: Cmd+Q / File > Exit — closing the window is not enough), 3) start a NEW chat and approve the TDEI sign-in when the first tool call asks. Still broken?
 Uninstall, restart, reinstall.
 
 After running a script, start the MCP client and ask it to use any TDEI tool.
@@ -298,21 +334,27 @@ servers (stdio, or a loopback server without a gateway).
 ### Docker deployment
 
 Build the image (multi-stage; ships compiled `dist/` plus Node 22 and nginx):
+
 ```bash
 docker build -t tdei-mcp:http .
 ```
+
 Run it with your SSO configuration. The container runs the gateway (nginx +
 all `mcps.json` children) on port `3000`:
+
 ```bash
 docker run --rm -p 3000:3000 --env-file .env tdei-mcp:http
 ```
+
 Override the public port with `-e` (explicit env beats the image default;
 keep it clear of the `mcps.json` child ports, default `3001+`):
+
 ```bash
 docker run --rm -p 4000:4000 -e PORT=4000 -e TDEI_SSO_CALLBACK_URL=https://mcp.example.com/callback --env-file .env tdei-mcp:http
 ```
 
 Smoke check from the host (expect `401 TDEI_SSO_REQUIRED` — proof the server is up and enforcing Bearer auth):
+
 ```bash
 curl -i -X POST http://127.0.0.1:3000/tdei-core-dev/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
@@ -396,48 +438,49 @@ installer after deploy so the relay is listening, then reconnect the server.
 
 Both transports expose the common semantic tools:
 
-| Tool | Purpose |
-| --- | --- |
-| `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
-| `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook. |
-| `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded. |
-| `tdei_get_my_identity` | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint). |
-| `tdei_list_jobs` | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering. |
-| `tdei_list_services` | List services by text, project group, or service type. |
-| `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
-| `tdei_validate_dataset` | Ask for missing inputs, then instruct the client to validate OSW/Flex/Pathways data via curl from its own machine. |
-| `tdei_upload_dataset` | Collect all required target and metadata fields, then instruct the client to upload via curl from its own machine. |
-| `tdei_publish_dataset` | Publish a dataset release (`publishOswFile`/`publishGtfsFlexFile`/`publishGtfsPathwaysFile`). |
-| `tdei_delete_dataset` | Permanently delete a dataset. Requires `confirm:true`. |
-| `tdei_clone_dataset` | Clone a dataset into a target project group/service with new metadata. Requires `confirm:true`. |
-| `tdei_edit_metadata` | Overwrite a dataset's metadata document. Requires `confirm:true`. |
-| `tdei_calculate_confidence` | Confidence job for an OSW dataset, optional sub-region GeoJSON. |
-| `tdei_calculate_quality_intersection` | Intersection-quality job for an OSW dataset, optional polygon. |
-| `tdei_tag_quality_metric` | Tag quality metrics on OSW elements via a tag-quality file. |
-| `tdei_generate_quality_report` | Quality-report job for an OSW dataset. |
-| `tdei_sanitize_dataset` | Sanitize an OSW ZIP (correct invalid/unsupported values). |
-| `tdei_convert_osw` | Convert between OSW and OSM formats. |
-| `tdei_convert_pathways` | Convert CAD DXF ZIP or an ArcGIS service into a Pathways draft. |
-| `tdei_self_merge` | Self-merge spatial entities within one OSW dataset. |
-| `tdei_spatial_join` | Spatial join between two OSW datasets (dimensions + join condition). |
-| `tdei_union_datasets` | Union DS2 into DS1. Requires `confirm:true`. |
-| `tdei_cut_dataset_bbox` | Cut a dataset subgraph to a bounding box (`datasetBbox`). |
-| `tdei_tag_road` | Tag sidewalks in a target dataset with a source road network. |
-| `tdei_tag_incline` | Incline-tagging job for an OSW dataset. |
-| `tdei_check_dataset_incline` | Return a client-side incline-inspection runbook (curl + unzip + edges check). The server never downloads the ZIP. |
-| `tdei_list_feedbacks` | List dataset-viewer feedbacks with optional filters. |
-| `tdei_get_feedback_summary` | Feedback counts/overdue summary, optionally per project group. |
-| `tdei_download_feedbacks` | Download feedbacks for a project group (CSV/GeoJSON preview). |
-| `tdei_submit_feedback` | Submit viewer feedback for a dataset element. |
-| `tdei_update_feedback_status` | Resolve/triage feedbacks (open/resolved + resolution). |
-| `tdei_get_pm_tiles_url` | PMTiles SAS URL for viewing a dataset. |
-| `tdei_set_viewer_access` | Dataset-viewer visibility preferences. |
-| `tdei_get_metrics` | Data/service/system metrics (service scope needs a project group). |
-| `tdei_list_versions` | Supported data-standard versions for OSW/Flex/Pathways. |
-| `tdei_get_system_info` | Capabilities plus supported API versions. |
-| `tdei_verify_email` | Send an email-verification link. |
-| `tdei_recover_password` | Send a password-recovery link. |
-| `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
+| Tool                                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tdei_find_datasets`                  | Find datasets by name, city, explicit bbox, configured place-to-bbox fallback, project group or service; project-group/service listings scan every page and return the latest unique version per dataset name (`latestPerName:false` shows every version). Also supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
+| `tdei_get_dataset_details`            | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook.                                                                                                                                                                                                                                                 |
+| `tdei_get_tcat_qa_reports`            | Read-only QA/QC report inventory for a project group/service: scans every dataset page, keeps the latest version per dataset name, and returns the TCAT report links, report codes and pipeline/tract fields from `custom_metadata`, plus missing-report counts. Different from `tdei_generate_quality_report`, which creates a report job for one dataset.                                                |
+| `tdei_download_dataset`               | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded.                                                                                   |
+| `tdei_get_my_identity`                | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint).                                                                                                                                                                                                                                                                                                                                      |
+| `tdei_list_jobs`                      | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering.                                                                                                                                                                                                                                                                                                                               |
+| `tdei_list_services`                  | List services by text, project group, or service type.                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_list_my_project_groups`         | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer.                                                                                                                                                                                                                                                        |
+| `tdei_validate_dataset`               | Ask for missing inputs, then instruct the client to validate OSW/Flex/Pathways data via curl from its own machine.                                                                                                                                                                                                                                                                                         |
+| `tdei_upload_dataset`                 | Collect all required target and metadata fields, then instruct the client to upload via curl from its own machine.                                                                                                                                                                                                                                                                                         |
+| `tdei_publish_dataset`                | Publish a dataset release (`publishOswFile`/`publishGtfsFlexFile`/`publishGtfsPathwaysFile`).                                                                                                                                                                                                                                                                                                              |
+| `tdei_delete_dataset`                 | Permanently delete a dataset. Requires `confirm:true`.                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_clone_dataset`                  | Clone a dataset into a target project group/service with new metadata. Requires `confirm:true`.                                                                                                                                                                                                                                                                                                            |
+| `tdei_edit_metadata`                  | Overwrite a dataset's metadata document. Requires `confirm:true`.                                                                                                                                                                                                                                                                                                                                          |
+| `tdei_calculate_confidence`           | Confidence job for an OSW dataset, optional sub-region GeoJSON.                                                                                                                                                                                                                                                                                                                                            |
+| `tdei_calculate_quality_intersection` | Intersection-quality job for an OSW dataset, optional polygon.                                                                                                                                                                                                                                                                                                                                             |
+| `tdei_tag_quality_metric`             | Tag quality metrics on OSW elements via a tag-quality file.                                                                                                                                                                                                                                                                                                                                                |
+| `tdei_generate_quality_report`        | Quality-report job for an OSW dataset.                                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_sanitize_dataset`               | Sanitize an OSW ZIP (correct invalid/unsupported values).                                                                                                                                                                                                                                                                                                                                                  |
+| `tdei_convert_osw`                    | Convert between OSW and OSM formats.                                                                                                                                                                                                                                                                                                                                                                       |
+| `tdei_convert_pathways`               | Convert CAD DXF ZIP or an ArcGIS service into a Pathways draft.                                                                                                                                                                                                                                                                                                                                            |
+| `tdei_self_merge`                     | Self-merge spatial entities within one OSW dataset.                                                                                                                                                                                                                                                                                                                                                        |
+| `tdei_spatial_join`                   | Spatial join between two OSW datasets (dimensions + join condition).                                                                                                                                                                                                                                                                                                                                       |
+| `tdei_union_datasets`                 | Union DS2 into DS1. Requires `confirm:true`.                                                                                                                                                                                                                                                                                                                                                               |
+| `tdei_cut_dataset_bbox`               | Cut a dataset subgraph to a bounding box (`datasetBbox`).                                                                                                                                                                                                                                                                                                                                                  |
+| `tdei_tag_road`                       | Tag sidewalks in a target dataset with a source road network.                                                                                                                                                                                                                                                                                                                                              |
+| `tdei_tag_incline`                    | Incline-tagging job for an OSW dataset.                                                                                                                                                                                                                                                                                                                                                                    |
+| `tdei_check_dataset_incline`          | Return a client-side incline-inspection runbook (curl + unzip + edges check). The server never downloads the ZIP.                                                                                                                                                                                                                                                                                          |
+| `tdei_list_feedbacks`                 | List dataset-viewer feedbacks with optional filters.                                                                                                                                                                                                                                                                                                                                                       |
+| `tdei_get_feedback_summary`           | Feedback counts/overdue summary, optionally per project group.                                                                                                                                                                                                                                                                                                                                             |
+| `tdei_download_feedbacks`             | Download feedbacks for a project group (CSV/GeoJSON preview).                                                                                                                                                                                                                                                                                                                                              |
+| `tdei_submit_feedback`                | Submit viewer feedback for a dataset element.                                                                                                                                                                                                                                                                                                                                                              |
+| `tdei_update_feedback_status`         | Resolve/triage feedbacks (open/resolved + resolution).                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_get_pm_tiles_url`               | PMTiles SAS URL for viewing a dataset.                                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_set_viewer_access`              | Dataset-viewer visibility preferences.                                                                                                                                                                                                                                                                                                                                                                     |
+| `tdei_get_metrics`                    | Data/service/system metrics (service scope needs a project group).                                                                                                                                                                                                                                                                                                                                         |
+| `tdei_list_versions`                  | Supported data-standard versions for OSW/Flex/Pathways.                                                                                                                                                                                                                                                                                                                                                    |
+| `tdei_get_system_info`                | Capabilities plus supported API versions.                                                                                                                                                                                                                                                                                                                                                                  |
+| `tdei_verify_email`                   | Send an email-verification link.                                                                                                                                                                                                                                                                                                                                                                           |
+| `tdei_recover_password`               | Send a password-recovery link.                                                                                                                                                                                                                                                                                                                                                                             |
+| `tdei_regenerate_api_key`             | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`.                                                                                                                                                                                                                                                                                                                            |
 
 File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
 
@@ -447,14 +490,14 @@ The optional `TDEI_GEOCODER_URL` enables forward-geocoding only after dataset na
 
 Local stdio mode also exposes these connector-management tools while signed out:
 
-| Tool | Purpose |
-| --- | --- |
-| `tdei_auth_status` | Report whether the SSO session is signed out, pending, or authenticated, including JWT identity (email, username, roles) when signed in. |
-| `tdei_health` | Report connector health: auth state, OpenAPI provider, spec reachability, callback port, and config. Read-only, safe signed-out. |
-| `tdei_sso_login` | Start browser SSO and return the login URL. |
-| `tdei_test_authentication` | Check for a usable SSO session token. |
-| `tdei_load_api_tools` | Retry API tool loading after SSO succeeds. |
-| `tdei_logout` | Clear local tokens, reset the OpenAPI provider, and return the browser SSO logout URL. |
+| Tool                       | Purpose                                                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `tdei_auth_status`         | Report whether the SSO session is signed out, pending, or authenticated, including JWT identity (email, username, roles) when signed in. |
+| `tdei_health`              | Report connector health: auth state, OpenAPI provider, spec reachability, callback port, and config. Read-only, safe signed-out.         |
+| `tdei_sso_login`           | Start browser SSO and return the login URL.                                                                                              |
+| `tdei_test_authentication` | Check for a usable SSO session token.                                                                                                    |
+| `tdei_load_api_tools`      | Retry API tool loading after SSO succeeds.                                                                                               |
+| `tdei_logout`              | Clear local tokens, reset the OpenAPI provider, and return the browser SSO logout URL.                                                   |
 
 The connector starts signed out but discovers generated tools such as `listServices` for the initial catalogue. Call `tdei_sso_login`, open its `loginUrl` in a browser, and complete SSO before invoking them. Every API call obtains the current access token before calling TDEI.
 
@@ -484,27 +527,27 @@ Tokens are kept in process memory. When a token needs renewal, the connector att
 
 Values can be supplied through `.env` using Node's `--env-file` flag, or through your MCP client's environment settings. Existing process environment variables take precedence over values in the environment file.
 
-| Variable | Required | Default / purpose |
-| --- | --- | --- |
-| `TDEI_API_URL` | No | `https://api-dev.tdei.us` (the only value a typical stdio setup needs) |
-| `TDEI_SPEC_URL` | No | Derived from `TDEI_API_URL` (`dev` / `stage` / `main` OpenAPI JSON on GitHub) |
-| `TDEI_SSO_CALLBACK_URL` | No | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var) |
-| `TDEI_GEOCODER_URL` | No | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback |
-| `TDEI_GEOCODER_USER_AGENT` | No | Identifies this connector; set an operator contact when required by the provider |
-| `TDEI_TRANSPORT` | No | `stdio` (`stdio` or `http`; CLI `--transport=` overrides) |
-| `TDEI_HTTP_HOST` | No | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides) |
-| `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
-| `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
-| `TDEI_DOWNLOAD_MODE` | No | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback) |
-| `TDEI_EXPOSE_ALL_RAW_TOOLS` | No | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it) |
-| `TDEI_STATUS_PAGE_URL` | No | unset (the TDEI MCP status/install page of this deployment, for example `https://tdei-mcp-dev.proudbay-977f7717.westus.azurecontainerapps.io/`. Tools that need the companion server (workspace tools that need core data, core dataset tools used for workspace creation) tell the model to send the user there to install both servers when the other one is missing; when unset the note says to use the root URL of the host the server was installed from) |
-| `TDEI_USER_API_URL` | No | derived from `TDEI_API_URL` for the three TDEI core hosts (`portal-api-dev.tdei.us`, `portal-api-stage.tdei.us`, `portal-api.tdei.us`); `off` disables it; other hosts load nothing. Core servers load the TDEI User Management API as a second OpenAPI source (see below) |
-| `TDEI_USER_SPEC_URL` | No | `<TDEI_USER_API_URL>/api-docs/swagger.json` (the User Management API's OpenAPI document) |
-| `TDEI_OAUTH_SECRET` | Gateway deployments (generate with `openssl rand -hex 32`; see below) | Long random secret that protects sign-in codes and the login cookie. Set the same value on every replica. If unset, a random per-process secret is used and a sign-in must finish on the instance that started it |
-| `TDEI_DOWNLOAD_DIR` | No | `~/Downloads` (absolute folder for server-mode downloads) |
-| `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
-| `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
-| `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
+| Variable                         | Required                                                              | Default / purpose                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TDEI_API_URL`                   | No                                                                    | `https://api-dev.tdei.us` (the only value a typical stdio setup needs)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `TDEI_SPEC_URL`                  | No                                                                    | Derived from `TDEI_API_URL` (`dev` / `stage` / `main` OpenAPI JSON on GitHub)                                                                                                                                                                                                                                                                                                                                                                                   |
+| `TDEI_SSO_CALLBACK_URL`          | No                                                                    | `http://127.0.0.1:8765/callback` (SSO `client_id` is always `tdei-mcp` in code — not an env var)                                                                                                                                                                                                                                                                                                                                                                |
+| `TDEI_GEOCODER_URL`              | No                                                                    | Absent; Nominatim-compatible HTTPS `/search` endpoint for place-to-bbox fallback                                                                                                                                                                                                                                                                                                                                                                                |
+| `TDEI_GEOCODER_USER_AGENT`       | No                                                                    | Identifies this connector; set an operator contact when required by the provider                                                                                                                                                                                                                                                                                                                                                                                |
+| `TDEI_TRANSPORT`                 | No                                                                    | `stdio` (`stdio` or `http`; CLI `--transport=` overrides)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `TDEI_HTTP_HOST`                 | No                                                                    | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides)                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `TDEI_HTTP_PORT`                 | No                                                                    | `3000` (HTTP mode listen port; CLI `--port=` overrides)                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `TDEI_HTTP_BASE_PATH`            | No                                                                    | `/mcp`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `TDEI_DOWNLOAD_MODE`             | No                                                                    | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback)                                                                                                                                                                                                                                                                        |
+| `TDEI_EXPOSE_ALL_RAW_TOOLS`      | No                                                                    | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it)                                                                                                                                                                                                                     |
+| `TDEI_STATUS_PAGE_URL`           | No                                                                    | unset (the TDEI MCP status/install page of this deployment, for example `https://tdei-mcp-dev.proudbay-977f7717.westus.azurecontainerapps.io/`. Tools that need the companion server (workspace tools that need core data, core dataset tools used for workspace creation) tell the model to send the user there to install both servers when the other one is missing; when unset the note says to use the root URL of the host the server was installed from) |
+| `TDEI_USER_API_URL`              | No                                                                    | derived from `TDEI_API_URL` for the three TDEI core hosts (`portal-api-dev.tdei.us`, `portal-api-stage.tdei.us`, `portal-api.tdei.us`); `off` disables it; other hosts load nothing. Core servers load the TDEI User Management API as a second OpenAPI source (see below)                                                                                                                                                                                      |
+| `TDEI_USER_SPEC_URL`             | No                                                                    | `<TDEI_USER_API_URL>/api-docs/swagger.json` (the User Management API's OpenAPI document)                                                                                                                                                                                                                                                                                                                                                                        |
+| `TDEI_OAUTH_SECRET`              | Gateway deployments (generate with `openssl rand -hex 32`; see below) | Long random secret that protects sign-in codes and the login cookie. Set the same value on every replica. If unset, a random per-process secret is used and a sign-in must finish on the instance that started it                                                                                                                                                                                                                                               |
+| `TDEI_DOWNLOAD_DIR`              | No                                                                    | `~/Downloads` (absolute folder for server-mode downloads)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `TDEI_PUBLIC_BASE_URL`           | No                                                                    | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one.                                                                                                           |
+| `TDEI_CORS_ORIGINS`              | No                                                                    | Empty (same-origin only; comma-separated allow-list)                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No                                                                    | Absent (plain HTTP; terminate TLS at a reverse proxy)                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 The API URL must use HTTPS. The spec URL and SSO callback are optional because they have defaults. The local SSO callback must exactly match the registered HTTP loopback URL when you override it.
 
@@ -512,11 +555,11 @@ The API URL must use HTTPS. The spec URL and SSO callback are optional because t
 
 Each `tdei-core-*` server also loads the **TDEI User Management API** (the "portal API") as a second OpenAPI source, so project-group services, members and roles are available without a separate MCP entry. The workspace servers never load it.
 
-| Environment | API origin | OpenAPI document |
-|---|---|---|
-| dev | `https://portal-api-dev.tdei.us` | `https://portal-api-dev.tdei.us/api-docs/swagger.json` |
-| stage | `https://portal-api-stage.tdei.us` | `https://portal-api-stage.tdei.us/api-docs/swagger.json` |
-| prod | `https://portal-api.tdei.us` | `https://portal-api.tdei.us/api-docs/swagger.json` |
+| Environment | API origin                         | OpenAPI document                                         |
+| ----------- | ---------------------------------- | -------------------------------------------------------- |
+| dev         | `https://portal-api-dev.tdei.us`   | `https://portal-api-dev.tdei.us/api-docs/swagger.json`   |
+| stage       | `https://portal-api-stage.tdei.us` | `https://portal-api-stage.tdei.us/api-docs/swagger.json` |
+| prod        | `https://portal-api.tdei.us`       | `https://portal-api.tdei.us/api-docs/swagger.json`       |
 
 The URLs are derived from the core host, or set per server with `userApiUrl` / `userSpecUrl` in `mcps.json` (shipped explicitly for the three core servers), or with `TDEI_USER_API_URL` / `TDEI_USER_SPEC_URL`. If the User API cannot be reached the core tools keep working and the log says why.
 
@@ -547,27 +590,28 @@ getOswFile → listJobs → job-download).
 
 ## Troubleshooting
 
-| Symptom | What to check |
-| --- | --- |
-| `.env` or `dist/index.js` cannot be found | Verify the project path and `cwd`; create `.env` and run `pnpm build`. For clients without `cwd`, use absolute argument paths. |
-| SSO login is required | Call `tdei_sso_login` and open the returned `loginUrl`. |
-| Callback port is already in use | Stop the process using port 8765, then retry login. |
-| SSO redirect returns 400 (`Invalid parameter: redirect_uri`) | `tdei_sso_login` preflights the login URL and returns this diagnosis instead of a dead-end browser page. The URI must be registered on the Keycloak client: admin console → realm `tdei` → Clients → `tdei-mcp` → Settings → add `http://127.0.0.1:8765/callback` to **Valid redirect URIs** (and **Valid post logout redirect URIs**) in each environment (dev, stage, prod). |
-| Only connector-management and semantic tools appear in stdio | Raw-tool discovery failed. Inspect the server logs, network access, and the specification URL, then restart the MCP client. |
-| First load times out | Check network access to the specification URL. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary. |
-| An API call returns a permission error | Check that your TDEI account has access to the requested operation and resources in the selected environment. |
-| URL validation fails | Ensure `TDEI_API_URL` (and any `TDEI_SPEC_URL` override) is a valid absolute URL beginning with `https://`. |
-| `TDEI_SSO_REQUIRED` | Call `tdei_sso_login` and open the returned `loginUrl`. |
-| `TDEI_TOKEN_EXPIRED` | Refresh via `POST /api/v1/refresh-token` or re-run SSO login. |
-| `TDEI_TOKEN_INVALID` | Call `tdei_sso_login` again; do not reuse the old Bearer. |
-| `TDEI_FORBIDDEN` | Check your TDEI account's project-group permissions; the error names the requirement. |
-| `TDEI_NOT_FOUND` | Verify the resource id and environment (dev/stage/prod). |
-| `TDEI_CONFLICT` | Re-read the resource and retry with current values. |
-| `TDEI_UPSTREAM_5XX` | Retry; if it persists, check TDEI environment status. |
-| `TDEI_CONFIG_INVALID` | Check `.env` values and `tdei.config.json` against the schema. |
-| `TDEI_TOOL_DISABLED` | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`. |
-| `TDEI_CHILD_UNAVAILABLE` | Legacy error code: call `tdei_load_api_tools` to reload the in-process OpenAPI provider. |
-| `TDEI_CONFIG_INVALID` | Check the named variable against its rule; the error JSON includes a working example value. |
+| Symptom                                                                          | What to check                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npx` fails with `GitFetcher requires an Arborist constructor to pack a tarball` | The command pins a full 40-character commit SHA and npm 10 cannot install it (npm/cli#6723). Use `#dev`, or copy the current command from the connector's status page — it pins a 12-character abbreviated SHA that works.                                                                                                                                                     |
+| `.env` or `dist/index.js` cannot be found                                        | Verify the project path and `cwd`; create `.env` and run `pnpm build`. For clients without `cwd`, use absolute argument paths.                                                                                                                                                                                                                                                 |
+| SSO login is required                                                            | Call `tdei_sso_login` and open the returned `loginUrl`.                                                                                                                                                                                                                                                                                                                        |
+| Callback port is already in use                                                  | Stop the process using port 8765, then retry login.                                                                                                                                                                                                                                                                                                                            |
+| SSO redirect returns 400 (`Invalid parameter: redirect_uri`)                     | `tdei_sso_login` preflights the login URL and returns this diagnosis instead of a dead-end browser page. The URI must be registered on the Keycloak client: admin console → realm `tdei` → Clients → `tdei-mcp` → Settings → add `http://127.0.0.1:8765/callback` to **Valid redirect URIs** (and **Valid post logout redirect URIs**) in each environment (dev, stage, prod). |
+| Only connector-management and semantic tools appear in stdio                     | Raw-tool discovery failed. Inspect the server logs, network access, and the specification URL, then restart the MCP client.                                                                                                                                                                                                                                                    |
+| First load times out                                                             | Check network access to the specification URL. Retry `tdei_load_api_tools`; increase your client's tool timeout if necessary.                                                                                                                                                                                                                                                  |
+| An API call returns a permission error                                           | Check that your TDEI account has access to the requested operation and resources in the selected environment.                                                                                                                                                                                                                                                                  |
+| URL validation fails                                                             | Ensure `TDEI_API_URL` (and any `TDEI_SPEC_URL` override) is a valid absolute URL beginning with `https://`.                                                                                                                                                                                                                                                                    |
+| `TDEI_SSO_REQUIRED`                                                              | Call `tdei_sso_login` and open the returned `loginUrl`.                                                                                                                                                                                                                                                                                                                        |
+| `TDEI_TOKEN_EXPIRED`                                                             | Refresh via `POST /api/v1/refresh-token` or re-run SSO login.                                                                                                                                                                                                                                                                                                                  |
+| `TDEI_TOKEN_INVALID`                                                             | Call `tdei_sso_login` again; do not reuse the old Bearer.                                                                                                                                                                                                                                                                                                                      |
+| `TDEI_FORBIDDEN`                                                                 | Check your TDEI account's project-group permissions; the error names the requirement.                                                                                                                                                                                                                                                                                          |
+| `TDEI_NOT_FOUND`                                                                 | Verify the resource id and environment (dev/stage/prod).                                                                                                                                                                                                                                                                                                                       |
+| `TDEI_CONFLICT`                                                                  | Re-read the resource and retry with current values.                                                                                                                                                                                                                                                                                                                            |
+| `TDEI_UPSTREAM_5XX`                                                              | Retry; if it persists, check TDEI environment status.                                                                                                                                                                                                                                                                                                                          |
+| `TDEI_CONFIG_INVALID`                                                            | Check `.env` values and `tdei.config.json` against the schema.                                                                                                                                                                                                                                                                                                                 |
+| `TDEI_TOOL_DISABLED`                                                             | Enable the tool in `tdei.config.json`, then call `tdei_reload_config`.                                                                                                                                                                                                                                                                                                         |
+| `TDEI_CHILD_UNAVAILABLE`                                                         | Legacy error code: call `tdei_load_api_tools` to reload the in-process OpenAPI provider.                                                                                                                                                                                                                                                                                       |
+| `TDEI_CONFIG_INVALID`                                                            | Check the named variable against its rule; the error JSON includes a working example value.                                                                                                                                                                                                                                                                                    |
 
 Connector diagnostics are written to stderr, which MCP clients usually capture in server logs. Keep stdout reserved for MCP messages.
 
@@ -577,11 +621,39 @@ Run the deterministic lifecycle tests and TypeScript build without a live TDEI s
 
 ```bash
 pnpm test
+pnpm test:installers
 pnpm lint
 pnpm build
 ```
 
 The tests cover the loopback callback and token exchange, SSO-triggered tool loading, tool calls, logout, and signed-out availability. `pnpm lint` runs the TypeScript compiler, oxlint, and a Prettier check; fix formatting with `pnpm format` (or verify with `pnpm format:check`). The same three commands run in CI and as the pre-commit hook.
+
+The hook also runs `pnpm knip`, `pnpm audit` and `pnpm secret-scan`. The secret
+scan uses [gitleaks](https://github.com/gitleaks/gitleaks) when it is installed
+(`brew install gitleaks`) and falls back to trufflehog; it scans exactly the
+staged files, redacts any match, and fails the commit on a finding. CI still
+runs a full-history trufflehog scan, so a missing local scanner only skips the
+local gate.
+
+`pnpm test:installers` exercises the two installers directly and runs first in the
+pre-commit hook: it executes the served `curl ... | sh` wrapper against a
+throwaway `HOME` for every supported client (install / update / uninstall /
+combined core + workspace), checks the `npx` package spec, and drives the CLI
+entry point the `npx` command launches. It stays offline. To also install the
+CLI from GitHub the way a user does (needs network, git, and HEAD pushed):
+
+```bash
+TDEI_INSTALLER_E2E=1 pnpm test:installers
+```
+
+The `npx` spec pins the deployed commit with a 12-character abbreviated SHA on
+purpose: npm 10 (the npm bundled with Node 22) fails on a full 40-character SHA
+for a package with a `prepare` script — `GitFetcher requires an Arborist
+constructor to pack a tarball` — because `npx` takes its hosted-tarball
+shortcut for full SHAs and then cannot run the prepare step. Any shorter
+committish takes the clone path instead (npm/cli#6723). That is the fallback;
+once the CLI is on npm and `TDEI_NPX_PACKAGE=tdei-mcp@<version>` is set, the
+pages use the standard registry spec and none of this applies.
 
 To verify a real TDEI connection, configure the registered SSO client and callback in `.env`, then run:
 

@@ -90,6 +90,7 @@ test("uploads are never retried after a network error or 502/504", async () => {
         return new Response("x", { status: outcome });
       }) as typeof fetch,
     });
+    // oxlint-disable-next-line no-await-in-loop -- one call per outcome, with a shared call counter that parallel calls would corrupt
     await client.callTool("up", { note: "n" }).catch(() => undefined);
     assert.equal(calls, 1, `outcome ${String(outcome)} must not be retried`);
   }

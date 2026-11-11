@@ -55,7 +55,7 @@ const ROLES_HELP =
   "TDEI project-group roles (for example POC, osw_data_generator) are a different layer, not in this API; only if the user asks about those, they are read from the SSO token via tdei_get_my_identity on the matching tdei-core-* server (a cross-server request: follow the companion-server rule). " +
   "Project-group membership does not by itself grant workspace editing, review, export or publication rights.";
 
-export const TDEI_WORKSPACE_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
+const TDEI_WORKSPACE_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   get_my_workspaces:
     `Call this first and cache every workspace id and title. Pass gig_only=true when the user asks which workspaces are available in ASR / ScoutRoute / the mobile apps (it returns only OSW workspaces open to external apps); omit it for "my workspaces".  almost every other workspace tool is scoped by workspace_id. Never guess one. ` +
     `Each item has the caller's workspace role, tdeiProjectGroupId (an id only; show ids as they are, and only if the user asks for project group NAMES do you need tdei_list_my_project_groups on the matching tdei-core-* server, a cross-server request), projectsCount and membersCount. ` +

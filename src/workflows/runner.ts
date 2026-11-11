@@ -90,6 +90,7 @@ export async function runWorkflow(
   const completedIds = new Set<string>();
   const transcript: StepResult[] = [];
 
+  /* oxlint-disable no-await-in-loop -- workflow steps run in order because later steps reference earlier outputs and failures abort the run */
   for (let index = 0; index < def.steps.length; index += 1) {
     const step = def.steps[index]!;
     if (deps.denied?.has(step.tool)) {
@@ -157,6 +158,7 @@ export async function runWorkflow(
       throw abort;
     }
   }
+  /* oxlint-enable no-await-in-loop */
 
   return { outputs, transcript };
 }

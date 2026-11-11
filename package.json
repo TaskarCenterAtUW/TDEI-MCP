@@ -50,6 +50,7 @@
     "gen:tool-fields": "tsx scripts/generate-tool-fields.ts",
     "check:tool-fields": "tsx scripts/generate-tool-fields.ts --check",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "test:installers": "node --import tsx --test test/installers.test.ts",
     "test:live": "node --env-file=.env --import tsx scripts/live-session-smoke.ts",
     "test:live-parse": "node --import tsx scripts/live-response-parse-probe.ts",
     "check:stdio": "node --env-file=.env --import tsx scripts/stdio-check.ts",

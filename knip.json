@@ -19,5 +19,8 @@
   "ignoreDependencies": [
     "@stryker-mutator/command-runner",
     "husky"
+  ],
+  "ignoreBinaries": [
+    "pwsh"
   ]
 }

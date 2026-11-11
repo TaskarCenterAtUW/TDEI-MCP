@@ -23,8 +23,15 @@ export const TOOL_ROUTING: readonly ToolRoute[] = [
     use: "projects, project groups, organizations/orgs, groups the login can see",
   },
   { tool: "tdei_list_services", use: "services, optionally for a project group or data type" },
-  { tool: "tdei_find_datasets", use: "find/list/search datasets by place, city, name, bbox, project group or recency" },
+  {
+    tool: "tdei_find_datasets",
+    use: "find/list/search datasets by place, city, name, bbox, project group, service or recency; project-group/service listings return the latest unique version per dataset name",
+  },
   { tool: "tdei_get_dataset_details", use: "details, release status or metadata of one dataset id" },
+  {
+    tool: "tdei_get_tcat_qa_reports",
+    use: "existing QA/QC report links and report detail for a project group or service; which datasets are missing a quality report",
+  },
   { tool: "tdei_get_my_identity", use: "who am I, my email/username, token roles" },
   {
     tool: "tdei_my_project_group_roles",
@@ -81,6 +88,7 @@ const ROUTING_DISAMBIGUATION: readonly string[] = [
   'Dataset vs feedback: "download feedbacks" is tdei_download_feedbacks, never tdei_download_dataset. "Download the dataset" is tdei_download_dataset.',
   "Identity vs project groups: tdei_list_my_project_groups lists groups visible to the login, not membership. Use tdei_my_project_group_roles for 'my roles in <project group>' or which groups the user belongs to, and tdei_get_my_identity for the user's own email or token roles.",
   "Details vs search: with an exact dataset id use tdei_get_dataset_details; with a place, name or filter use tdei_find_datasets.",
+  "Report inventory vs generation: for existing QA/QC report links, report codes or missing reports across a project group or service use tdei_get_tcat_qa_reports; tdei_generate_quality_report CREATES one new report job for one dataset id.",
   "Inclines: check with tdei_check_dataset_incline first, then tag with tdei_tag_incline only if the user wants it added.",
   "Destructive tools (delete, clone, edit metadata, union, regenerate API key) need an explicit user confirmation before you pass confirm:true.",
 ];

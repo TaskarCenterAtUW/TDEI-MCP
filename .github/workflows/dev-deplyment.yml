@@ -57,6 +57,9 @@ jobs:
           registry: ${{ secrets.REGISTRY_DOMAIN }}
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
+      # vars.TDEI_NPX_PACKAGE stays empty until the CLI is published on npm.
+      # Set that repository variable to tdei-mcp@<version> to switch every
+      # install page/message from the git fallback to the npm spec.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -67,6 +70,7 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
             BUILD_VERSION=0.1.${{ github.run_number }}
+            TDEI_NPX_PACKAGE=${{ vars.TDEI_NPX_PACKAGE }}
 
   deploy:
     needs: build

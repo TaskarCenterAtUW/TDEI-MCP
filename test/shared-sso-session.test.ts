@@ -190,6 +190,7 @@ test("authorize falls back to the SSO redirect when no session tokens validate",
       verifier,
       ...(hook ? { getValidSessionTokens: hook } : {}),
     });
+    // oxlint-disable-next-line no-await-in-loop -- the hook variants share OAuth session state, so each flow runs to completion before the next
     const result = await dispatchOAuth(input);
     assert.equal(result?.status, 200);
     assert.match(loginUrlFromPage(result?.body ?? ""), /api\/v1\/sso-redirect/);

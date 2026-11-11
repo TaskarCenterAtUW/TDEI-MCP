@@ -7,7 +7,7 @@
  */
 
 /** Optional env: the status/install page of this deployment (the base URL users installed from). */
-export function statusPageHint(env: NodeJS.ProcessEnv = process.env): string {
+function statusPageHint(env: NodeJS.ProcessEnv = process.env): string {
   const url = env.TDEI_STATUS_PAGE_URL?.trim();
   return url
     ? `the TDEI MCP status page (${url})`

@@ -105,11 +105,13 @@ async function main(): Promise<void> {
     });
 
     const loginDeadline = Date.now() + 5 * 60_000;
+    /* oxlint-disable no-await-in-loop -- polling the sign-in status; each check must settle before the next */
     while (Date.now() < loginDeadline) {
       const status = await call("tdei_auth_status");
       if (textOf(status).includes('"authenticated": true')) break;
       await new Promise((r) => setTimeout(r, 500));
     }
+    /* oxlint-enable no-await-in-loop */
 
     const status = await call("tdei_auth_status");
     const statusText = textOf(status);
@@ -119,11 +121,13 @@ async function main(): Promise<void> {
     // ---- 2. Generated API tools ----
     const toolDeadline = Date.now() + 30_000;
     let tools: Array<{ name: string }> = [];
+    /* oxlint-disable no-await-in-loop -- waits for tools to load after sign-in; each poll must settle before the next */
     while (Date.now() < toolDeadline) {
       ({ tools } = await client.listTools());
       if (tools.some((t) => t.name === "listServices")) break;
       await new Promise((r) => setTimeout(r, 100));
     }
+    /* oxlint-enable no-await-in-loop */
     ({ tools } = await client.listTools());
     assert.ok(
       tools.some((t) => t.name === "listServices"),

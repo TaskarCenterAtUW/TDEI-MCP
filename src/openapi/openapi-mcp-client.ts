@@ -208,7 +208,7 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
   url.searchParams.append(name, String(value));
 }
 
-async function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): Promise<void> {
+function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): void {
   if (binary && typeof value === "string") {
     // File bytes never go through MCP: binary form fields only accept file
     // paths for client-side curl, so refuse them here with the runbook.
@@ -303,7 +303,7 @@ export class OpenApiMcpClient {
         buildBody = async () => {
           const form = new FormData();
           for (const [key, value] of Object.entries(values)) {
-            await appendFormValue(form, key, value, operation.binaryBodyProperties.has(key));
+            appendFormValue(form, key, value, operation.binaryBodyProperties.has(key));
           }
           return form;
         };
@@ -336,6 +336,7 @@ export class OpenApiMcpClient {
     const maxAttempts = isGet ? 3 : isMultipart ? 2 : 1;
     const retryableStatuses = isGet ? new Set([408, 429, 502, 503, 504]) : new Set([429, 503]);
     let response: Response | undefined;
+    /* oxlint-disable no-await-in-loop -- retries with backoff are sequential by definition: each attempt must settle before the delay and the next attempt */
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const body = await buildBody();
       try {
@@ -363,6 +364,7 @@ export class OpenApiMcpClient {
         );
       }
     }
+    /* oxlint-enable no-await-in-loop */
     const finalResponse = response!;
     const contentType = finalResponse.headers.get("content-type") ?? "";
     const text = await finalResponse.text();

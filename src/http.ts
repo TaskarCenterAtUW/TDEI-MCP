@@ -209,6 +209,7 @@ async function sendWebResponse(nodeResponse: ServerResponse, webResponse: Respon
   const reader = webResponse.body.getReader();
   try {
     for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- chunks must be written in order with backpressure; reading them in parallel is not possible
       const { done, value } = await reader.read();
       if (done) break;
       nodeResponse.write(value);

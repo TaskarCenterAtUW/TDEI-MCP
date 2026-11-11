@@ -21,11 +21,11 @@ const CORE_HOST: Record<TdeiEnvironment, string> = {
   prod: "https://api.tdei.us",
 };
 
-export function osmApiBase(environment: TdeiEnvironment): string {
+function osmApiBase(environment: TdeiEnvironment): string {
   return `${OSM_HOST[environment]}/api/0.6`;
 }
 
-export function coreApiBase(environment: TdeiEnvironment): string {
+function coreApiBase(environment: TdeiEnvironment): string {
   return `${CORE_HOST[environment]}/api/v1`;
 }
 
