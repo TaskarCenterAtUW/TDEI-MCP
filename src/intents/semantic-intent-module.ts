@@ -66,6 +66,9 @@ import type {
   DataType,
   DatasetAsset,
   DatasetMatch,
+  TcatQaReportRow,
+  TcatQaReportsData,
+  TcatQaReportsInput,
 } from "./types.js";
 
 export type { TdeiOperations } from "./operations.js";
@@ -135,13 +138,67 @@ function readDatasetDataType(dataset: Record<string, unknown>): DataType | undef
 }
 
 function readDatasetName(dataset: Record<string, unknown>): string | undefined {
-  const name = dataset.name ?? dataset.dataset_name;
-  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  const direct = dataset.name ?? dataset.dataset_name;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  // The live listDatasetFiles shape keeps the name in metadata.dataset_detail.
+  return firstText(readDatasetDetail(dataset), ["name"]);
 }
 
 function readDatasetId(dataset: Record<string, unknown>): string | undefined {
   const found = dataset.tdei_dataset_id ?? dataset.tdeiDatasetId ?? dataset.id;
   return typeof found === "string" && found.trim() ? found.trim() : undefined;
+}
+
+/** Object-only view of an unknown value (arrays and primitives excluded). */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** First non-empty string/number (or primitive array) among `keys`, trimmed. */
+function firstText(source: Record<string, unknown> | undefined, keys: readonly string[]): string | undefined {
+  if (!source) return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value)) {
+      const parts = value
+        .filter((item) => typeof item === "string" || typeof item === "number")
+        .map((item) => String(item).trim())
+        .filter((item) => item.length > 0);
+      if (parts.length > 0) return parts.join(", ");
+    }
+  }
+  return undefined;
+}
+
+/** metadata.dataset_detail block (name, version and custom metadata live here). */
+function readDatasetDetail(dataset: Record<string, unknown>): Record<string, unknown> | undefined {
+  return asRecord(asRecord(dataset.metadata)?.dataset_detail);
+}
+
+function readDatasetCustomMetadata(dataset: Record<string, unknown>): Record<string, unknown> | undefined {
+  return asRecord(readDatasetDetail(dataset)?.custom_metadata);
+}
+
+function readDatasetVersion(dataset: Record<string, unknown>): string | undefined {
+  return firstText(readDatasetDetail(dataset), ["version"]) ?? firstText(dataset, ["version"]);
+}
+
+function readDatasetServiceName(dataset: Record<string, unknown>): string | undefined {
+  return firstText(dataset, ["service", "service_name"]);
+}
+
+/** Natural compare so "1.10" is newer than "1.9" (a plain string sort gets this wrong). */
+const VERSION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+function compareDatasetVersions(a: string | undefined, b: string | undefined): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return VERSION_COLLATOR.compare(a, b);
 }
 
 /** First UUID found anywhere in a string (handles pasted table rows). */
@@ -159,19 +216,52 @@ function tableCell(value: unknown): string {
  * with the name, UUID, data type and status. The user replies with a UUID
  * (or a pasted row containing one) or a 1-based row number.
  */
-export function renderDatasetTable(matches: DatasetMatch[]): string {
+function renderDatasetTable(matches: DatasetMatch[]): string {
   if (matches.length === 0) return "No datasets matched.";
-  const header = "| # | name | tdei_dataset_id | data_type | status |";
-  const divider = "|---|------|-----------------|-----------|--------|";
+  const header = "| # | name | version | tdei_dataset_id | data_type | status |";
+  const divider = "|---|------|---------|-----------------|-----------|--------|";
   const rows = matches.map((match, index) => {
     const dataset = match.dataset;
     const name = readDatasetName(dataset) ?? "";
+    const version = match.version ?? readDatasetVersion(dataset) ?? "";
     const id = readDatasetId(dataset) ?? "";
     const rawType = String(dataset.data_type ?? dataset.dataType ?? "");
     const status = String(dataset.status ?? "");
-    return `| ${index + 1} | ${tableCell(name)} | ${tableCell(id)} | ${tableCell(rawType)} | ${tableCell(status)} |`;
+    return `| ${index + 1} | ${tableCell(name)} | ${tableCell(version)} | ${tableCell(id)} | ${tableCell(rawType)} | ${tableCell(status)} |`;
   });
   return [header, divider, ...rows].join("\n");
+}
+
+/**
+ * QA/QC report table. Report columns show presence (yes/missing) rather than
+ * the blob URL: rows[] carries the full URLs, and 300+ long SAS URLs would
+ * dominate the reply.
+ */
+function renderTcatQaReportTable(rows: TcatQaReportRow[]): string {
+  if (rows.length === 0) return "No datasets matched the filters.";
+  const header =
+    "| # | name | version | tdei_dataset_id | uploaded | status | pipeline | tract_no | pdf | html | report_code |";
+  const divider =
+    "|---|------|---------|-----------------|----------|--------|----------|----------|-----|------|-------------|";
+  const lines = rows.map((row, index) => {
+    const uploaded = row.uploaded_timestamp ? row.uploaded_timestamp.slice(0, 10) : "";
+    const pdf = row.reportUrlPdf ? "yes" : "missing";
+    const html = row.reportUrlHtml ? "yes" : "missing";
+    return [
+      `| ${index + 1}`,
+      tableCell(row.name),
+      tableCell(row.version ?? ""),
+      tableCell(row.tdei_dataset_id ?? ""),
+      tableCell(uploaded),
+      tableCell(row.status ?? ""),
+      tableCell(row.pipelineVersion ?? ""),
+      tableCell(row.tractNo ?? ""),
+      pdf,
+      html,
+      `${tableCell(row.reportCode ?? "")} |`,
+    ].join(" | ");
+  });
+  return [header, divider, ...lines].join("\n");
 }
 
 /**
@@ -197,6 +287,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   const worker = async (): Promise<void> => {
     while (next < items.length) {
       const index = next++;
+      // oxlint-disable-next-line no-await-in-loop -- each worker must finish one item before taking the next, which is what caps concurrency
       results[index] = await fn(items[index] as T);
     }
   };
@@ -206,6 +297,74 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 /** The jobs API returns at most this many records per call (page_size 1 to 50). */
 const JOBS_API_PAGE_SIZE = 50;
+
+/** Dataset API page size used by the QA/QC report inventory scan. */
+const DATASET_SCAN_PAGE_SIZE = 50;
+/** Pages fetched in parallel per window (same bound as the jobs fan-out). */
+const DATASET_SCAN_CONCURRENCY = 5;
+/** Safety stop for a runaway project group (200 pages * 50 = 10,000 datasets). */
+const DATASET_SCAN_MAX_PAGES = 200;
+/** Follow-up questions reuse the scan instead of re-reading dozens of pages. */
+const DATASET_SCAN_CACHE_TTL_MS = 60_000;
+
+interface TcatCandidate {
+  dataset: Record<string, unknown>;
+  name: string;
+  version: string | undefined;
+  uploadedMs: number;
+  id: string | undefined;
+  versionsAvailable: number | undefined;
+}
+
+/** Newer version wins, then newest upload, then id for deterministic output. */
+function compareTcatCandidates(a: TcatCandidate, b: TcatCandidate): number {
+  const byVersion = compareDatasetVersions(a.version, b.version);
+  if (byVersion !== 0) return byVersion;
+  if (a.uploadedMs !== b.uploadedMs) return a.uploadedMs - b.uploadedMs;
+  return (a.id ?? "").localeCompare(b.id ?? "");
+}
+
+/** Normalize one dataset record into a dedupe candidate. */
+function toTcatCandidate(dataset: Record<string, unknown>): TcatCandidate {
+  return {
+    dataset,
+    name: readDatasetName(dataset) ?? readDatasetId(dataset) ?? "(unnamed dataset)",
+    version: readDatasetVersion(dataset),
+    uploadedMs: uploadedTimestampMs(dataset) ?? 0,
+    id: readDatasetId(dataset),
+    versionsAvailable: undefined,
+  };
+}
+
+/**
+ * Keep the newest version of each dataset name. The key includes the service
+ * when no service filter was used, because identical names in two services
+ * are different datasets and must not collapse into one row.
+ */
+function selectLatestPerName(
+  datasets: Array<Record<string, unknown>>,
+  serviceFilter: string | undefined,
+): { selected: TcatCandidate[]; versionsSuperseded: number; uniqueNames: number } {
+  const byKey = new Map<string, TcatCandidate>();
+  const counts = new Map<string, number>();
+  for (const dataset of datasets) {
+    const candidate = toTcatCandidate(dataset);
+    const groupKey = serviceFilter ?? firstText(dataset, ["tdei_service_id"]) ?? readDatasetServiceName(dataset) ?? "";
+    const key = `${groupKey}\u0000${candidate.name}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const previous = byKey.get(key);
+    if (!previous || compareTcatCandidates(candidate, previous) > 0) byKey.set(key, candidate);
+  }
+  const selected = [...byKey.entries()].map(([key, candidate]) => ({
+    ...candidate,
+    versionsAvailable: counts.get(key) ?? 1,
+  }));
+  return {
+    selected,
+    versionsSuperseded: datasets.length - selected.length,
+    uniqueNames: new Set(selected.map((candidate) => candidate.name)).size,
+  };
+}
 
 export class SemanticIntentModule {
   private readonly readCache = new Map<string, { expires: number; value: Promise<unknown> }>();
@@ -265,8 +424,17 @@ export class SemanticIntentModule {
             const ts = uploadedTimestampMs(item);
             return ts !== undefined && ts >= cutoffMs;
           });
+    const projectGroupId = input.projectGroupId?.trim() || undefined;
+    const serviceId = input.serviceId?.trim() || undefined;
+    // A project-group/service listing means "latest unique datasets" unless the
+    // caller explicitly asks for every version. This is the single place the
+    // rule lives; dependent tools (details, download, workspace creation)
+    // resolve their dataset through this search, so they inherit it.
+    const latestPerName = input.latestPerName ?? Boolean(projectGroupId || serviceId);
+
     const common = {
       ...(input.dataType ? { dataType: input.dataType } : {}),
+      ...(serviceId ? { serviceId } : {}),
       status: input.status ?? ("All" as const),
       sortField: "uploaded_timestamp" as const,
       sortOrder: "desc" as const,
@@ -274,21 +442,87 @@ export class SemanticIntentModule {
       pageSize,
     };
 
-    const complete = (
-      datasets: Array<Record<string, unknown>>,
+    const result = (
+      rows: Array<{
+        dataset: Record<string, unknown>;
+        version: string | undefined;
+        versionsAvailable: number | undefined;
+      }>,
       matchedBy: DatasetMatch["matchedBy"],
       evidence: string,
+      scan?: FindDatasetsData["scan"],
     ): IntentResult<FindDatasetsData> => {
-      const matches: DatasetMatch[] = datasets.map((dataset) => ({ dataset, matchedBy, evidence }));
+      const matches: DatasetMatch[] = rows.map((row) => ({
+        dataset: row.dataset,
+        matchedBy,
+        evidence,
+        ...(row.version ? { version: row.version } : {}),
+        ...(row.versionsAvailable !== undefined ? { versionsAvailable: row.versionsAvailable } : {}),
+      }));
       return {
         status: "complete",
         data: {
           matches,
-          ...(input.latest && datasets[0] ? { selected: datasets[0] } : {}),
+          ...(input.latest && matches[0] ? { selected: matches[0].dataset } : {}),
           effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+          ...(scan ? { scan } : {}),
           table: renderDatasetTable(matches),
         },
       };
+    };
+    const complete = (
+      datasets: Array<Record<string, unknown>>,
+      matchedBy: DatasetMatch["matchedBy"],
+      evidence: string,
+    ): IntentResult<FindDatasetsData> =>
+      result(
+        datasets.map((dataset) => ({
+          dataset,
+          version: readDatasetVersion(dataset),
+          versionsAvailable: undefined,
+        })),
+        matchedBy,
+        evidence,
+      );
+
+    /** Project-group/service listings read every page, then keep the latest per name. */
+    const scanAndSelect = async (
+      base: Pick<DatasetSearch, "projectGroupId" | "serviceId">,
+      matchedBy: DatasetMatch["matchedBy"],
+      evidence: string,
+    ): Promise<IntentResult<FindDatasetsData>> => {
+      const baseQuery = {
+        ...base,
+        ...(input.dataType ? { dataType: input.dataType } : {}),
+        status: input.status ?? "All",
+      };
+      // Follow-up questions reuse the scan instead of re-reading dozens of pages.
+      const scanKey = `findDatasetsScan:${base.projectGroupId ?? ""}:${base.serviceId ?? ""}:${input.dataType ?? "*"}:${baseQuery.status}`;
+      const scan = await this.cached(scanKey, DATASET_SCAN_CACHE_TTL_MS, context, () =>
+        this.scanDatasetPages(baseQuery, context),
+      );
+      const filtered = applyCutoff(scan.datasets);
+      const latest = selectLatestPerName(filtered, base.serviceId);
+      const rows = latestPerName ? latest.selected : filtered.map(toTcatCandidate);
+      // Newest upload first across every page scanned (the API only sorts within a page).
+      rows.sort((a, b) => (a.uploadedMs !== b.uploadedMs ? b.uploadedMs - a.uploadedMs : a.name.localeCompare(b.name)));
+      const shown = rows.slice(0, pageSize);
+      const note = scan.truncated
+        ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset records) and stopped at the ${DATASET_SCAN_MAX_PAGES}-page cap; some datasets were not read. Narrow with serviceId or uploadedWithinDays.`
+        : latestPerName
+          ? `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s); kept the latest version of each of ${latest.uniqueNames} dataset name(s) (${latest.versionsSuperseded} older version record(s) hidden).`
+          : `Scanned every page: ${scan.pagesRead} page(s), ${filtered.length} dataset record(s).`;
+      return result(shown, matchedBy, evidence, {
+        pagesRead: scan.pagesRead,
+        datasetsScanned: scan.datasets.length,
+        uniqueDatasetNames: latest.uniqueNames,
+        versionsSuperseded: latestPerName ? latest.versionsSuperseded : 0,
+        truncated: scan.truncated,
+        note:
+          rows.length > shown.length
+            ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 50) or narrow with serviceId/uploads.`
+            : note,
+      });
     };
     const search = async (extra: Partial<DatasetSearch>) =>
       applyCutoff(await this.dependencies.operations.searchDatasets({ ...common, ...extra }, context));
@@ -302,12 +536,11 @@ export class SemanticIntentModule {
     if (input.bbox) {
       return complete(await search({ bbox: input.bbox }), "bbox", `explicit bbox ${input.bbox.join(",")}`);
     }
-    if (input.projectGroupId) {
-      return complete(
-        await search({ projectGroupId: input.projectGroupId }),
-        "project_group",
-        `project group ${input.projectGroupId}`,
-      );
+    if (projectGroupId) {
+      return scanAndSelect({ projectGroupId }, "project_group", `project group ${projectGroupId}`);
+    }
+    if (serviceId) {
+      return scanAndSelect({ serviceId }, "service", `service ${serviceId}`);
     }
 
     if (!input.place) {
@@ -835,6 +1068,261 @@ export class SemanticIntentModule {
         ...result.data,
         inclineNote:
           "Incline presence is not in dataset metadata. Use tdei_check_dataset_incline for an automatic verdict, or download the dataset ZIP with tdei_download_dataset and inspect edges files; to tag it, call tdei_tag_incline.",
+      },
+    };
+  }
+
+  /**
+   * Resolve one project group from an id or a name. Names are matched against
+   * the caller's groups (exact first, then substring), mirroring tdei_list_jobs.
+   */
+  private async resolveSingleProjectGroup(
+    input: { projectGroupId?: string; projectGroupName?: string },
+    context: RequestContext,
+    question: string,
+  ): Promise<
+    | { status: "resolved"; id: string; name?: string }
+    | { status: "needs_input"; question: string; allowedValues?: string[] }
+  > {
+    const explicitId = input.projectGroupId?.trim();
+    const explicitName = input.projectGroupName?.trim();
+    let groups: ProjectGroup[] = [];
+    try {
+      groups = await this.accessibleProjectGroups(context);
+    } catch (error) {
+      // The id alone is enough; only a name needs the group list.
+      if (!explicitId) throw error;
+    }
+    const entries = groups.flatMap((group) => {
+      const id = group.tdei_project_group_id ?? group.id ?? group.project_group_id;
+      const name = group.project_group_name ?? group.name;
+      return typeof id === "string" && id.length > 0 ? [{ id, name: typeof name === "string" ? name : id }] : [];
+    });
+    if (!explicitId && !explicitName) {
+      return {
+        status: "needs_input",
+        question,
+        allowedValues: entries.map((entry) => entry.name),
+      };
+    }
+    if (explicitId) {
+      const known = entries.find((entry) => entry.id === explicitId);
+      return { status: "resolved", id: explicitId, ...(known ? { name: known.name } : {}) };
+    }
+    const wanted = (explicitName ?? "").toLowerCase();
+    const exact = entries.filter((entry) => entry.name.toLowerCase() === wanted);
+    const partial = entries.filter((entry) => entry.name.toLowerCase().includes(wanted));
+    const found = exact.length > 0 ? exact : partial;
+    if (found.length === 0) {
+      return {
+        status: "needs_input",
+        question: `No project group matches "${explicitName}". ${question}`,
+        allowedValues: entries.map((entry) => entry.name),
+      };
+    }
+    if (found.length > 1) {
+      return {
+        status: "needs_input",
+        question: `"${explicitName}" matches ${found.length} project groups. Which one?`,
+        allowedValues: found.map((entry) => entry.name),
+      };
+    }
+    const only = found[0]!;
+    return { status: "resolved", id: only.id, name: only.name };
+  }
+
+  /**
+   * Read every dataset record of a query (project group, optionally one
+   * service) in page windows, stopping at the first short page. Bounded
+   * concurrency keeps a ~2,400-record service near 10s instead of ~40s, and
+   * the cap reports truncation instead of scanning forever.
+   */
+  private async scanDatasetPages(
+    base: Pick<DatasetSearch, "dataType" | "status" | "projectGroupId" | "serviceId">,
+    context: RequestContext,
+  ): Promise<{ datasets: Array<Record<string, unknown>>; pagesRead: number; truncated: boolean }> {
+    const datasets: Array<Record<string, unknown>> = [];
+    let pagesRead = 0;
+    let truncated = false;
+    for (let windowStart = 1; ; windowStart += DATASET_SCAN_CONCURRENCY) {
+      if (windowStart > DATASET_SCAN_MAX_PAGES) {
+        truncated = true;
+        break;
+      }
+      const lastPage = Math.min(windowStart + DATASET_SCAN_CONCURRENCY - 1, DATASET_SCAN_MAX_PAGES);
+      const pageNumbers = Array.from({ length: lastPage - windowStart + 1 }, (_, index) => windowStart + index);
+      // oxlint-disable-next-line no-await-in-loop -- pages are read in windows so the scan can stop as soon as a short page arrives
+      const batches = await mapWithConcurrency(pageNumbers, DATASET_SCAN_CONCURRENCY, (page) =>
+        this.dependencies.operations.searchDatasets(
+          {
+            ...base,
+            sortField: "uploaded_timestamp",
+            sortOrder: "desc",
+            page,
+            pageSize: DATASET_SCAN_PAGE_SIZE,
+          },
+          context,
+        ),
+      );
+      let reachedEnd = false;
+      for (const batch of batches) {
+        pagesRead += 1;
+        for (const dataset of batch) datasets.push(dataset);
+        if (batch.length < DATASET_SCAN_PAGE_SIZE) {
+          reachedEnd = true;
+          break;
+        }
+      }
+      if (reachedEnd) break;
+      // Every page in the capped window was full: there may be more data.
+      if (lastPage >= DATASET_SCAN_MAX_PAGES) {
+        truncated = true;
+        break;
+      }
+    }
+    return { datasets, pagesRead, truncated };
+  }
+
+  /**
+   * Read-only QA/QC report inventory for a project group or service: scan all
+   * dataset pages, keep the latest version per name, and project the TCAT
+   * report fields from metadata.dataset_detail.custom_metadata. This is the
+   * read side of tdei_generate_quality_report (which creates one report job).
+   */
+  async getTcatQaReports(
+    input: TcatQaReportsInput = {},
+    context: RequestContext = {},
+  ): Promise<IntentResult<TcatQaReportsData>> {
+    const resolved = await this.resolveSingleProjectGroup(
+      input,
+      context,
+      "Which project group should I read QA/QC reports for?",
+    );
+    if (resolved.status === "needs_input") {
+      return {
+        status: "needs_input",
+        missing: [
+          {
+            field: "projectGroupName",
+            question: resolved.question,
+            ...(resolved.allowedValues ? { allowedValues: resolved.allowedValues } : {}),
+          },
+        ],
+        accepted: { ...input },
+      };
+    }
+
+    const projectGroupId = resolved.id;
+    const dataType = input.dataType ?? "osw";
+    const status = input.status ?? "All";
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 500);
+    const latestPerName = input.latestPerName !== false;
+    const serviceId = input.serviceId?.trim() || undefined;
+
+    const scanKey = `tcatQaReports:${projectGroupId}:${serviceId ?? "*"}:${dataType}:${status}`;
+    const loadScan = () =>
+      this.scanDatasetPages({ projectGroupId, ...(serviceId ? { serviceId } : {}), dataType, status }, context);
+    const scan = input.refresh
+      ? await loadScan()
+      : await this.cached(scanKey, DATASET_SCAN_CACHE_TTL_MS, context, loadScan);
+
+    const latest = selectLatestPerName(scan.datasets, serviceId);
+    const selected = latestPerName ? latest.selected : scan.datasets.map(toTcatCandidate);
+    const versionsSuperseded = latestPerName ? latest.versionsSuperseded : 0;
+
+    const toRow = (candidate: TcatCandidate): TcatQaReportRow => {
+      const custom = readDatasetCustomMetadata(candidate.dataset);
+      return {
+        name: candidate.name,
+        version: candidate.version,
+        tdei_dataset_id: candidate.id,
+        uploaded_timestamp: firstText(candidate.dataset, ["uploaded_timestamp", "uploaded_on"]),
+        status: firstText(candidate.dataset, ["status"]),
+        service: readDatasetServiceName(candidate.dataset),
+        serviceId: firstText(candidate.dataset, ["tdei_service_id"]),
+        pipelineVersion: firstText(custom, ["pipeline_version", "pipeline version"]),
+        tractNo: firstText(custom, ["tract_no", "tract_nos"]),
+        area: firstText(custom, ["area"]),
+        county: firstText(custom, ["county"]),
+        releaseNotes: firstText(custom, ["release_notes"]),
+        qaQcReportVersion: firstText(custom, ["tcat_qa_qc_report_version"]),
+        mapSource: firstText(custom, ["map_source"]),
+        reportUrlPdf: firstText(custom, ["tcat_quality_report_url_pdf"]),
+        reportUrlHtml: firstText(custom, ["tcat_quality_report_url_html"]),
+        reportCode: firstText(custom, ["tcat_quality_report_code"]),
+        imageryUsed: asRecord(custom?.imagery_used),
+        versionsAvailable: candidate.versionsAvailable,
+        customMetadata: input.includeCustomMetadata ? (custom ?? {}) : undefined,
+      };
+    };
+
+    const cutoffMs = resolveCutoffMs(input.uploadedAfter, input.uploadedWithinDays);
+    let rows = selected.map(toRow);
+    if (cutoffMs !== undefined) {
+      rows = rows.filter((row) => {
+        const ms = row.uploaded_timestamp ? Date.parse(row.uploaded_timestamp) : Number.NaN;
+        return Number.isFinite(ms) && ms >= cutoffMs;
+      });
+    }
+    const needle = input.nameContains?.trim().toLowerCase();
+    if (needle) rows = rows.filter((row) => row.name.toLowerCase().includes(needle));
+    const reportFilter = input.reportFilter ?? "all";
+    if (reportFilter === "with_reports") rows = rows.filter((row) => Boolean(row.reportUrlPdf || row.reportUrlHtml));
+    if (reportFilter === "missing_reports") rows = rows.filter((row) => !row.reportUrlPdf && !row.reportUrlHtml);
+
+    rows.sort((a, b) => {
+      const byName = VERSION_COLLATOR.compare(a.name, b.name);
+      return byName !== 0 ? byName : compareDatasetVersions(b.version, a.version);
+    });
+
+    const urlCounts = new Map<string, number>();
+    for (const row of rows) {
+      if (row.reportUrlPdf) urlCounts.set(row.reportUrlPdf, (urlCounts.get(row.reportUrlPdf) ?? 0) + 1);
+    }
+    const summary = {
+      matchingRows: rows.length,
+      withReportPdf: rows.filter((row) => Boolean(row.reportUrlPdf)).length,
+      withReportHtml: rows.filter((row) => Boolean(row.reportUrlHtml)).length,
+      withReportCode: rows.filter((row) => Boolean(row.reportCode)).length,
+      missingReport: rows.filter((row) => !row.reportUrlPdf && !row.reportUrlHtml).length,
+      duplicateReportUrls: rows.filter(
+        (row) => Boolean(row.reportUrlPdf) && (urlCounts.get(row.reportUrlPdf as string) ?? 0) > 1,
+      ).length,
+      versionsSuperseded,
+    };
+    const uniqueDatasetNames = new Set(selected.map((candidate) => candidate.name)).size;
+    const shown = rows.slice(0, limit);
+    const mayHaveMore = rows.length > shown.length;
+    const scanNote = scan.truncated
+      ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset records) and stopped at the ${DATASET_SCAN_MAX_PAGES}-page cap; some datasets were not read. Narrow with serviceId or uploadedWithinDays.`
+      : `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s).`;
+
+    return {
+      status: "complete",
+      data: {
+        appliedFilters: { ...input, projectGroupId, dataType, status },
+        ...(resolved.name ? { projectGroupName: resolved.name } : {}),
+        scan: {
+          pagesRead: scan.pagesRead,
+          datasetsScanned: scan.datasets.length,
+          uniqueDatasetNames,
+          truncated: scan.truncated,
+          note: scanNote,
+        },
+        summary,
+        rows: shown,
+        table: renderTcatQaReportTable(shown),
+        truncation: {
+          shown: shown.length,
+          available: rows.length,
+          mayHaveMore,
+          note: mayHaveMore
+            ? `Showing ${shown.length} of ${rows.length} matching rows (limit ${limit}); the summary counts cover all ${rows.length}. Narrow with serviceId, nameContains, reportFilter or uploadedWithinDays instead of paging.`
+            : `Complete for the filters used: ${rows.length} row(s) matched.`,
+        },
+        apiOperation: "listDatasetFiles",
+        method: "GET",
+        path: "/api/v1/datasets",
       },
     };
   }

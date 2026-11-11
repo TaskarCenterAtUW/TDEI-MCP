@@ -6,7 +6,7 @@ export interface ToolSpecFields {
 }
 
 export const TOOL_SPEC_FIELDS: Readonly<Record<string, ToolSpecFields>> = {
-  tdei_find_datasets: { required: [], oneOf: ["place","bbox","projectGroupId","tdeiDatasetId"] },
+  tdei_find_datasets: { required: [], oneOf: ["place","bbox","projectGroupId","serviceId","tdeiDatasetId"] },
   tdei_list_my_project_groups: { required: [] },
   tdei_list_services: { required: [] },
   tdei_validate_dataset: { required: ["asset","dataType"] },
@@ -15,6 +15,7 @@ export const TOOL_SPEC_FIELDS: Readonly<Record<string, ToolSpecFields>> = {
   tdei_my_project_group_roles: { required: [] },
   tdei_list_jobs: { required: [], oneOf: ["projectGroupName","projectGroupId","allGroups"] },
   tdei_get_dataset_details: { required: ["tdeiDatasetId"] },
+  tdei_get_tcat_qa_reports: { required: [], oneOf: ["projectGroupId","projectGroupName"] },
   tdei_download_dataset: { required: ["tdeiDatasetId"] },
   tdei_publish_dataset: { required: ["dataType","tdeiDatasetId"] },
   tdei_delete_dataset: { required: ["confirm","tdeiDatasetId"] },

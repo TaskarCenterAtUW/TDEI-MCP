@@ -18,10 +18,12 @@ const findDatasetsSchema = z.object({
   dataType: z.enum(["osw", "flex", "pathways"]).optional(),
   status: z.enum(["All", "Publish", "Pre-Release"]).optional(),
   projectGroupId: z.string().trim().min(1).optional(),
+  serviceId: z.string().trim().min(1).optional(),
   tdeiDatasetId: z.string().trim().min(1).optional(),
   uploadedAfter: z.string().trim().min(1).optional(),
   uploadedWithinDays: z.number().min(0).optional(),
   latest: z.boolean().optional(),
+  latestPerName: z.boolean().optional(),
   limit: z.number().int().min(1).max(50).optional(),
 });
 
@@ -41,6 +43,22 @@ const listJobsSchema = z.object({
 const getDatasetDetailsSchema = z.object({
   tdeiDatasetId: z.string().trim().min(1),
   dataType: z.enum(["osw", "flex", "pathways"]).optional(),
+});
+
+const tcatQaReportsSchema = z.object({
+  projectGroupId: z.string().trim().min(1).optional(),
+  projectGroupName: z.string().trim().min(1).optional(),
+  serviceId: z.string().trim().min(1).optional(),
+  dataType: z.enum(["osw", "flex", "pathways"]).optional(),
+  status: z.enum(["All", "Publish", "Pre-Release"]).optional(),
+  latestPerName: z.boolean().optional(),
+  uploadedAfter: z.string().trim().min(1).optional(),
+  uploadedWithinDays: z.number().min(0).optional(),
+  nameContains: z.string().trim().min(1).optional(),
+  reportFilter: z.enum(["all", "with_reports", "missing_reports"]).optional(),
+  includeCustomMetadata: z.boolean().optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+  refresh: z.boolean().optional(),
 });
 
 const downloadDatasetSchema = z.object({
@@ -372,6 +390,7 @@ export function registerSemanticTools(
   tool("tdei_get_dataset_details", D.getDatasetDetails, getDatasetDetailsSchema, (a, c) =>
     module.getDatasetDetails(a, c),
   );
+  tool("tdei_get_tcat_qa_reports", D.getTcatQaReports, tcatQaReportsSchema, (a, c) => module.getTcatQaReports(a, c));
   tool("tdei_download_dataset", D.downloadDataset, downloadDatasetSchema, (a, c) => module.downloadDataset(a, c));
   tool("tdei_publish_dataset", D.publishDataset, publishDatasetSchema, (a, c) => module.publishDataset(a, c));
   tool("tdei_delete_dataset", D.deleteDataset, deleteDatasetSchema, (a, c) => module.deleteDataset(a, c));

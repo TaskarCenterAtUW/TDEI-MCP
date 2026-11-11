@@ -14,3 +14,18 @@ test("export tool returns the API runbook on request", () => {
   const text = exportWorkspaceGuide({ method: "api_runbook" });
   assert.match(text, /Export a workspace to TDEI, advanced API recipe/);
 });
+
+test("runbook embeds the caller's bearer and tells the model to use defaults instead of asking", () => {
+  const text = exportWorkspaceGuide({ method: "api_runbook" }, {} as NodeJS.ProcessEnv, "tok-abc");
+  assert.match(text, /Authorization: Bearer tok-abc/);
+  assert.doesNotMatch(text, /\$TDEI_TOKEN/);
+  assert.match(text, /Do not interrogate the user/);
+  assert.match(text, /\$HOME\/Downloads\/tdei-export-<workspace_id>\//);
+  assert.match(text, /data_source = TDEITools/);
+  assert.doesNotMatch(text, /Ask the user for the required ones/);
+});
+
+test("runbook falls back to $TDEI_TOKEN when no bearer is available", () => {
+  const text = exportWorkspaceGuide({ method: "api_runbook" }, {} as NodeJS.ProcessEnv);
+  assert.match(text, /Authorization: Bearer \$TDEI_TOKEN/);
+});

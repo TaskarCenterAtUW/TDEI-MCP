@@ -5,7 +5,7 @@ import { resolveTdeiEnvironment, type TdeiEnvironment } from "../tdei-shared/web
  * (found by diffing the three OpenAPI specs). On prod they are simply not discovered, so the model must be
  * told why they are missing instead of searching for them or blaming the connection.
  */
-export const WORKSPACE_PENDING_FEATURES: ReadonlyArray<{ operation: string; label: string }> = [
+const WORKSPACE_PENDING_FEATURES: ReadonlyArray<{ operation: string; label: string }> = [
   { operation: "check_workspace_create", label: "the workspace creation pre-check (check_workspace_create)" },
   { operation: "get_fixmes", label: "the workspace fixmes listing (get_fixmes)" },
 ];

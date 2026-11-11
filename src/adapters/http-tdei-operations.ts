@@ -106,6 +106,7 @@ export class HttpTdeiOperations implements TdeiOperations {
     appendIfDefined(params, "data_type", input.dataType);
     appendIfDefined(params, "status", input.status);
     appendIfDefined(params, "tdei_project_group_id", input.projectGroupId);
+    appendIfDefined(params, "tdei_service_id", input.serviceId);
     appendIfDefined(params, "tdei_dataset_id", input.tdeiDatasetId);
     appendIfDefined(params, "collection_date", input.collectionDate);
     appendIfDefined(params, "sort_field", input.sortField);

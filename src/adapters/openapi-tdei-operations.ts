@@ -54,6 +54,7 @@ export class OpenApiTdeiOperations implements TdeiOperations {
       ...(input.dataType ? { data_type: input.dataType } : {}),
       status: input.status,
       ...(input.projectGroupId ? { tdei_project_group_id: input.projectGroupId } : {}),
+      ...(input.serviceId ? { tdei_service_id: input.serviceId } : {}),
       ...(input.tdeiDatasetId ? { tdei_dataset_id: input.tdeiDatasetId } : {}),
       ...(input.collectionDate ? { collection_date: input.collectionDate } : {}),
       sort_field: input.sortField,

@@ -63,6 +63,7 @@ test("hosted semantic server calls TDEI directly with its request bearer", async
       "tdei_get_my_identity",
       "tdei_get_pm_tiles_url",
       "tdei_get_system_info",
+      "tdei_get_tcat_qa_reports",
       "tdei_list_feedbacks",
       "tdei_list_jobs",
       "tdei_list_my_project_groups",

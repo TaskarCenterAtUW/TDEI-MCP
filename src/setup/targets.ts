@@ -80,14 +80,36 @@ export function setupEnvForServer(name: string): SetupEnv | undefined {
 const SETUP_REPO = "github:TaskarCenterAtUW/TDEI-MCP";
 
 /**
+ * Characters of the commit SHA used to pin the npx package spec.
+ *
+ * A full 40-character SHA breaks `npx` on npm 10 (the npm bundled with Node
+ * 22): pacote takes its "hosted tarball" shortcut for a full SHA, and since
+ * this package has a `prepare` script it then needs an Arborist to pack the
+ * prepared tarball. `npm exec` does not pass one, so the install dies with
+ * "GitFetcher requires an Arborist constructor to pack a tarball" before the
+ * CLI ever runs. Any committish shorter than 40 characters makes pacote clone
+ * (which npm exec does pass Arborist to), so pin with an abbreviated SHA that
+ * is still unambiguous in practice. See npm/cli#6723.
+ */
+const NPX_PIN_LENGTH = 12;
+
+/** Abbreviated commit SHA that is safe for an `npx` git spec, if `buildSha` is a SHA. */
+function npxPin(buildSha?: string): string | undefined {
+  const sha = (buildSha ?? "").trim().toLowerCase();
+  return /^[0-9a-f]{7,40}$/.test(sha) ? sha.slice(0, NPX_PIN_LENGTH) : undefined;
+}
+
+/**
  * Package spec for `npx`: this repository, pinned to the deployed commit when its SHA is known (so the
- * CLI always matches the gateway), else the dev branch. TDEI_NPX_PACKAGE overrides it (for example
- * `tdei-mcp` once the package is published on npm).
+ * CLI always matches the gateway), else the dev branch. TDEI_NPX_PACKAGE overrides it; set that once the
+ * package is published on npm, preferably with an exact version (`tdei-mcp@0.1.42`) so the CLI matches
+ * the gateway. A registry spec is the preferred install path: no git, no client-side build, and no
+ * npm-10 full-SHA packing bug.
  */
 export function npxPackageSpec(buildSha?: string, env: NodeJS.ProcessEnv = process.env): string {
   const override = env["TDEI_NPX_PACKAGE"]?.trim();
   if (override) return override;
-  return /^[0-9a-f]{7,40}$/i.test(buildSha ?? "") ? `${SETUP_REPO}#${buildSha}` : `${SETUP_REPO}#dev`;
+  return `${SETUP_REPO}#${npxPin(buildSha) ?? "dev"}`;
 }
 
 /** `npx -y <package> setup`: the prefix every setup command on the pages and in messages starts with. */

@@ -31,7 +31,10 @@ COPY mcps.json ./mcps.json
 # stage repeats it so the entrypoint regenerates the same value at boot.
 ARG GIT_SHA=unknown
 ARG BUILD_VERSION=
-ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION
+# Optional: point installer pages at the published npm package, e.g.
+# tdei-mcp@0.1.0. Empty keeps the git fallback (pinned to GIT_SHA).
+ARG TDEI_NPX_PACKAGE=
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION TDEI_NPX_PACKAGE=$TDEI_NPX_PACKAGE
 RUN pnpm build \
   && node scripts/generate-nginx-conf.mjs --file mcps.json --out nginx/nginx.conf --direct
 
@@ -57,7 +60,10 @@ RUN chmod +x scripts/docker-entrypoint.sh
 ENV PORT=3000 TDEI_TRANSPORT=http
 ARG GIT_SHA=unknown
 ARG BUILD_VERSION=
-ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION
+# Optional: point installer pages at the published npm package, e.g.
+# tdei-mcp@0.1.0. Empty keeps the git fallback (pinned to GIT_SHA).
+ARG TDEI_NPX_PACKAGE=
+ENV TDEI_MCP_BUILD_SHA=$GIT_SHA TDEI_MCP_BUILD_VERSION=$BUILD_VERSION TDEI_NPX_PACKAGE=$TDEI_NPX_PACKAGE
 EXPOSE 3000
 # Gateway landing page proves nginx is up and serving the generated routes.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

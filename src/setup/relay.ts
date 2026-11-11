@@ -25,7 +25,7 @@ import { publicAuthCallbackUrl } from "../sso-public-callback.js";
  * production side by side on one machine with a single loopback port.
  */
 export const RELAY_PORT = 8765;
-export const RELAY_SCRIPT_NAME = "sso-callback-relay.cjs";
+const RELAY_SCRIPT_NAME = "sso-callback-relay.cjs";
 export const RELAY_TARGETS_NAME = "sso-callback-targets.json";
 export const RELAY_PID_NAME = "sso-callback-relay.pid";
 const MAX_TARGETS = 5;
@@ -52,7 +52,7 @@ export function mergeRelayTargets(existing: readonly string[], gatewayCallbackUr
   return [...new Set(next)].slice(0, MAX_TARGETS);
 }
 
-export function readRelayTargetsFile(dir: string): string[] {
+function readRelayTargetsFile(dir: string): string[] {
   try {
     const parsed: unknown = JSON.parse(readFileSync(join(dir, RELAY_TARGETS_NAME), "utf-8"));
     if (parsed && typeof parsed === "object" && Array.isArray((parsed as { callbacks?: unknown }).callbacks)) {

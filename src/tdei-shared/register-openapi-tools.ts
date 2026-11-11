@@ -17,13 +17,7 @@ export type TdeiOpenApiToolRegistrationResult = OpenApiToolRegistrationResult;
 export { sanitizeJsonSchema };
 
 /** Auth operations the connector owns (tdei_sso_login etc.); never exposed as raw tools. */
-export const CONNECTOR_MANAGED_AUTH_TOOLS = new Set([
-  "authenticate",
-  "refreshToken",
-  "ssoRedirect",
-  "ssoLogin",
-  "ssoLogout",
-]);
+const CONNECTOR_MANAGED_AUTH_TOOLS = new Set(["authenticate", "refreshToken", "ssoRedirect", "ssoLogin", "ssoLogout"]);
 
 export const ALLOW_ALL_ENDPOINTS: EndpointFilter = { mode: "all", allow: [], deny: [], allowTags: [], denyTags: [] };
 

@@ -15,6 +15,7 @@ export async function findFreePort(
   tryPort: (port: number) => Promise<boolean> = defaultTryPort,
 ): Promise<number> {
   for (let port = fromPort; port < fromPort + 100; port += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- probe ports in order and stop at the first free one
     if (await tryPort(port)) return port;
   }
   throw new Error(`No free loopback port found in ${fromPort}-${fromPort + 99}. ${portInUseHint(fromPort)}`);

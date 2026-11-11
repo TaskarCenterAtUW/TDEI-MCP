@@ -14,7 +14,7 @@ import { EXPORT_WORKSPACE_TOOL, registerExportWorkspaceTool } from "./export-too
 import { augmentWorkspaceToolDescription } from "./tool-instructions.js";
 
 /** Operations that are protocol plumbing, not user capabilities (health, OSM capabilities, catch-all proxy). */
-export const WORKSPACE_PLUMBING_OPERATIONS = /^(health_check_|root__get|capabilities_|catch_all_)/;
+const WORKSPACE_PLUMBING_OPERATIONS = /^(health_check_|root__get|capabilities_|catch_all_)/;
 
 /** Register the TDEI Workspace (ws-backend) OpenAPI operations. There are no semantic tools to dedupe against. */
 export async function registerTdeiWorkspaceOpenApiTools(

@@ -9,10 +9,11 @@ export const TDEI_CORE_SERVER_INSTRUCTIONS = `${TDEI_SHARED_SERVER_INSTRUCTIONS}
 This server talks to the TDEI core API: project groups, services, datasets, jobs, feedbacks, metrics, and data-standard versions. The dev, staging, and production instances share these instructions; only the API host changes.
 
 - Resolve project groups and services first (tdei_list_my_project_groups, tdei_list_services) and cache their IDs for later dataset and upload calls.
-- Use tdei_find_datasets for name/city/bbox searches, tdei_get_dataset_details for an exact tdei_dataset_id, and tdei_download_dataset to build the client-side download curl.
+- Use tdei_find_datasets for name/city/bbox/project-group/service searches, tdei_get_dataset_details for an exact tdei_dataset_id, and tdei_download_dataset to build the client-side download curl.
 - If the User provides a osw file (zip) and asks to validate call the following POST API /api/v1/osw/validate thru CURL and upload the file directly. 
 - Dataset upload are client-side: ask for the data type, the absolute ZIP path on the CLIENT machine, and (for uploads) projectGroupId, serviceId, and required metadata. Return the curl hand-off, then poll tdei_list_jobs. Once a job is COMPLETED, fetch its result with job_download (GET /api/v1/job/download/<job_id>).
-- When user asks for the latest datasets for a project group - Get the latest unique published datasets. No duplicate items on the list return. 
+- When user asks for the latest datasets for a project group - call tdei_find_datasets with projectGroupId (or serviceId). It scans every page and returns the latest unique published dataset per name (no duplicate versions, numeric version compare: 1.10 is newer than 1.9) with versionsAvailable on each row. Pass latestPerName:false only when the user explicitly wants every version.
+- For QA/QC report detail (existing report links, report codes, pipeline/tract fields, or which datasets are missing a report) for a project group or service, use tdei_get_tcat_qa_reports. It scans every dataset page and keeps the latest version per dataset name. Do NOT use tdei_generate_quality_report for lookups: that creates a new report job for one dataset id.
 - For OSW Tag definition, use the osw-tag-definition schema (inclines, surface, width, length,description, name) then use tdei_get_dataset_details to generate the request payload based on the json at https://raw.githubusercontent.com/TaskarCenterAtUW/TDEI-osw-datasvc-ts/dev/schema/tag-quality.json.
 - For Tags, use the tag-quality schema to generate the request payload.
 - Jobs: before tdei_list_jobs, ask the user which project group (by name) unless they named one; list project groups with tdei_list_my_project_groups if they need options. Pass projectGroupName (or projectGroupId). Only when the user says "all" pass allGroups:true. For "running jobs" use status IN-PROGRESS; for one job's status use jobId. Fetching a job's result (job_download) is the last step and only for COMPLETED jobs.
@@ -44,6 +45,7 @@ Derived from the TDEI API tester (TaskarCenterAtUW/TDEI-api-tester) and the core
 - "my roles / permissions": tdei_get_my_identity (SSO token claims; TDEI has no roles endpoint). It does not list project-group membership or workspace roles.
 - "jobs": tdei_list_jobs needs a project group (ask which one). "Show: all" in the portal means the whole group (includeGroupJobs true); omitted means only the user's own jobs. The job result is only fetched once the status is COMPLETED.
 - "what changed in a dataset": there is no diff; use lineage (derived_from_dataset_id) and exact versions.
+- "QA/QC report", "quality report links", "report detail", "missing report": tdei_get_tcat_qa_reports (inventory across a project group/service), not tdei_generate_quality_report (creates a job for one dataset). Report fields are not a TDEI standard: they live in metadata.dataset_detail.custom_metadata and may be absent for other pipelines.
 - A dataset NAME is not an id: resolve it to a tdei_dataset_id with tdei_find_datasets and let the user confirm before download, delete, clone or publish.
 - Destructive or irreversible (delete, publish, union, regenerate API key): confirm the exact target first.
 

@@ -34,6 +34,7 @@ function flagValue(name: string): string | undefined {
 const servers = resolveMultiMcp(loadMultiMcpFile(resolveMultiMcpFilePath(flagValue("--file"))));
 console.log(`multi transport check: ${servers.length} servers`);
 
+/* oxlint-disable no-await-in-loop -- servers are checked one at a time so the report stays in file order and a slow server cannot stall the others' output */
 for (const s of servers) {
   console.log(`\n== ${s.name} (${s.url}) ==`);
   const client = new Client({ name: "tdei-multi-check", version: "0.1.0" });
@@ -83,6 +84,7 @@ for (const s of servers) {
     /* ignore */
   }
 }
+/* oxlint-enable no-await-in-loop */
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n== SUMMARY: ${checks.length - failed.length}/${checks.length} passed ==`);

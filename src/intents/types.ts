@@ -41,6 +41,7 @@ export interface FindDatasetsInput {
   dataType?: DataType;
   status?: DatasetStatus;
   projectGroupId?: string;
+  serviceId?: string;
   /** Exact TDEI dataset id lookup (maps to API tdei_dataset_id). */
   tdeiDatasetId?: string;
   /** Only keep datasets uploaded after this ISO date-time (client-side; API has no uploaded_after). */
@@ -48,13 +49,27 @@ export interface FindDatasetsInput {
   /** Shorthand for uploadedAfter = now - N days. */
   uploadedWithinDays?: number;
   latest?: boolean;
+  /**
+   * Keep one row per dataset name: the newest version (numeric compare, so
+   * 1.10 beats 1.9), newest upload as tie-break, and count the versions it
+   * replaced. Defaults to true for projectGroupId/serviceId listings, which
+   * read every page; pass false to see each version. This is the single
+   * implementation of "latest unique datasets" — dependent tools
+   * (tdei_get_dataset_details, tdei_download_dataset, workspace creation)
+   * resolve their dataset through this tool, so they inherit it.
+   */
+  latestPerName?: boolean;
   limit?: number;
 }
 
 export interface DatasetMatch {
   dataset: Dataset;
-  matchedBy: "name" | "city" | "bbox" | "project_group" | "dataset_id";
+  matchedBy: "name" | "city" | "bbox" | "project_group" | "service" | "dataset_id";
   evidence: string;
+  /** Dataset version from metadata.dataset_detail.version (when present). */
+  version?: string;
+  /** How many versions share this name (latestPerName scans only). */
+  versionsAvailable?: number;
 }
 
 export interface FindDatasetsData {
@@ -64,7 +79,18 @@ export interface FindDatasetsData {
     field: "uploaded_timestamp";
     order: "desc";
   };
-  /** Markdown table of the matches (#, name, uuid, type, status) for the user to pick from. */
+  /** Present when the search scanned beyond the first page (latestPerName). */
+  scan?: {
+    pagesRead: number;
+    datasetsScanned: number;
+    uniqueDatasetNames: number;
+    /** Dataset records hidden because a newer version of the same name was kept. */
+    versionsSuperseded: number;
+    /** True when the page cap stopped the scan before the last page. */
+    truncated: boolean;
+    note: string;
+  };
+  /** Markdown table of the matches (#, name, version, uuid, type, status) for the user to pick from. */
   table: string;
 }
 
@@ -138,6 +164,96 @@ export interface ListJobsData {
 }
 
 export type JobRecord = Record<string, unknown>;
+
+/** Which rows a QA/QC report inventory should keep, based on report-link presence. */
+type TcatQaReportFilter = "all" | "with_reports" | "missing_reports";
+
+export interface TcatQaReportsInput {
+  projectGroupId?: string;
+  /** Resolved against the caller's project groups (case-insensitive). */
+  projectGroupName?: string;
+  serviceId?: string;
+  dataType?: DataType;
+  /** Defaults to All so pre-release datasets that carry the newest report are included. */
+  status?: DatasetStatus;
+  /** Keep one row per dataset name, choosing the newest version. Defaults to true. */
+  latestPerName?: boolean;
+  uploadedAfter?: string;
+  uploadedWithinDays?: number;
+  /** Case-insensitive substring filter on the dataset name (narrows large inventories). */
+  nameContains?: string;
+  reportFilter?: TcatQaReportFilter;
+  includeCustomMetadata?: boolean;
+  /** Rows returned (1-500). The summary always covers every scanned dataset. */
+  limit?: number;
+  /** Bypass the short-lived read cache and scan the API again. */
+  refresh?: boolean;
+}
+
+/**
+ * One QA/QC report row. Fields are required-but-possibly-undefined so the
+ * builder can assign them directly under exactOptionalPropertyTypes; JSON
+ * serialization drops the undefined ones.
+ */
+export interface TcatQaReportRow {
+  name: string;
+  version: string | undefined;
+  tdei_dataset_id: string | undefined;
+  uploaded_timestamp: string | undefined;
+  status: string | undefined;
+  service: string | undefined;
+  serviceId: string | undefined;
+  pipelineVersion: string | undefined;
+  tractNo: string | undefined;
+  area: string | undefined;
+  county: string | undefined;
+  releaseNotes: string | undefined;
+  qaQcReportVersion: string | undefined;
+  mapSource: string | undefined;
+  reportUrlPdf: string | undefined;
+  reportUrlHtml: string | undefined;
+  reportCode: string | undefined;
+  imageryUsed: Record<string, unknown> | undefined;
+  /** How many dataset versions share this name (latestPerName only). */
+  versionsAvailable: number | undefined;
+  customMetadata: Record<string, unknown> | undefined;
+}
+
+export interface TcatQaReportsData {
+  appliedFilters: TcatQaReportsInput & { projectGroupId: string; dataType: DataType; status: DatasetStatus };
+  projectGroupName?: string;
+  scan: {
+    pagesRead: number;
+    datasetsScanned: number;
+    uniqueDatasetNames: number;
+    /** True when the server-side page cap stopped the scan before the last page. */
+    truncated: boolean;
+    note: string;
+  };
+  summary: {
+    matchingRows: number;
+    withReportPdf: number;
+    withReportHtml: number;
+    withReportCode: number;
+    missingReport: number;
+    /** Rows whose PDF URL is shared with at least one other row. */
+    duplicateReportUrls: number;
+    /** Dataset rows hidden because a newer version of the same name was kept. */
+    versionsSuperseded: number;
+  };
+  rows: TcatQaReportRow[];
+  /** Markdown table of the shown rows (presence flags, not full URLs). */
+  table: string;
+  truncation: {
+    shown: number;
+    available: number;
+    mayHaveMore: boolean;
+    note: string;
+  };
+  apiOperation: "listDatasetFiles";
+  method: "GET";
+  path: "/api/v1/datasets";
+}
 
 export interface PublishDatasetInput {
   tdeiDatasetId?: string;
@@ -426,11 +542,6 @@ export type DatasetAsset =
     }
   | { kind: "url"; url: string; name?: string }
   | { kind: "object_ref"; id: string; name: string };
-
-export interface AcceptedJob {
-  jobId: string;
-  location?: string;
-}
 
 interface DatasetDetailMetadata {
   name?: string;

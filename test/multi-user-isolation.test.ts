@@ -168,6 +168,7 @@ test("gateway: two users with their own tokens are served independently", async 
 test("an upstream error while validating a token fails closed instead of accepting it", async () => {
   for (const status of [500, 502, 503, 404]) {
     const fetchImpl = (async () => new Response("x", { status })) as unknown as typeof fetch;
+    // oxlint-disable-next-line no-await-in-loop -- assert one status at a time so the first failing status is reported deterministically
     await assert.rejects(
       injectAccessToken(jwt(`u${status}`)).validateToken({ fetchImpl }),
       /TDEI_TOKEN_INVALID|TDEI_UPSTREAM_UNAVAILABLE/,

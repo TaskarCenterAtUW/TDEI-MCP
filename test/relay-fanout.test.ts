@@ -85,6 +85,7 @@ async function browserVisit(
   jar: Map<string, string>,
 ): Promise<{ status: number; body: string; url: string }> {
   let current = startUrl;
+  /* oxlint-disable no-await-in-loop -- each redirect hop depends on the Location of the previous response */
   for (let hop = 0; hop < 10; hop += 1) {
     const origin = new URL(current).origin;
     const cookie = jar.get(origin);
@@ -105,6 +106,7 @@ async function browserVisit(
     }
     return { status: res.status, body: await res.text(), url: current };
   }
+  /* oxlint-enable no-await-in-loop */
   throw new Error(`too many redirects starting at ${startUrl}`);
 }
 
@@ -116,6 +118,7 @@ async function runRelayOn(port: number, home: string, fallback: readonly string[
     stdio: "ignore",
   });
   // Wait for the listen socket.
+  /* oxlint-disable no-await-in-loop -- polling a socket that has not started listening yet is sequential by design */
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
@@ -125,6 +128,7 @@ async function runRelayOn(port: number, home: string, fallback: readonly string[
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  /* oxlint-enable no-await-in-loop */
   child.kill();
   throw new Error(`relay did not come up on 127.0.0.1:${port}`);
 }
@@ -178,7 +182,7 @@ test("relay redirects the browser so each gateway receives its own login cookie"
     assert.match(result.body, /Login complete/);
   } finally {
     relay?.kill();
-    for (const server of gateways) await new Promise((resolve) => server.close(resolve));
+    await Promise.all(gateways.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
     rmSync(home, { recursive: true, force: true });
   }
 });

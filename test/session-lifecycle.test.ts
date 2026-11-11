@@ -117,11 +117,13 @@ test("SSO login loads API tools and supports calls and logout", async () => {
     assert.match(completionResult.content[0]?.type === "text" ? completionResult.content[0].text : "", /completed/);
 
     const deadline = Date.now() + 1_000;
+    /* oxlint-disable no-await-in-loop -- waits for tools to load after sign-in; each poll must settle before the next */
     while (Date.now() < deadline) {
       const tools = await client.listTools();
       if (tools.tools.some((tool) => tool.name === "listServices")) break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    /* oxlint-enable no-await-in-loop */
 
     const loadedTools = await client.listTools();
     assert.ok(loadedTools.tools.some((tool) => tool.name === "listServices"));
