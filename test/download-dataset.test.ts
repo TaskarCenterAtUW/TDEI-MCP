@@ -76,8 +76,8 @@ test("downloadDataset returns a client-side curl command without fetching bytes"
   assert.match(result.data.curlCommand, /\$TDEI_TOKEN/);
   assert.ok(result.data.curlCommand.includes(API_URL));
   assert.match(result.data.instruction, /CLIENT machine/);
-  // No dataset lookup needed when dataType is explicit.
-  assert.equal(seen.length, 0);
+  // A name lookup still runs so the default filename is <name>-<id>.zip.
+  assert.equal(seen.length, 1);
 });
 
 test("downloadDataset auto-detects flex type and dataset name for the filename", async () => {
@@ -92,7 +92,7 @@ test("downloadDataset auto-detects flex type and dataset name for the filename",
   assert.equal(result.data.dataType, "flex");
   assert.equal(result.data.apiOperation, "getGtfsFlexFile");
   assert.equal(result.data.path, "/api/v1/gtfs-flex/flex-1");
-  assert.equal(result.data.filePath, "/tmp/dl/FLex_Seattle.zip");
+  assert.equal(result.data.filePath, "/tmp/dl/FLex_Seattle-flex-1.zip");
   assert.equal(result.data.datasetName, "FLex Seattle");
 });
 

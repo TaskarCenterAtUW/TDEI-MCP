@@ -1358,14 +1358,16 @@ export class SemanticIntentModule {
     let datasetName: string | undefined;
     const isUuidLike = embeddedUuid !== undefined || isUuidLikeDatasetId(rawId);
     if (isUuidLike) {
-      if (!dataType) {
-        const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context);
-        if (lookup.status === "complete" && lookup.data.matches[0]) {
+      // Look the dataset up even when dataType is given, so the default
+      // filename can be "<dataset name>-<dataset id>.zip".
+      if (!dataType || !input.filename?.trim()) {
+        const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context).catch(() => undefined);
+        if (lookup?.status === "complete" && lookup.data.matches[0]) {
           const dataset = lookup.data.matches[0].dataset;
-          dataType = readDatasetDataType(dataset) ?? "osw";
+          dataType = dataType ?? readDatasetDataType(dataset) ?? "osw";
           datasetName = readDatasetName(dataset);
         } else {
-          dataType = "osw";
+          dataType = dataType ?? "osw";
         }
       }
     } else {
@@ -1510,7 +1512,10 @@ export class SemanticIntentModule {
     const apiPath = `/api/v1/${resolved === "osw" ? "osw" : resolved === "flex" ? "gtfs-flex" : "gtfs-pathways"}/${id}`;
     const apiOperation =
       resolved === "osw" ? "getOswFile" : resolved === "flex" ? "getGtfsFlexFile" : "getGtfsPathwaysFile";
-    const safeBase = (datasetName ?? id).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || id;
+    // Default name: <dataset name>-<dataset id>.zip (just <id>.zip if the
+    // name is unknown).
+    const safeName = datasetName?.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) ?? "";
+    const safeBase = safeName ? `${safeName}-${id}` : id;
     // Always end the download in .zip: a user-supplied filename may omit the
     // extension or carry a wrong one (e.g. ".err"), which confuses clients.
     const rawName = input.filename?.trim() || `${safeBase}.zip`;
