@@ -8,9 +8,7 @@ import {
   joinDownloadPath,
 } from "../adapters/binary-tdei-downloads.js";
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path";
 import { signInText } from "../mcp/errors.js";
-import { saveDatasetToDisk, type DownloadSettings } from "./server-download.js";
 import type {
   CheckInclineData,
   CloneDatasetInput,
@@ -83,13 +81,12 @@ export interface SemanticIntentDependencies {
    */
   apiUrl?: string;
   /**
-   * Supplies the same SSO token from the sso logon tool so client-side
-   * curl commands are already authenticated. Falls back to $TDEI_TOKEN
-   * placeholder when unavailable.
+   * Supplies the SSO token for server-side JSON calls (search, jobs, etc.).
+   * Never used for curl commands: those always use $TDEI_TOKEN so multiple
+   * users can share one server without leaking tokens. File bytes flow
+   * directly from the CLIENT to the TDEI backend; the gateway is not a relay.
    */
   tokenProvider?: () => Promise<string>;
-  /** Server-side download settings. Client mode (default) returns a curl command. */
-  downloadSettings?: DownloadSettings;
   /** Injected for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** TDEI User Management API origin (project-group roles). Unset means the tool reports it as unsupported. */
@@ -412,7 +409,7 @@ export class SemanticIntentModule {
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be validated? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip). MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip", then poll with tdei_list_jobs.',
+                "Which dataset ZIP should be validated? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip).",
             },
           ]
         : []),
@@ -472,7 +469,7 @@ export class SemanticIntentModule {
             {
               field: "asset",
               question:
-                'Which dataset ZIP should be uploaded? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip). MCP never takes file bytes — run curl from your machine: curl -X POST "<apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/upload/{projectGroupId}/{serviceId}" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -F "metadata=<json>;type=application/json", then poll with tdei_list_jobs.',
+                "Which dataset ZIP should be uploaded? Give the absolute path on the CLIENT machine (e.g. /Users/you/data/file.zip).",
             },
           ]
         : []),
@@ -1033,46 +1030,6 @@ export class SemanticIntentModule {
     const filename = /\.zip$/i.test(noSlashes) ? noSlashes : `${noSlashes}.zip`;
     const filePath = joinDownloadPath(outputDir, filename);
     const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
-    if (this.dependencies.downloadSettings?.mode === "server") {
-      const token = await this.resolveCurlToken(context);
-      if (!token) {
-        return {
-          status: "needs_input",
-          missing: [
-            { field: "tdei_sso_login", question: "Sign in with tdei_sso_login first, then retry the download." },
-          ],
-          accepted: { tdeiDatasetId: id },
-        };
-      }
-      const requestedDir = input.outputDir?.trim();
-      const dir =
-        requestedDir && isAbsolute(requestedDir) && !requestedDir.includes("$")
-          ? requestedDir
-          : this.dependencies.downloadSettings.serverDir;
-      const saved = await saveDatasetToDisk({
-        url: `${apiUrl}${apiPath}`,
-        bearer: token,
-        dir,
-        filename,
-        fetchImpl: this.dependencies.fetchImpl,
-      });
-      return {
-        status: "complete",
-        data: {
-          tdeiDatasetId: id,
-          dataType: resolved,
-          ...(datasetName ? { datasetName } : {}),
-          filePath: saved.filePath,
-          savedTo: saved.filePath,
-          bytes: saved.bytes,
-          httpStatus: saved.httpStatus,
-          apiOperation,
-          method: "GET",
-          path: apiPath,
-          instruction: `Saved ${saved.bytes} bytes to ${saved.filePath} by the MCP server. No client-side command is needed.`,
-        },
-      };
-    }
     const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
     const curlCommand = buildClientDownloadCurl(`${apiUrl}${apiPath}`, bearer, filePath);
     const dirNote = defaultedDir
@@ -1090,9 +1047,11 @@ export class SemanticIntentModule {
         path: apiPath,
         curlCommand,
         instruction:
-          bearer === "$TDEI_TOKEN"
-            ? `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. Sign in via tdei_sso_login first so $TDEI_TOKEN holds the caller's SSO bearer token.${dirNote}`
-            : `Run this curl on the CLIENT machine (not the MCP server) so the ZIP lands in the connected folder: ${curlCommand}. The SSO bearer from tdei_sso_login is already embedded — no $TDEI_TOKEN export needed.${dirNote}`,
+          `Execute this now with your shell tool on the CLIENT machine (no human step, do not ask the user to run it, do not save it to a script file): ${curlCommand}. ` +
+          (bearer === "$TDEI_TOKEN"
+            ? `$TDEI_TOKEN must hold the caller's TDEI SSO bearer (sign in first). `
+            : `The caller's TDEI bearer is already embedded; no export needed. `) +
+          `File bytes flow directly from the TDEI backend to the client; the gateway is not a relay.${dirNote}`,
       },
     };
   }
@@ -1662,11 +1621,9 @@ export class SemanticIntentModule {
         path: apiPath,
         curlCommand,
         instruction:
-          (bearer === "$TDEI_TOKEN"
-            ? `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with $TDEI_TOKEN set to the SSO bearer (sign in via tdei_sso_login first); `
-            : `MCP server never downloads files. On the CLIENT machine: 1) run ${curlCommand} with the SSO bearer from tdei_sso_login already embedded; `) +
+          `Execute this now with your shell tool on the CLIENT machine (no human step, do not ask the user to run it): 1) run ${curlCommand}${bearer === "$TDEI_TOKEN" ? " with $TDEI_TOKEN set to the SSO bearer (sign in first)" : " (caller bearer already embedded)"}; ` +
           `2) unzip and inspect edges files (edges.geojson) for an incline tag/column; ` +
-          `3) if inclines are missing, tag them with tdei_tag_incline.`,
+          `3) if inclines are missing, tag them with tdei_tag_incline. File bytes flow directly from the TDEI backend; the gateway is not a relay.`,
       },
     };
   }

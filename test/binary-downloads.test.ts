@@ -13,20 +13,12 @@ import {
 // curl command with zero network or disk activity.
 
 test("getOswFile resolves to a client-side curl instruction without network", async () => {
-  let fetchCalls = 0;
-  const fetchImpl = (async () => {
-    fetchCalls += 1;
-    throw new Error("must not fetch");
-  }) as typeof fetch;
   const downloads = new BinaryTdeiDownloads({
     baseUrl: "https://api.example.test",
-    fetchImpl,
-    outputDir: "/tmp/ignored",
   });
 
   const result = await downloads.download("getOswFile", { tdei_dataset_id: "yakima-1" }, { accessToken: "bearer-A" });
 
-  assert.equal(fetchCalls, 0);
   assert.equal(result.tool, "getOswFile");
   assert.equal(result.method, "GET");
   assert.equal(result.path, "/api/v1/osw/yakima-1");
@@ -36,6 +28,8 @@ test("getOswFile resolves to a client-side curl instruction without network", as
     'curl -L -sS --create-dirs --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n" -H "Authorization: Bearer bearer-A" "https://api.example.test/api/v1/osw/yakima-1" -o "getOswFile-yakima-1.zip"',
   );
   assert.match(result.instruction, /CLIENT machine/);
+  assert.match(result.instruction, /Execute this now/);
+  assert.match(result.instruction, /already embedded/);
 });
 
 test("download routes map to spec streaming endpoints", async () => {

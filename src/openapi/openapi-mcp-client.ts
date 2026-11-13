@@ -210,10 +210,10 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
 
 async function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): Promise<void> {
   if (binary && typeof value === "string") {
-    // File bytes never go through MCP: binary form fields only accept file
-    // paths for client-side curl, so refuse them here with the runbook.
+    // File bytes never go through MCP and the gateway is never a relay: binary
+    // form fields only accept file paths for hands-free client-side curl.
     throw new Error(
-      `MCP never accepts file bytes — run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
+      `MCP never accepts file bytes — execute the upload yourself with your shell tool via curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
     );
   }
   if (value instanceof Blob) {

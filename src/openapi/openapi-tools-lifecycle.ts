@@ -1,3 +1,4 @@
+import { requestBearer } from "../auth/request-bearer.js";
 import type { McpServer } from "@modelcontextprotocol/server";
 
 import type { AuthManager } from "../auth/auth-manager.js";
@@ -145,9 +146,9 @@ export class OpenApiToolsLifecycle {
     if (this.state !== "loaded") {
       await this.serialize(() => this.ensureLoadedLocked());
     }
-    // Binary downloads never touch server bytes or disk. They resolve to a
-    // client-side curl instruction which the LLM runs on the CLIENT machine,
-    // keeping them out of the generic text-oriented OpenAPI executor.
+    // Binary downloads never touch server bytes, disk, or tokens. They resolve
+    // to a client-side curl instruction (with the caller's own bearer embedded) which the assistant runs on the CLIENT machine directly against
+    // the TDEI backend; the gateway is not a relay.
     if (BinaryTdeiDownloads.isDownloadTool(tool)) {
       const downloads =
         this.downloads ??
@@ -155,7 +156,8 @@ export class OpenApiToolsLifecycle {
           baseUrl: getConfig().apiUrl,
           ...(this.authSession.getAccessToken ? { tokenProvider: () => this.authSession.getAccessToken!() } : {}),
         });
-      return downloads.download(tool, input, {});
+      const callerBearer = requestBearer.getStore();
+      return downloads.download(tool, input, callerBearer ? { accessToken: callerBearer } : {});
     }
     return this.openApiSession.callTool(tool, input);
   }

@@ -11,7 +11,7 @@ import { lookupToolInstruction } from "../tdei-shared/register-openapi-tools.js"
  */
 
 const FILE_UPLOAD_HINT =
-  "MCP never accepts file bytes: ask the user for the absolute path of the file on the CLIENT machine, then run the multipart curl from that machine with the SSO bearer from tdei_sso_login.";
+  "MCP never accepts file bytes: ask for the absolute path of the file on the CLIENT machine, then execute the multipart curl yourself with your shell tool on that machine using $TDEI_TOKEN (never an embedded bearer).";
 const JOB_HINT =
   "Creation/import is asynchronous: poll get_jobs_by_workspace_id / get_job_by_id (and the workspace's importStatus) until it completes before editing or configuring the workspace.";
 const DESTRUCTIVE = "Destructive: do this only when the user explicitly asks, and confirm the target first.";

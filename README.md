@@ -400,13 +400,13 @@ Both transports expose the common semantic tools:
 | --- | --- |
 | `tdei_find_datasets` | Find datasets by name, city, explicit bbox, or configured place-to-bbox fallback; supports deterministic latest sorting, exact `tdeiDatasetId` lookup, and recent-upload filtering via `uploadedAfter`/`uploadedWithinDays`. |
 | `tdei_get_dataset_details` | Dataset details by exact id (status/release); incline presence is not in metadata — use `tdei_check_dataset_incline` for a client-side inspection runbook. |
-| `tdei_download_dataset` | Build a client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files: it resolves the id + data type, asks for the folder when missing, and the LLM runs the returned `curlCommand` on the client machine with the SSO bearer from `tdei_sso_login` already embedded. |
+| `tdei_download_dataset` | Build a hands-free client-side curl that downloads a dataset ZIP into the user-connected folder. The MCP server never writes files, touches bytes/tokens, or relays data: it resolves the id + data type and returns a `curlCommand` with the caller's own bearer already embedded. The assistant executes it on the client machine directly against the TDEI backend. |
 | `tdei_get_my_identity` | Identity/roles decoded from the SSO JWT (TDEI has no roles endpoint). |
 | `tdei_list_jobs` | Jobs with project-group fan-out plus `jobId`/`status`/recent-date filtering. |
 | `tdei_list_services` | List services by text, project group, or service type. |
 | `tdei_list_my_project_groups` | Lists project groups via authenticated `GET /api/v1/project-groups` (`listProjectGroups`). On stdio this uses direct TDEI HTTP with the SSO bearer. |
-| `tdei_validate_dataset` | Ask for missing inputs, then instruct the client to validate OSW/Flex/Pathways data via curl from its own machine. |
-| `tdei_upload_dataset` | Collect all required target and metadata fields, then instruct the client to upload via curl from its own machine. |
+| `tdei_validate_dataset` | Ask for missing inputs, then execute a hands-free curl on the CLIENT machine to validate OSW/Flex/Pathways data (bytes go straight to the TDEI backend; one line, caller's bearer already embedded). |
+| `tdei_upload_dataset` | Collect all required target and metadata fields, then execute a hands-free curl on the CLIENT machine to upload (bytes go straight to the TDEI backend; one line, caller's bearer already embedded). |
 | `tdei_publish_dataset` | Publish a dataset release (`publishOswFile`/`publishGtfsFlexFile`/`publishGtfsPathwaysFile`). |
 | `tdei_delete_dataset` | Permanently delete a dataset. Requires `confirm:true`. |
 | `tdei_clone_dataset` | Clone a dataset into a target project group/service with new metadata. Requires `confirm:true`. |
@@ -439,7 +439,7 @@ Both transports expose the common semantic tools:
 | `tdei_recover_password` | Send a password-recovery link. |
 | `tdei_regenerate_api_key` | Regenerate the TDEI API key (invalidates the old one). Requires `confirm:true`. |
 
-File bytes never go through MCP in any mode — no downloads, no uploads, no file writes or reads on the server. Dataset ZIPs download directly to the client machine via curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the SSO bearer from `tdei_sso_login` already embedded), and uploads/validations also run as client-side curl, then poll with `tdei_list_jobs`.
+File bytes never go through MCP — no downloads, no uploads, no file writes/reads on the server. Dataset ZIPs download directly from the TDEI backend to the client machine via hands-free curl (`tdei_download_dataset`, raw `getOswFile`/`getGtfsFlexFile`/`getGtfsPathwaysFile`/`job-download` all return a `curlCommand` with the caller's own bearer embedded in that caller's response; the assistant executes it on the CLIENT machine), and uploads/validations also run as hands-free client-side curl directly against the backend, then poll with `tdei_list_jobs`. The gateway is never a relay; each caller only ever receives their own bearer.
 
 Raw operation descriptions are augmented with connector runbooks in `src/tdei-core/tool-instructions.ts`: OSW/Flex/Pathways validate tools ask for a CLIENT-machine ZIP path and give the upload curl, `oswQualityReportGenerate` asks for a `tdei_dataset_id`, and `job_download` is used only after `tdei_list_jobs` reports `COMPLETED` to fetch `/api/v1/job/download/<job_id>`. Add new per-tool guidance to that map as more operations need instructions.
 
@@ -495,13 +495,11 @@ Values can be supplied through `.env` using Node's `--env-file` flag, or through
 | `TDEI_HTTP_HOST` | No | `127.0.0.1` (HTTP mode listen host; CLI `--host=` overrides) |
 | `TDEI_HTTP_PORT` | No | `3000` (HTTP mode listen port; CLI `--port=` overrides) |
 | `TDEI_HTTP_BASE_PATH` | No | `/mcp` |
-| `TDEI_DOWNLOAD_MODE` | No | `client` (`client` returns a curl command for the client shell; `server` streams dataset ZIPs to disk from the MCP server. `server` is honored only for stdio or HTTP bound to loopback) |
 | `TDEI_EXPOSE_ALL_RAW_TOOLS` | No | unset (set `1` to also list raw OpenAPI operations that a `tdei_*` tool already covers. By default they are left out of the tool list to keep it short; workflows can still call them, and naming one in `endpoints.allow` also exposes it) |
 | `TDEI_STATUS_PAGE_URL` | No | unset (the TDEI MCP status/install page of this deployment, for example `https://tdei-mcp-dev.proudbay-977f7717.westus.azurecontainerapps.io/`. Tools that need the companion server (workspace tools that need core data, core dataset tools used for workspace creation) tell the model to send the user there to install both servers when the other one is missing; when unset the note says to use the root URL of the host the server was installed from) |
 | `TDEI_USER_API_URL` | No | derived from `TDEI_API_URL` for the three TDEI core hosts (`portal-api-dev.tdei.us`, `portal-api-stage.tdei.us`, `portal-api.tdei.us`); `off` disables it; other hosts load nothing. Core servers load the TDEI User Management API as a second OpenAPI source (see below) |
 | `TDEI_USER_SPEC_URL` | No | `<TDEI_USER_API_URL>/api-docs/swagger.json` (the User Management API's OpenAPI document) |
 | `TDEI_OAUTH_SECRET` | Gateway deployments (generate with `openssl rand -hex 32`; see below) | Long random secret that protects sign-in codes and the login cookie. Set the same value on every replica. If unset, a random per-process secret is used and a sign-in must finish on the instance that started it |
-| `TDEI_DOWNLOAD_DIR` | No | `~/Downloads` (absolute folder for server-mode downloads) |
 | `TDEI_PUBLIC_BASE_URL` | No | Auto-detected (`X-Forwarded-Proto` + `Host`; plain `http` for direct local requests). Set to the canonical public origin (e.g. `https://mcp.example.com`) when hosting behind a TLS-terminating proxy so installers and the status page advertise `https` URLs — MCP clients must be registered with the `https` URL, not the redirecting `http` one. |
 | `TDEI_CORS_ORIGINS` | No | Empty (same-origin only; comma-separated allow-list) |
 | `TDEI_TLS_CERT` / `TDEI_TLS_KEY` | No | Absent (plain HTTP; terminate TLS at a reverse proxy) |
@@ -539,7 +537,7 @@ editors get completion via `tdei.config.schema.json`.
 Workflows are linear `workflow_*` tools: each step calls one REST operation in order,
 `ask[]` becomes required input, `{{user.*}}` / `{{steps.<id>.output.<path>}}` thread
 values, failure aborts with a transcript. File bytes never move through the MCP
-server in any mode: `getOswFile` / `job-download` steps return a `curlCommand`
+server: `getOswFile` / `job-download` steps return a `curlCommand`
 the LLM runs on the client machine (same as `tdei_download_dataset`), and
 file-upload steps are rejected in v1. First built-in example:
 `workflow_download_osw_dataset_bundle` (listProjectGroups → listDatasetFiles →

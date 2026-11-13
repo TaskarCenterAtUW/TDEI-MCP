@@ -330,7 +330,7 @@ export interface ClientUploadInstruction {
   apiOperation: "validateDataset" | "uploadDataset";
   method: "POST";
   path: string;
-  /** Ready-to-run client-side upload command with the SSO bearer embedded when available. */
+  /** Hands-free client-side upload command using $TDEI_TOKEN (never an embedded bearer). */
   curlCommand: string;
   instruction: string;
 }

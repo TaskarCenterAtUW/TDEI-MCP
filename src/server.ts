@@ -15,7 +15,6 @@ import { OpenApiToolsLifecycle } from "./openapi/openapi-tools-lifecycle.js";
 import { getConfig } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 import { BinaryTdeiDownloads } from "./adapters/binary-tdei-downloads.js";
-import { resolveDownloadSettings } from "./intents/server-download.js";
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
 import { resolveTdeiServerProfile, tdeiServerInstructions } from "./intents/server-instructions.js";
@@ -164,12 +163,10 @@ export async function createServer(
   );
   // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
   // generated tools use the in-process OpenAPI provider.
-  // File bytes never move through this server in any mode: dataset downloads
-  // run as curl on the client machine (tdei_download_dataset / raw download
-  // tools return commands, never bytes), and uploads also return client-side
-  // curl commands, so no asset bytes are ever read here.
-  const downloadSettings = resolveDownloadSettings(process.env, getConfig().transport, getConfig().httpHost);
-  for (const warning of downloadSettings.warnings) process.stderr.write(`[tdei-mcp] ${warning}\n`);
+  // File bytes never move through this server: downloads and uploads run as
+  // curl on the CLIENT machine directly against the TDEI backend (the gateway
+  // is never a relay). Each curl embeds only the calling user's own bearer in that
+  // user's response, so the assistant can run it with no extra step.
   const semanticModule = new SemanticIntentModule({
     operations: new HttpTdeiOperations(getConfig().apiUrl, fetch, 15_000, {
       tokenProvider: () => auth.getAccessToken(),
@@ -178,7 +175,6 @@ export async function createServer(
     apiUrl: getConfig().apiUrl,
     ...(getConfig().userApiUrl ? { userApiUrl: getConfig().userApiUrl } : {}),
     tokenProvider: () => auth.getAccessToken(),
-    downloadSettings: downloadSettings.settings,
     fetchImpl: fetch,
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
