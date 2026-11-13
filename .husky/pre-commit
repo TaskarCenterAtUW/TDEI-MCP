@@ -1,1 +1,1 @@
-pnpm lint && pnpm knip && pnpm audit && pnpm secret-scan && pnpm test:coverage
+pnpm test:installers && pnpm lint && pnpm knip && pnpm audit && pnpm secret-scan && pnpm test:coverage

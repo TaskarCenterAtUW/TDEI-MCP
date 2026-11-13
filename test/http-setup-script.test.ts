@@ -29,23 +29,29 @@ test("installer relays the registered loopback callback to the gateway", () => {
   assert.match(js, /127\.0\.0\.1/);
 });
 
-test("installer relay is on-demand and one-shot: quits after the callback or after 300s", () => {
+test("installer relay stays running for client-initiated sign-ins", () => {
   const js = getClientSetupJs();
-  assert.match(js, /IDLE_MS = 300000/);
-  assert.match(js, /process\.exit\(0\)/);
-  assert.match(js, /clearTimeout\(idle\)/);
+  // Client-initiated OAuth (Claude Desktop etc.) opens the loopback callback
+  // with no agent hook to start anything, so the relay must not self-exit.
+  assert.doesNotMatch(js, /IDLE_MS/);
+  assert.doesNotMatch(js, /setTimeout\(\(\) => process\.exit/);
+  // A reinstall replaces a relay from the previous install.
+  assert.match(js, /sso-callback-relay\.pid/);
+  assert.match(js, /process\.kill\(oldPid\)/);
 });
 
-test("installer relay fans one loopback port out to every installed gateway", () => {
+test("installer relay hands the browser to every installed gateway in turn", () => {
   const js = getClientSetupJs();
   // Targets live in a shared file so dev + staging + production installs
   // accumulate; the running relay re-reads it on every callback.
   assert.match(js, /sso-callback-targets\.json/);
   assert.match(js, /remoteCallbackUrl\]\.concat/);
-  // A 404 means "no sign-in pending on this gateway" — try the next one and
-  // replay the first non-404 answer to the browser.
-  assert.match(js, /statusCode === 404/);
-  assert.match(js, /tryNext/);
+  // Each hop is a browser redirect (302), never a proxy: the gateway's
+  // pending login is an origin-scoped cookie only the browser can send.
+  // tdei_relay_try lets a gateway with no login waiting send it back so the
+  // relay can try the next installed gateway.
+  assert.match(js, /tdei_relay_try/);
+  assert.match(js, /res\.writeHead\(302/);
   // The loopback port stays fixed (Keycloak registers a single port across envs).
   assert.match(js, /const port = 8765;/);
 });
@@ -891,6 +897,16 @@ test("gateway page is a 3-step installer for every environment", { skip: !hasBui
     // setup plus the workspace companion, Remove maps to the global cleanup.
     assert.match(html, /"workspace":\{"name":"tdei-workspace-dev"/);
     assert.match(html, /\?with=' \+|with=.*\.join/);
+    // Every entry carries a real setup path. A missing `setup` makes the page
+    // do `location.origin + undefined` (https://host.ioundefined/<client>).
+    for (const entry of ["tdei-core-dev", "tdei-workspace-dev"]) {
+      assert.match(
+        html,
+        new RegExp(`"setup":"/${entry}/mcp/setup"`),
+        `gateway page must embed the setup path for ${entry}`,
+      );
+    }
+    assert.doesNotMatch(html, /"setup":undefined/);
     assert.match(html, /TDEI_NPX_PREFIX \+ ' cleanup'/);
     // One copy button per generated command plus restarts + sign-in explanation.
     assert.match(html, /Restart required/);

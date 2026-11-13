@@ -97,6 +97,7 @@ export class NominatimPlaceResolver implements PlaceResolver {
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("limit", "5");
     let response: Response | undefined;
+    /* oxlint-disable no-await-in-loop -- retries are paced by the shared rate limiter and Retry-After, so each attempt must settle before the next */
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       await this.waitForSlot();
       response = await this.fetchImpl(url, {
@@ -114,6 +115,7 @@ export class NominatimPlaceResolver implements PlaceResolver {
       }
       break;
     }
+    /* oxlint-enable no-await-in-loop */
     if (!response?.ok) {
       throw new Error(`Forward geocoder failed with status ${response?.status}.`);
     }

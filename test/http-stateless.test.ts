@@ -227,6 +227,13 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
   try {
     const notThisChild = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456`);
     assert.equal(notThisChild.status, 404);
+    // A relay-forwarded callback bounces back to the loopback relay so it can
+    // try the next installed gateway. 404 is preserved for the nginx fan-out.
+    const bounce = await fetch(`${handle.url}/auth/callback?code=auth-code-123&state=state-456&tdei_relay_try=1`);
+    assert.equal(bounce.status, 404);
+    const bounceBody = await bounce.text();
+    assert.match(bounceBody, /127\.0\.0\.1:8765\/callback\?code=auth-code-123/);
+    assert.match(bounceBody, /tdei_relay_try=1/);
 
     // Lazy auth: connecting and listing tools never needs a sign-in.
     const anonymousList = await postMcp(`${handle.url}/mcp`, mcpBody(1, "tools/list"));
@@ -253,8 +260,8 @@ test("gateway OAuth gives the client a bearer for later tool calls", async () =>
       `${issuer}/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent(clientRedirect)}&state=client-state&code_challenge=${challengeCode}&code_challenge_method=S256`,
       { redirect: "manual" },
     );
-    assert.equal(authorize.status, 302);
-    const location = authorize.headers.get("location") ?? "";
+    assert.equal(authorize.status, 200);
+    const location = (await authorize.text()).match(/var loginUrl = ("[^"]*");/)?.[1] ?? "";
     assert.match(location, /127\.0\.0\.1%3A8765%2Fcallback/);
     const cookie = (authorize.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
     assert.match(cookie, /^tdei_oauth=/);

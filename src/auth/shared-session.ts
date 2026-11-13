@@ -19,7 +19,7 @@ import type { TokenResponse } from "./types.js";
  * caller falls back to the normal SSO redirect.
  */
 
-export interface SharedSessionTokens extends TokenResponse {
+interface SharedSessionTokens extends TokenResponse {
   expiresAt: number;
 }
 

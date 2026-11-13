@@ -55,7 +55,7 @@ test("tool descriptions list required and optional fields", async () => {
   const find = tools.find((t) => t.name === "tdei_find_datasets")!;
   assert.match(
     find.description ?? "",
-    /required: none \(plus at least one of: place, bbox, projectGroupId, tdeiDatasetId\)/,
+    /required: none \(plus at least one of: place, bbox, projectGroupId, serviceId, tdeiDatasetId\)/,
   );
   const jobs = tools.find((t) => t.name === "tdei_list_jobs")!;
   assert.match(jobs.description ?? "", /required: none/, "project group is fanned out, so it is not mandatory");

@@ -8,9 +8,6 @@ export { TDEI_CORE_SERVER_INSTRUCTIONS } from "./instructions/tdei-core-instruct
 export { TDEI_SHARED_SERVER_INSTRUCTIONS } from "./instructions/tdei-shared-instructions.js";
 export { TDEI_WORKSPACE_SERVER_INSTRUCTIONS } from "./instructions/tdei-workspace-instructions.js";
 
-/** Backward-compatible default: the core server instructions. */
-export const TDEI_SERVER_INSTRUCTIONS = TDEI_CORE_SERVER_INSTRUCTIONS;
-
 export interface TdeiServerProfileInput {
   /** Server name from TDEI_MCP_NAME (e.g. tdei-core-dev, tdei-workspace). */
   name?: string | undefined;

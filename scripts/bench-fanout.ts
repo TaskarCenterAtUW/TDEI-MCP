@@ -17,6 +17,7 @@ const module = new SemanticIntentModule({
 
 for (const label of ["cold (fetches groups)", "warm (groups cached)"]) {
   const start = performance.now();
+  // oxlint-disable-next-line no-await-in-loop -- the benchmark measures cold vs warm latency, so the calls must not overlap
   await module.listJobs({}, { accessToken: "bench" });
   console.log(`${label}: ${(performance.now() - start).toFixed(0)}ms`);
 }

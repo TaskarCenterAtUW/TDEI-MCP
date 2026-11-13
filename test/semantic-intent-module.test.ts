@@ -7,6 +7,15 @@ import {
   type TdeiOperations,
 } from "../src/intents/semantic-intent-module.js";
 
+/** Dataset record with the live API shape (name/version live under metadata.dataset_detail). */
+function datasetRow(name: string, version: string, uploaded: string, id: string) {
+  return {
+    tdei_dataset_id: id,
+    uploaded_timestamp: uploaded,
+    metadata: { dataset_detail: { name, version } },
+  };
+}
+
 function createHarness(
   datasetResponses: Array<Array<Record<string, unknown>>>,
   placeResponses: Array<
@@ -76,7 +85,7 @@ test("latest dataset name match completes without geographic fallback", async ()
       selected: seattle,
       effectiveSort: { field: "uploaded_timestamp", order: "desc" },
       table:
-        "| # | name | tdei_dataset_id | data_type | status |\n|---|------|-----------------|-----------|--------|\n| 1 | Seattle Accessible Sidewalks | dataset-1 |  |  |",
+        "| # | name | version | tdei_dataset_id | data_type | status |\n|---|------|---------|-----------------|-----------|--------|\n| 1 | Seattle Accessible Sidewalks |  | dataset-1 |  |  |",
     },
   });
   assert.deepEqual(harness.searches, [
@@ -91,6 +100,50 @@ test("latest dataset name match completes without geographic fallback", async ()
     },
   ]);
   assert.deepEqual(harness.geocodes, []);
+});
+
+test("service filter scans every page and searches without needing a place", async () => {
+  const dataset = { tdei_dataset_id: "dataset-5", name: "WSP_Aberdeen_City" };
+  const harness = createHarness([[dataset]]);
+
+  const result = await harness.module.findDatasets({ serviceId: "service-1", dataType: "osw" });
+
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  assert.deepEqual(result.data.matches[0]?.matchedBy, "service");
+  assert.equal(result.data.matches[0]?.evidence, "service service-1");
+  assert.equal(result.data.scan?.pagesRead, 1);
+  assert.equal(harness.searches[0]?.serviceId, "service-1");
+  assert.equal(harness.searches[0]?.page, 1);
+  assert.equal(harness.searches[0]?.pageSize, 50);
+  // One page window is issued up front; the short first page ends the scan.
+  assert.equal(harness.searches.length, 5);
+  assert.deepEqual(harness.geocodes, []);
+});
+
+test("project-group search keeps the latest version of each dataset name across pages", async () => {
+  const row = datasetRow;
+  const fillers = Array.from({ length: 49 }, (_, index) =>
+    row(`Filler_${index + 1}`, "1.0", "2026-01-01T00:00:00.000Z", `filler-${index + 1}`),
+  );
+  const page1 = [row("WSP_City_A", "1.9", "2026-02-01T00:00:00.000Z", "a-v19"), ...fillers];
+  // 1.10 wins on a numeric version compare even though it was uploaded earlier.
+  const page2 = [row("WSP_City_A", "1.10", "2025-06-01T00:00:00.000Z", "a-v110")];
+  const harness = createHarness([page1, page2]);
+
+  const result = await harness.module.findDatasets({ projectGroupId: "group-1", latest: true, limit: 50 });
+
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  assert.equal(result.data.scan?.pagesRead, 2);
+  assert.equal(result.data.scan?.datasetsScanned, 51);
+  assert.equal(result.data.scan?.versionsSuperseded, 1);
+  assert.equal(result.data.matches.length, 50);
+
+  const cityA = result.data.matches.find((match) => match.version === "1.10");
+  assert.ok(cityA);
+  assert.equal(cityA.versionsAvailable, 2);
+  assert.equal(cityA.dataset.tdei_dataset_id, "a-v110");
 });
 
 test("dataset search falls back from name to city before geocoding", async () => {
@@ -184,14 +237,16 @@ test("an explicit bounding box searches without requiring a place", async () => 
   assert.deepEqual(harness.geocodes, []);
 });
 
-test("a project-group filter searches without requiring a place", async () => {
+test("a project-group filter scans every page without requiring a place", async () => {
   const dataset = { tdei_dataset_id: "dataset-5" };
   const harness = createHarness([[dataset]]);
   const result = await harness.module.findDatasets({ projectGroupId: "group-1" });
   assert.equal(result.status, "complete");
   if (result.status !== "complete") return;
   assert.equal(result.data.matches[0]?.matchedBy, "project_group");
+  assert.equal(result.data.scan?.pagesRead, 1);
   assert.equal(harness.searches[0]?.projectGroupId, "group-1");
+  assert.equal(harness.searches[0]?.pageSize, 50);
 });
 
 test("service listing returns normalized filters and results", async () => {

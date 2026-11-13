@@ -19,6 +19,7 @@ export interface DatasetSearch {
   dataType?: DataType;
   status: DatasetStatus;
   projectGroupId?: string;
+  serviceId?: string;
   tdeiDatasetId?: string;
   collectionDate?: string;
   sortField: "uploaded_timestamp";

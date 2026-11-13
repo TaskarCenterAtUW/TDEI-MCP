@@ -73,20 +73,22 @@ test("template interpolation blocks Object.prototype property lookups", async ()
     },
     toolSchemas: schemas,
   };
-  for (const forbidden of ["{{user.toString}}", "{{user.__proto__}}", "{{user.constructor}}"]) {
-    const def = {
-      name: "proto_guard",
-      steps: [
-        {
-          id: "s1",
-          tool: "a",
-          ask: [],
-          input: { x: forbidden },
-        },
-      ],
-    };
-    await assert.rejects(() => runWorkflow(def as never, { x: "safe" }, deps as never), /unknown template ref/);
-  }
+  await Promise.all(
+    ["{{user.toString}}", "{{user.__proto__}}", "{{user.constructor}}"].map(async (forbidden) => {
+      const def = {
+        name: "proto_guard",
+        steps: [
+          {
+            id: "s1",
+            tool: "a",
+            ask: [],
+            input: { x: forbidden },
+          },
+        ],
+      };
+      await assert.rejects(() => runWorkflow(def as never, { x: "safe" }, deps as never), /unknown template ref/);
+    }),
+  );
 });
 
 test("registerWorkflows tracks registered workflow names per McpServer instance", async () => {

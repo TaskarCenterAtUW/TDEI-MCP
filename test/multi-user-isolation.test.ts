@@ -70,8 +70,8 @@ test("gateway: one user's saved login is never handed to the next person", async
   try {
     // User B starts a login. They must be sent to SSO, not given A's tokens.
     const res = await authorize(handle.url, "tdei-core-dev");
-    assert.equal(res.status, 302);
-    const location = res.headers.get("location") ?? "";
+    assert.equal(res.status, 200);
+    const location = (await res.text()).match(/var loginUrl = ("[^"]*");/)?.[1] ?? "";
     assert.match(location, /api\/v1\/sso-redirect/, "B must authenticate as themselves");
     assert.ok(!location.includes("code="), "no sealed authorization code for A's session");
   } finally {
@@ -168,6 +168,7 @@ test("gateway: two users with their own tokens are served independently", async 
 test("an upstream error while validating a token fails closed instead of accepting it", async () => {
   for (const status of [500, 502, 503, 404]) {
     const fetchImpl = (async () => new Response("x", { status })) as unknown as typeof fetch;
+    // oxlint-disable-next-line no-await-in-loop -- assert one status at a time so the first failing status is reported deterministically
     await assert.rejects(
       injectAccessToken(jwt(`u${status}`)).validateToken({ fetchImpl }),
       /TDEI_TOKEN_INVALID|TDEI_UPSTREAM_UNAVAILABLE/,

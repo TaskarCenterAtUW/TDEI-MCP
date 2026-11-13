@@ -194,6 +194,7 @@ for (const probe of PROBES) {
   }
 
   try {
+    // oxlint-disable-next-line no-await-in-loop -- probes hit the live API one at a time so rate limits and output order stay predictable
     const { status, contentType, body, text } = await fetchJson(path);
     const shape = describe(body, contentType, text.length);
     const parsed = parseTdeiGetResponse(body);

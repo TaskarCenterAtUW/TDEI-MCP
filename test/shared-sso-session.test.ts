@@ -37,6 +37,12 @@ function seedShared(apiUrl: string = TEST_API_URL): void {
   saveSharedSession(apiUrl, seededTokens, Date.now() + 3600 * 1000);
 }
 
+/** Authorize now serves a pre-login check page; the sign-in URL it continues to is embedded in its script. */
+function loginUrlFromPage(body: string): string {
+  const match = body.match(/var loginUrl = ("(?:[^"\\\\]|\\\\.)*");/);
+  return match ? (JSON.parse(match[1] as string) as string) : "";
+}
+
 test("shared session file round-trips tokens", () => {
   clearSharedSession(TEST_API_URL);
   seedShared();
@@ -184,9 +190,10 @@ test("authorize falls back to the SSO redirect when no session tokens validate",
       verifier,
       ...(hook ? { getValidSessionTokens: hook } : {}),
     });
+    // oxlint-disable-next-line no-await-in-loop -- the hook variants share OAuth session state, so each flow runs to completion before the next
     const result = await dispatchOAuth(input);
-    assert.equal(result?.status, 302);
-    assert.match(result?.headers.Location ?? "", /api\/v1\/sso-redirect/);
+    assert.equal(result?.status, 200);
+    assert.match(loginUrlFromPage(result?.body ?? ""), /api\/v1\/sso-redirect/);
     assert.match(result?.headers["Set-Cookie"] ?? "", /^tdei_oauth=/);
   }
 });
@@ -202,8 +209,8 @@ test("gateway authorize falls back to SSO when no shared login exists", async ()
       `${handle.url}/tdei-core-dev/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent("http://127.0.0.1:9/callback")}&state=s&code_challenge=${challenge}&code_challenge_method=S256`,
       { redirect: "manual" },
     );
-    assert.equal(authorize.status, 302);
-    assert.match(authorize.headers.get("location") ?? "", /api\/v1\/sso-redirect/);
+    assert.equal(authorize.status, 200);
+    assert.match(loginUrlFromPage(await authorize.text()), /api\/v1\/sso-redirect/);
   } finally {
     await handle.close();
     clearSharedSession(apiUrl);
@@ -224,8 +231,8 @@ test("gateway authorize never reuses a saved login, because gateway callers are 
         `${handle.url}/tdei-core-dev/oauth/authorize?response_type=code&client_id=tdei-mcp&redirect_uri=${encodeURIComponent("http://127.0.0.1:9/callback")}&state=sibling-state&code_challenge=${challenge}&code_challenge_method=S256`,
         { redirect: "manual" },
       );
-      assert.equal(authorize.status, 302);
-      const location = authorize.headers.get("location") ?? "";
+      assert.equal(authorize.status, 200);
+      const location = loginUrlFromPage(await authorize.text());
       assert.match(location, /api\/v1\/sso-redirect/, "the caller signs in as themselves");
       assert.ok(!location.includes("code="), "no authorization code is sealed from the saved login");
     } finally {

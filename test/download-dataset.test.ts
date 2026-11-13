@@ -127,7 +127,7 @@ test("downloadDataset asks for confirmation with a match table for a NAME", asyn
   assert.ok(result.missing.some((m) => m.field === "confirm"));
   const question = result.missing.map((m) => m.question).join("\n");
   assert.ok(question.includes("7d6ae05c-8928-4727-bb0d-4717e46242f1"));
-  assert.ok(question.includes("| # | name | tdei_dataset_id | data_type | status |"));
+  assert.ok(question.includes("| # | name | version | tdei_dataset_id | data_type | status |"));
 });
 
 test("downloadDataset downloads a NAME after confirm:true using the resolved UUID", async () => {

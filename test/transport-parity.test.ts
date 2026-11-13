@@ -141,6 +141,7 @@ test("stdio and HTTP transports expose identical semantic tools with identical r
       ["tdei_verify_email", {}],
     ];
     for (const [name, args] of battery) {
+      // oxlint-disable-next-line no-await-in-loop -- keep the battery sequential so a parity failure names one tool and the two transports are not interleaved
       const [viaHttp, viaStdio] = await Promise.all([
         callJson(httpClient, name, args),
         callJson(stdioClient, name, args),

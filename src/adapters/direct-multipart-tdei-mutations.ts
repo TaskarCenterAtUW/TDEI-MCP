@@ -13,11 +13,11 @@ import { TdeiHttpError } from "./tdei-http-error.js";
 
 type DatasetMutations = Required<Pick<TdeiOperations, "validateDataset" | "uploadDataset">>;
 
-export const ALLOWED_UPLOAD_EXTENSIONS = new Set([".zip", ".json", ".geojson", ".osm", ".osc", ".xml"]);
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([".zip", ".json", ".geojson", ".osm", ".osc", ".xml"]);
 
 export type MultipartFieldValue = string | DatasetAsset | { json: unknown; filename: string };
 
-async function fieldToFormValue(value: MultipartFieldValue): Promise<{ value: string | Blob; filename?: string }> {
+function fieldToFormValue(value: MultipartFieldValue): { value: string | Blob; filename?: string } {
   if (typeof value === "string") return { value };
   if ("json" in value) {
     return {
@@ -131,7 +131,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     url.search = params.toString();
     const form = new FormData();
     for (const [name, fieldValue] of Object.entries(fields)) {
-      const { value, filename } = await fieldToFormValue(fieldValue);
+      const { value, filename } = fieldToFormValue(fieldValue);
       if (typeof value === "string") form.set(name, value);
       else form.set(name, value, filename ?? name);
     }

@@ -40,7 +40,10 @@ export function semanticFieldNames(specField: string, binding: ToolSpecBinding):
 const THREE = (osw: string, flex: string, pathways: string): string[] => [osw, flex, pathways];
 
 export const TOOL_SPEC_BINDINGS: Readonly<Record<string, ToolSpecBinding>> = {
-  tdei_find_datasets: { ops: ["listDatasetFiles"], oneOf: ["place", "bbox", "projectGroupId", "tdeiDatasetId"] },
+  tdei_find_datasets: {
+    ops: ["listDatasetFiles"],
+    oneOf: ["place", "bbox", "projectGroupId", "serviceId", "tdeiDatasetId"],
+  },
   tdei_list_my_project_groups: { ops: ["listProjectGroups"] },
   tdei_list_services: { ops: ["listServices"] },
   tdei_validate_dataset: {
@@ -64,6 +67,11 @@ export const TOOL_SPEC_BINDINGS: Readonly<Record<string, ToolSpecBinding>> = {
     oneOf: ["projectGroupName", "projectGroupId", "allGroups"],
   },
   tdei_get_dataset_details: { ops: ["listDatasetFiles"], extraRequired: ["tdeiDatasetId"] },
+  // Inventory reads every page of a project group/service; the group can come as id or name.
+  tdei_get_tcat_qa_reports: {
+    ops: ["listDatasetFiles"],
+    oneOf: ["projectGroupId", "projectGroupName"],
+  },
   tdei_download_dataset: { ops: THREE("getOswFile", "getGtfsFlexFile", "getGtfsPathwaysFile") },
   tdei_publish_dataset: {
     ops: THREE("publishOswFile", "publishGtfsFlexFile", "publishGtfsPathwaysFile"),

@@ -95,7 +95,10 @@ test("core gateway raw tools call the upstream API with each caller's own token"
       call("listApiVersions", 2, "alice-token"),
       call("portal_list_roles", 3, "bob-token"),
     ]);
-    for (const response of responses) assert.equal(response.status, 200, await response.clone().text());
+    const statusTexts = await Promise.all(responses.map((response) => response.clone().text()));
+    for (const [index, response] of responses.entries()) {
+      assert.equal(response.status, 200, statusTexts[index]);
+    }
 
     const byPath = Object.fromEntries(seen.map((entry) => [entry.path, entry]));
     assert.equal(byPath["/api/v1/api-versions"]?.auth, "Bearer alice-token");

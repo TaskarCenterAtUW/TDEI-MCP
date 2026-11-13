@@ -21,6 +21,7 @@ test("HTTP adapter forwards request bearer and dataset filters", async () => {
       bbox: [-122.46, 47.48, -122.22, 47.74],
       dataType: "osw",
       status: "Publish",
+      serviceId: "service-1",
       sortField: "uploaded_timestamp",
       sortOrder: "desc",
       page: 1,
@@ -35,7 +36,7 @@ test("HTTP adapter forwards request bearer and dataset filters", async () => {
   assert.equal(request.headers.get("Authorization"), "Bearer bearer-A");
   assert.equal(
     request.url,
-    "https://api.example.test/api/v1/datasets?bbox=-122.46&bbox=47.48&bbox=-122.22&bbox=47.74&data_type=osw&status=Publish&sort_field=uploaded_timestamp&sort_order=desc&page_no=1&page_size=5",
+    "https://api.example.test/api/v1/datasets?bbox=-122.46&bbox=47.48&bbox=-122.22&bbox=47.74&data_type=osw&status=Publish&tdei_service_id=service-1&sort_field=uploaded_timestamp&sort_order=desc&page_no=1&page_size=5",
   );
 });
 

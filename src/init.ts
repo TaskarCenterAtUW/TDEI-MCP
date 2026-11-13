@@ -49,11 +49,11 @@ async function interactivePrompter() {
   return {
     async chooseEnv() {
       for (;;) {
-        const answer = (
-          await rl.question(
-            "TDEI base URL (e.g. https://api-dev.tdei.us — a portal page or endpoint path is fine, only the host is used): ",
-          )
-        ).trim();
+        // oxlint-disable-next-line no-await-in-loop -- interactive prompt: one question is answered before the next is asked
+        const raw = await rl.question(
+          "TDEI base URL (e.g. https://api-dev.tdei.us — a portal page or endpoint path is fine, only the host is used): ",
+        );
+        const answer = raw.trim();
         if (answer) return { url: answer };
         console.error("A base URL is required — there is no default.");
       }
