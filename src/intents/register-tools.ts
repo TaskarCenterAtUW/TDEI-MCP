@@ -92,7 +92,7 @@ const assetSchema = z.discriminatedUnion("kind", [
       .trim()
       .min(1)
       .describe(
-        "Absolute file path on the CLIENT machine running the agent (never on the MCP server); used only to build a client-side curl command.",
+        "Absolute file path on the CLIENT machine running the agent (never on the MCP server); embedded in a hands-free client-side curl command using $TDEI_TOKEN.",
       ),
     name: z.string().trim().min(1).optional(),
   }),

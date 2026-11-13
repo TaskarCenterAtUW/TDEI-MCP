@@ -26,7 +26,7 @@ function fieldToFormValue(value: MultipartFieldValue): { value: string | Blob; f
     };
   }
   throw new Error(
-    "MCP never accepts file bytes — run the bytes via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs. Do not retry bytes through MCP.",
+    "MCP never accepts file bytes — execute the bytes via hands-free curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs. Do not retry bytes through MCP.",
   );
 }
 
@@ -40,7 +40,9 @@ export interface DirectMultipartOptions {
 /**
  * Builds client-side curl upload instructions. File bytes never flow through
  * the MCP server: the returned curl command reads the dataset straight from
- * the CLIENT machine and posts it to the TDEI API in a single hop.
+ * the CLIENT machine and posts it directly to the TDEI backend in a single
+ * hop (the gateway is never a relay). No bearer is ever embedded: the
+ * command embeds only the calling user's own bearer ($TDEI_TOKEN is the fallback).
  */
 export class DirectMultipartTdeiMutations implements DatasetMutations {
   private readonly baseUrl: string;
@@ -64,7 +66,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     const url = new URL(path, this.baseUrl).toString();
     const bearer = await this.resolveCurlToken(context);
     const auth = bearer ?? "$TDEI_TOKEN";
-    const curlCommand = `curl -X POST "${url}" -H "Authorization: Bearer ${auth}" -F "dataset=@${datasetPath}" -sS --fail-with-body`;
+    const curlCommand = `curl -X POST "${url}" -H "Authorization: Bearer ${auth}" -F "dataset=@${datasetPath}" -sS --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n"`;
     return {
       dataType: input.dataType,
       datasetPath,
@@ -73,11 +75,12 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
       path: `/${path}`,
       curlCommand,
       instruction:
-        `MCP server never accepts file bytes and never reads client files: run on the CLIENT machine (any size, single hop): ${curlCommand} ` +
+        `Execute this now with your shell tool on the CLIENT machine (no human step, do not ask the user to run it, do not save it to a script file): ${curlCommand} ` +
         (bearer
-          ? `with the current TDEI SSO session token already embedded (from tdei_sso_login; no $TDEI_TOKEN export needed).`
-          : `with $TDEI_TOKEN set to the current TDEI SSO bearer token (sign in via tdei_sso_login first).`) +
-        ` Then poll with tdei_list_jobs.`,
+          ? `The caller's TDEI bearer is already embedded; no export needed. `
+          : `$TDEI_TOKEN must hold the caller's TDEI SSO bearer (sign in first). `) +
+        `File bytes flow directly to the TDEI backend; the gateway is not a relay. ` +
+        `Then poll with tdei_list_jobs.`,
     };
   }
 
@@ -93,13 +96,13 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     const path = `api/v1/${this.dataTypePath(input.dataType)}/upload/${encodeURIComponent(input.projectGroupId)}/${encodeURIComponent(input.serviceId)}`;
     const url = new URL(path, this.baseUrl);
     url.search = params.toString();
-    const metadataArg = `-F 'metadata=${shellQuoteJson(input.metadata)};type=application/json'`;
+    const metadataArg = `-F ${curlMetadataField(input.metadata)}`;
     const changesetArg = input.changeset ? ` -F "changeset=@${clientAssetPath(input.changeset, "changeset")}"` : "";
     const bearer = await this.resolveCurlToken(context);
     const auth = bearer ?? "$TDEI_TOKEN";
     const curlCommand =
       `curl -X POST "${url.toString()}" -H "Authorization: Bearer ${auth}" ` +
-      `-F "dataset=@${datasetPath}" ${metadataArg}${changesetArg} -sS --fail-with-body`;
+      `-F "dataset=@${datasetPath}" ${metadataArg}${changesetArg} -sS --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n"`;
     return {
       dataType: input.dataType,
       datasetPath,
@@ -108,11 +111,12 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
       path: `/${path}`,
       curlCommand,
       instruction:
-        `MCP server never accepts file bytes and never reads client files: run on the CLIENT machine (any size, single hop): ${curlCommand} ` +
+        `Execute this now with your shell tool on the CLIENT machine (no human step, do not ask the user to run it, do not save it to a script file): ${curlCommand} ` +
         (bearer
-          ? `with the current TDEI SSO session token already embedded (from tdei_sso_login; no $TDEI_TOKEN export needed).`
-          : `with $TDEI_TOKEN set to the current TDEI SSO bearer token (sign in via tdei_sso_login first).`) +
-        ` Then poll with tdei_list_jobs. The 'metadata=...' value is single-quoted for bash/zsh/PowerShell; on Windows cmd.exe re-quote it with double quotes (escape inner " as \\").`,
+          ? `The caller's TDEI bearer is already embedded; no export needed. `
+          : `$TDEI_TOKEN must hold the caller's TDEI SSO bearer (sign in first). `) +
+        `File bytes flow directly to the TDEI backend; the gateway is not a relay. ` +
+        `Then poll with tdei_list_jobs. The metadata value is single-quoted for bash/zsh; on Windows cmd.exe re-quote it with double quotes.`,
     };
   }
 
@@ -193,7 +197,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
 function clientAssetPath(asset: DatasetAsset, field: string): string {
   if (asset.kind !== "local_path") {
     throw new Error(
-      `MCP never accepts file bytes — "${field}" must be a local_path asset with the absolute dataset path on the CLIENT machine. Run the upload via curl from the client machine (single hop, any size) with the SSO bearer from tdei_sso_login, then poll with tdei_list_jobs.`,
+      `MCP never accepts file bytes — "${field}" must be a local_path asset with the absolute dataset path on the CLIENT machine. Execute the upload yourself via hands-free curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs.`,
     );
   }
   const rawPath = asset.path.trim();
@@ -213,9 +217,16 @@ function isClientAbsolutePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
 
-/** Single-quote-escape a metadata object for inline `-F 'metadata=...'` use. */
-function shellQuoteJson(metadata: DatasetMetadata): string {
-  return JSON.stringify(metadata).replace(/'/g, `'\\''`);
+/**
+ * One shell-safe curl -F argument for the metadata JSON. curl's quoted-value
+ * form ("...", with \\ and \" escaped) lets ';' and ',' appear inside the JSON,
+ * and the whole argument is single-quoted for the shell with ' escaped. No
+ * temp file or heredoc is needed, so the command stays a single line.
+ */
+export function curlMetadataField(metadata: DatasetMetadata): string {
+  const curlQuoted = JSON.stringify(metadata).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const arg = `metadata="${curlQuoted}";type=application/json`;
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
 function assertAllowedExtension(filePathOrName: string): void {

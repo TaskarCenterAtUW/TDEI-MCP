@@ -10,17 +10,17 @@ import { TDEI_USER_TOOL_INSTRUCTIONS } from "../tdei-user/tool-instructions.js";
  */
 export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   validateOswFile:
-    "OSW validation accepts one ZIP file containing nodes/edges/points GeoJSON. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then run this on that machine: " +
-    'curl -X POST "<apiUrl>/api/v1/osw/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -sS --fail-with-body. ' +
+    "OSW validation accepts one ZIP file containing nodes/edges/points GeoJSON. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then execute this yourself with your shell tool on that machine (no human step): " +
+    'curl -X POST "<apiUrl>/api/v1/osw/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -sS --fail-with-body with the caller bearer already embedded in the returned curlCommand (else $TDEI_TOKEN). File bytes flow directly to the TDEI backend; the gateway is not a relay. ' +
     "The response returns a job_id; poll it with tdei_list_jobs (jobId) until status is COMPLETED, then fetch the result with job_download (GET /api/v1/job/download/<job_id>). " +
     "Prefer tdei_validate_dataset, which asks for the missing file/data type and builds this hand-off automatically.",
   validateGtfsFlexFile:
-    "GTFS Flex validation accepts one ZIP file. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then run this on that machine: " +
-    'curl -X POST "<apiUrl>/api/v1/gtfs-flex/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -sS --fail-with-body. ' +
+    "GTFS Flex validation accepts one ZIP file. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then execute this yourself with your shell tool on that machine: " +
+    'curl -X POST "<apiUrl>/api/v1/gtfs-flex/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -sS --fail-with-body with the caller bearer already embedded in the returned curlCommand. ' +
     "The response returns a job_id; poll it with tdei_list_jobs (jobId) and fetch the completed result with job_download. Prefer tdei_validate_dataset for the full hand-off.",
   validateGtfsPathwaysFile:
-    "GTFS Pathways validation accepts one ZIP file. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then run this on that machine: " +
-    'curl -X POST "<apiUrl>/api/v1/gtfs-pathways/validate" -H "Authorization: Bearer <SSO bearer from tdei_sso_login>" -F "dataset=@/path/to/file.zip" -sS --fail-with-body. ' +
+    "GTFS Pathways validation accepts one ZIP file. MCP never accepts file bytes: ask the user for the absolute path of the .zip on the CLIENT machine, then execute this yourself with your shell tool on that machine: " +
+    'curl -X POST "<apiUrl>/api/v1/gtfs-pathways/validate" -H "Authorization: Bearer $TDEI_TOKEN" -F "dataset=@/path/to/file.zip" -sS --fail-with-body with the caller bearer already embedded in the returned curlCommand. ' +
     "The response returns a job_id; poll it with tdei_list_jobs (jobId) and fetch the completed result with job_download. Prefer tdei_validate_dataset for the full hand-off.",
   oswQualityReportGenerate:
     "Generate a quality report for exactly one OSW dataset (POST /api/v1/osw/quality-report/{tdei_dataset_id}). " +
@@ -53,7 +53,7 @@ export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
     "job_id is required: if missing, ask which job to download or look it up with tdei_list_jobs. " +
     "Check tdei_list_jobs first and only download after the job status is COMPLETED (FAILED jobs have no useful output). " +
     "Pass file to fetch a non-output artifact, such as the Pathways-Convert job's per-level reference data. " +
-    "Returns a client-side curl command with the SSO bearer already embedded; run it on the CLIENT machine into the user-connected folder.",
+    "Returns a hands-free client-side curl command with the caller's bearer already embedded; execute it yourself with your shell tool on the CLIENT machine.",
 };
 
 /** Append the matching TDEI instruction to a discovered tool description. */

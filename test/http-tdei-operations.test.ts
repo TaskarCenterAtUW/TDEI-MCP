@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
+import { curlMetadataField } from "../src/adapters/direct-multipart-tdei-mutations.js";
+
 import { HttpTdeiOperations } from "../src/adapters/http-tdei-operations.js";
 
 test("HTTP adapter forwards request bearer and dataset filters", async () => {
@@ -184,7 +186,8 @@ test("HTTP adapter upload returns curl with inline metadata and encoded target",
   assert.equal(instruction.path, "/api/v1/gtfs-pathways/upload/group%201/service%2F1");
   assert.ok(instruction.curlCommand.includes("derived_from_dataset_id=source-1"));
   assert.ok(instruction.curlCommand.includes('-F "dataset=@/Users/tester/data/upload.zip"'));
-  assert.ok(instruction.curlCommand.includes(`-F 'metadata=${JSON.stringify(metadata)};type=application/json'`));
+  assert.ok(instruction.curlCommand.includes(`-F ${curlMetadataField(metadata)}`));
+  assert.equal(instruction.curlCommand.includes("\n"), false);
   assert.ok(instruction.curlCommand.includes('-F "changeset=@/Users/tester/data/change.osc"'));
   assert.ok(instruction.curlCommand.includes("Bearer bearer-A"));
   assert.equal(calls, 0);
@@ -214,7 +217,7 @@ test("HTTP adapter upload falls back to the token provider and then $TDEI_TOKEN"
     {},
   );
   assert.ok(viaPlaceholder.curlCommand.includes("Bearer $TDEI_TOKEN"));
-  assert.match(viaPlaceholder.instruction, /sign in via tdei_sso_login first/);
+  assert.match(viaPlaceholder.instruction, /sign in first/);
 });
 
 test("HTTP adapter refuses non-local assets and guides to curl", async () => {
