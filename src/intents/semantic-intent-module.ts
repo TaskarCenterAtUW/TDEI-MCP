@@ -466,6 +466,39 @@ export class SemanticIntentModule {
           });
     const projectGroupId = input.projectGroupId?.trim() || undefined;
     const serviceId = input.serviceId?.trim() || undefined;
+    // Every further detail the user provides becomes a server-side API filter
+    // (exact spec names are mapped in the adapters). Nothing here is filtered
+    // by the LLM — the API ANDs them with the project group / service scope.
+    const extraApiFilters: Pick<
+      DatasetSearch,
+      | "version"
+      | "dataSource"
+      | "collectionMethod"
+      | "collectedBy"
+      | "derivedFromDatasetId"
+      | "collectionDate"
+      | "confidenceLevel"
+      | "schemaVersion"
+      | "validFrom"
+      | "validTo"
+      | "city"
+      | "county"
+      | "region"
+    > = {
+      ...(input.version?.trim() ? { version: input.version.trim() } : {}),
+      ...(input.dataSource ? { dataSource: input.dataSource } : {}),
+      ...(input.collectionMethod ? { collectionMethod: input.collectionMethod } : {}),
+      ...(input.collectedBy?.trim() ? { collectedBy: input.collectedBy.trim() } : {}),
+      ...(input.derivedFromDatasetId?.trim() ? { derivedFromDatasetId: input.derivedFromDatasetId.trim() } : {}),
+      ...(input.collectionDate?.trim() ? { collectionDate: input.collectionDate.trim() } : {}),
+      ...(input.confidenceLevel !== undefined ? { confidenceLevel: input.confidenceLevel } : {}),
+      ...(input.schemaVersion?.trim() ? { schemaVersion: input.schemaVersion.trim() } : {}),
+      ...(input.validFrom?.trim() ? { validFrom: input.validFrom.trim() } : {}),
+      ...(input.validTo?.trim() ? { validTo: input.validTo.trim() } : {}),
+      ...(input.city?.trim() ? { city: input.city.trim() } : {}),
+      ...(input.county?.trim() ? { county: input.county.trim() } : {}),
+      ...(input.region?.trim() ? { region: input.region.trim() } : {}),
+    };
     // A project-group/service listing means "latest unique datasets" unless the
     // caller explicitly asks for every version. This is the single place the
     // rule lives; dependent tools (details, download, workspace creation)
@@ -475,6 +508,7 @@ export class SemanticIntentModule {
     const common = {
       ...(input.dataType ? { dataType: input.dataType } : {}),
       ...(serviceId ? { serviceId } : {}),
+      ...extraApiFilters,
       status: input.status ?? ("All" as const),
       sortField: "uploaded_timestamp" as const,
       sortOrder: "desc" as const,
@@ -525,7 +559,7 @@ export class SemanticIntentModule {
         evidence,
       );
 
-    /** Project-group/service listings read every page, then keep the latest per name. */
+    /** Project-group/service listings scan pages newest-first, then keep the latest per name. */
     const scanAndSelect = async (
       base: Pick<DatasetSearch, "projectGroupId" | "serviceId">,
       matchedBy: DatasetMatch["matchedBy"],
@@ -534,12 +568,20 @@ export class SemanticIntentModule {
       const baseQuery = {
         ...base,
         ...(input.dataType ? { dataType: input.dataType } : {}),
+        ...extraApiFilters,
+        // A place given together with a project group / service narrows the
+        // listing server-side instead of being silently ignored.
+        ...(input.place?.trim() ? { name: input.place.trim() } : {}),
         status: input.status ?? "All",
       };
       // Follow-up questions reuse the scan instead of re-reading dozens of pages.
-      const scanKey = `findDatasetsScan:${base.projectGroupId ?? ""}:${base.serviceId ?? ""}:${input.dataType ?? "*"}:${baseQuery.status}`;
+      // The key covers the full server-side query so different filter sets never share a scan.
+      const scanKey = `findDatasetsScan:${JSON.stringify(baseQuery)}`;
       const scan = await this.cached(scanKey, DATASET_SCAN_CACHE_TTL_MS, context, () =>
-        this.scanDatasetPages(baseQuery, context),
+        // The API has no uploaded_after parameter, so date filtering stays
+        // client-side — but the cutoff is passed down so paging can stop as
+        // soon as pages are older than it (results sort newest-first).
+        this.scanDatasetPages(baseQuery, context, cutoffMs === undefined ? {} : { cutoffMs }),
       );
       const filtered = applyCutoff(scan.datasets);
       const latest = selectLatestPerName(filtered, base.serviceId);
@@ -547,17 +589,21 @@ export class SemanticIntentModule {
       // Newest upload first across every page scanned (the API only sorts within a page).
       rows.sort((a, b) => (a.uploadedMs !== b.uploadedMs ? b.uploadedMs - a.uploadedMs : a.name.localeCompare(b.name)));
       const shown = rows.slice(0, pageSize);
+      const scannedNote = scan.stoppedEarly
+        ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset record(s)) and stopped early: older pages predate the upload-date filter, so they cannot match.`
+        : `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s)`;
       const note = scan.truncated
         ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset records) and stopped at the ${DATASET_SCAN_MAX_PAGES}-page cap; some datasets were not read. Narrow with serviceId or uploadedWithinDays.`
         : latestPerName
-          ? `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s); kept the latest version of each of ${latest.uniqueNames} dataset name(s) (${latest.versionsSuperseded} older version record(s) hidden).`
-          : `Scanned every page: ${scan.pagesRead} page(s), ${filtered.length} dataset record(s).`;
+          ? `${scannedNote}; kept the latest version of each of ${latest.uniqueNames} dataset name(s) (${latest.versionsSuperseded} older version record(s) hidden).`
+          : `${scannedNote}; ${filtered.length} dataset record(s) after the upload-date filter.`;
       return result(shown, matchedBy, evidence, {
         pagesRead: scan.pagesRead,
         datasetsScanned: scan.datasets.length,
         uniqueDatasetNames: latest.uniqueNames,
         versionsSuperseded: latestPerName ? latest.versionsSuperseded : 0,
         truncated: scan.truncated,
+        stoppedEarly: scan.stoppedEarly,
         note:
           rows.length > shown.length
             ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 50) or narrow with serviceId/uploads.`
@@ -577,10 +623,21 @@ export class SemanticIntentModule {
       return complete(await search({ bbox: input.bbox }), "bbox", `explicit bbox ${input.bbox.join(",")}`);
     }
     if (projectGroupId) {
-      return scanAndSelect({ projectGroupId }, "project_group", `project group ${projectGroupId}`);
+      // Send the service filter together with the project group when both are
+      // known: the API ANDs them, so the scan reads far fewer pages.
+      // A place given on top narrows the listing by dataset name (see scanAndSelect).
+      const placeSuffix = input.place?.trim() ? ` + name contains ${input.place.trim()}` : "";
+      return scanAndSelect(
+        { projectGroupId, ...(serviceId ? { serviceId } : {}) },
+        "project_group",
+        serviceId
+          ? `project group ${projectGroupId} + service ${serviceId}${placeSuffix}`
+          : `project group ${projectGroupId}${placeSuffix}`,
+      );
     }
     if (serviceId) {
-      return scanAndSelect({ serviceId }, "service", `service ${serviceId}`);
+      const placeSuffix = input.place?.trim() ? ` + name contains ${input.place.trim()}` : "";
+      return scanAndSelect({ serviceId }, "service", `service ${serviceId}${placeSuffix}`);
     }
 
     if (!input.place) {
@@ -1176,14 +1233,27 @@ export class SemanticIntentModule {
    * service) in page windows, stopping at the first short page. Bounded
    * concurrency keeps a ~2,400-record service near 10s instead of ~40s, and
    * the cap reports truncation instead of scanning forever.
+   *
+   * When `cutoffMs` is set, paging additionally stops early: results sort
+   * newest-first (uploaded_timestamp desc), so once the last page read holds
+   * nothing uploaded after the cutoff, later pages cannot match either. Pages
+   * whose records all lack a parseable timestamp never trigger the early stop.
    */
   private async scanDatasetPages(
     base: Pick<DatasetSearch, "dataType" | "status" | "projectGroupId" | "serviceId">,
     context: RequestContext,
-  ): Promise<{ datasets: Array<Record<string, unknown>>; pagesRead: number; truncated: boolean }> {
+    options: { cutoffMs?: number } = {},
+  ): Promise<{
+    datasets: Array<Record<string, unknown>>;
+    pagesRead: number;
+    truncated: boolean;
+    stoppedEarly: boolean;
+  }> {
     const datasets: Array<Record<string, unknown>> = [];
     let pagesRead = 0;
     let truncated = false;
+    let stoppedEarly = false;
+    const { cutoffMs } = options;
     for (let windowStart = 1; ; windowStart += DATASET_SCAN_CONCURRENCY) {
       if (windowStart > DATASET_SCAN_MAX_PAGES) {
         truncated = true;
@@ -1205,12 +1275,25 @@ export class SemanticIntentModule {
         ),
       );
       let reachedEnd = false;
+      let lastBatch: Array<Record<string, unknown>> = [];
       for (const batch of batches) {
         pagesRead += 1;
         for (const dataset of batch) datasets.push(dataset);
+        lastBatch = batch;
         if (batch.length < DATASET_SCAN_PAGE_SIZE) {
           reachedEnd = true;
           break;
+        }
+      }
+      if (!reachedEnd && cutoffMs !== undefined && lastBatch.length > 0) {
+        let newestMs = Number.NEGATIVE_INFINITY;
+        for (const dataset of lastBatch) {
+          const ms = uploadedTimestampMs(dataset);
+          if (ms !== undefined && ms > newestMs) newestMs = ms;
+        }
+        if (newestMs !== Number.NEGATIVE_INFINITY && newestMs < cutoffMs) {
+          reachedEnd = true;
+          stoppedEarly = true;
         }
       }
       if (reachedEnd) break;
@@ -1220,7 +1303,7 @@ export class SemanticIntentModule {
         break;
       }
     }
-    return { datasets, pagesRead, truncated };
+    return { datasets, pagesRead, truncated, stoppedEarly };
   }
 
   /**
@@ -1260,8 +1343,15 @@ export class SemanticIntentModule {
     const serviceId = input.serviceId?.trim() || undefined;
 
     const scanKey = `tcatQaReports:${projectGroupId}:${serviceId ?? "*"}:${dataType}:${status}`;
+    // Like findDatasets, the API has no uploaded_after: filter client-side but
+    // stop paging early once pages predate the cutoff.
+    const cutoffMs = resolveCutoffMs(input.uploadedAfter, input.uploadedWithinDays);
     const loadScan = () =>
-      this.scanDatasetPages({ projectGroupId, ...(serviceId ? { serviceId } : {}), dataType, status }, context);
+      this.scanDatasetPages(
+        { projectGroupId, ...(serviceId ? { serviceId } : {}), dataType, status },
+        context,
+        cutoffMs === undefined ? {} : { cutoffMs },
+      );
     const scan = input.refresh
       ? await loadScan()
       : await this.cached(scanKey, DATASET_SCAN_CACHE_TTL_MS, context, loadScan);
@@ -1296,7 +1386,6 @@ export class SemanticIntentModule {
       };
     };
 
-    const cutoffMs = resolveCutoffMs(input.uploadedAfter, input.uploadedWithinDays);
     let rows = selected.map(toRow);
     if (cutoffMs !== undefined) {
       rows = rows.filter((row) => {
@@ -1335,7 +1424,9 @@ export class SemanticIntentModule {
     const mayHaveMore = rows.length > shown.length;
     const scanNote = scan.truncated
       ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset records) and stopped at the ${DATASET_SCAN_MAX_PAGES}-page cap; some datasets were not read. Narrow with serviceId or uploadedWithinDays.`
-      : `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s).`;
+      : scan.stoppedEarly
+        ? `Scanned ${scan.pagesRead} page(s) (${scan.datasets.length} dataset record(s)) and stopped early: older pages predate the upload-date filter, so they cannot match.`
+        : `Scanned every page: ${scan.pagesRead} page(s), ${scan.datasets.length} dataset record(s).`;
 
     return {
       status: "complete",

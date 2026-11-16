@@ -15,6 +15,8 @@ import type {
 export interface DatasetSearch {
   name?: string;
   city?: string;
+  county?: string;
+  region?: string;
   bbox?: [number, number, number, number];
   dataType?: DataType;
   status: DatasetStatus;
@@ -22,6 +24,18 @@ export interface DatasetSearch {
   serviceId?: string;
   tdeiDatasetId?: string;
   collectionDate?: string;
+  /** Exact match on metadata.dataset_detail.version. */
+  version?: string;
+  dataSource?: "3rdParty" | "TDEITools" | "InHouse";
+  collectionMethod?: "manual" | "transform" | "generated" | "other";
+  /** Exact match on the collection agency or person. */
+  collectedBy?: string;
+  derivedFromDatasetId?: string;
+  /** Minimum confidence level (API returns datasets above this value). */
+  confidenceLevel?: number;
+  schemaVersion?: string;
+  validFrom?: string;
+  validTo?: string;
   sortField: "uploaded_timestamp";
   sortOrder: "desc";
   page: number;

@@ -100,6 +100,8 @@ export class HttpTdeiOperations implements TdeiOperations {
     const params = new URLSearchParams();
     appendIfDefined(params, "name", input.name);
     appendIfDefined(params, "city", input.city);
+    appendIfDefined(params, "county", input.county);
+    appendIfDefined(params, "region", input.region);
     if (input.bbox) {
       for (const coordinate of input.bbox) params.append("bbox", String(coordinate));
     }
@@ -109,6 +111,15 @@ export class HttpTdeiOperations implements TdeiOperations {
     appendIfDefined(params, "tdei_service_id", input.serviceId);
     appendIfDefined(params, "tdei_dataset_id", input.tdeiDatasetId);
     appendIfDefined(params, "collection_date", input.collectionDate);
+    appendIfDefined(params, "version", input.version);
+    appendIfDefined(params, "data_source", input.dataSource);
+    appendIfDefined(params, "collection_method", input.collectionMethod);
+    appendIfDefined(params, "collected_by", input.collectedBy);
+    appendIfDefined(params, "derived_from_dataset_id", input.derivedFromDatasetId);
+    appendIfDefined(params, "confidence_level", input.confidenceLevel);
+    appendIfDefined(params, "schema_version", input.schemaVersion);
+    appendIfDefined(params, "valid_from", input.validFrom);
+    appendIfDefined(params, "valid_to", input.validTo);
     appendIfDefined(params, "sort_field", input.sortField);
     appendIfDefined(params, "sort_order", input.sortOrder);
     appendIfDefined(params, "page_no", input.page);
