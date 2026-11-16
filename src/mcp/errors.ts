@@ -8,7 +8,7 @@ export const setSignInMode = (m: SignInMode): void => {
 export function signInText(): string {
   switch (signInMode) {
     case "gateway":
-      return "Reconnect this MCP server in your client and approve the browser sign-in.";
+      return "Click the inline Sign in button in this chat to open the browser login (or use the server's Sign in action in Settings if no button appears).";
     case "bearer":
       return "Send a valid TDEI access token in the Authorization: Bearer header.";
     default:

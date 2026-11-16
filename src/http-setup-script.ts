@@ -41,8 +41,8 @@ export function normalizeSetupClientTarget(value: string): SetupClientTarget | u
  */
 export type SetupScriptAction = "install" | "update" | "uninstall" | "cleanup";
 
-/** A concrete client, or `all` (cleanup only: sweep every supported harness). */
-export type SetupScriptTarget = SetupClientTarget | "all";
+/** A concrete client, or `all` (interactive sweep), or `other` (manual copy-paste for harnesses not listed above). */
+export type SetupScriptTarget = SetupClientTarget | "all" | "other";
 
 const MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
@@ -582,6 +582,77 @@ export function getClientSetupJs(): string {
   return CLIENT_SETUP_JS;
 }
 
+/**
+ * Manual entry for harnesses with no auto-config writer (Cline, Aider,
+ * Windsurf, Zed, and any future client). MCP has no universal config path:
+ * every harness reads a different file/key (mcpServers vs servers vs mcp vs
+ * TOML), so `other` never writes a file — it prints the endpoint plus
+ * copy-paste snippets for plain Streamable HTTP. Same OAuth route as every
+ * listed client: first tool call starts the browser sign-in.
+ */
+export function renderManualEntryText(mcpUrl: string, serverName: string): string {
+  const httpJson = JSON.stringify({ [serverName]: { url: mcpUrl } }, null, 2);
+  return [
+    `MCP endpoint: ${mcpUrl}`,
+    `Entry name: ${serverName}`,
+    "",
+    "Add it manually in your client's MCP settings:",
+    "",
+    "  1) Streamable HTTP (Codex, Cursor, VS Code, Cline, Aider, Windsurf, Zed, most harnesses):",
+    `     {"mcpServers": ${JSON.stringify({ [serverName]: { url: mcpUrl } })}}`,
+    "     VS Code uses the same object under \"servers\" instead of \"mcpServers\".",
+    "     OpenCode uses {\"mcp\": {\"<name>\": {\"type\": \"remote\", \"url\": \"...\"}}}.",
+    "     Codex TOML (~/.codex/config.toml):",
+    `     [mcp_servers.${serverName}]`,
+    `     url = ${JSON.stringify(mcpUrl)}`,
+    "",
+    "  2) Restart the app, start a new chat, ask the agent to use any TDEI tool.",
+    "     The first call starts the TDEI sign-in: approve the browser login and the call is retried.",
+    "",
+    "Full JSON (mcpServers shape):",
+    httpJson,
+  ].join("\n");
+}
+
+function renderOtherSetupScript(
+  baseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+): string {
+  const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const manual = renderManualEntryText(mcpUrl, mcpName);
+  return `#!/usr/bin/env sh
+set -eu
+
+# TDEI MCP manual setup (entry: ${mcpName}): this harness has no auto-config writer,
+# so nothing is written. Copy the endpoint into your client's MCP settings by hand.
+cat <<'EOF'
+${manual}
+EOF
+`;
+}
+
+function renderOtherSetupPowershell(
+  baseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+): string {
+  const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const manual = renderManualEntryText(mcpUrl, mcpName);
+  const lines = manual
+    .split("\n")
+    .map((line) => (line === "" ? "Write-Host ''" : `Write-Host ${psQuote(line)}`))
+    .join("\n");
+  return `# TDEI MCP manual setup (entry: ${mcpName}) — nothing is written; copy the endpoint by hand.
+$ErrorActionPreference = "Stop"
+${lines}
+`;
+}
+
 export function renderSetupOverview(
   baseUrl: string,
   basePath = "/mcp",
@@ -621,6 +692,10 @@ export function renderSetupOverview(
     "  # Cursor (~/.cursor/mcp.json)",
     `  curl -fsSL ${setupBase}/cursor | sh`,
     "",
+    "  # Other / manual (Cline, Aider, Windsurf, Zed, any harness not listed above)",
+    "  # Prints the MCP URL plus copy-paste JSON/TOML — nothing is written, add it by hand:",
+    `  curl -fsSL ${setupBase}/other | sh`,
+    "",
     "Install to every client at once — one command prompts Y/n for each client",
     "(answer n to skip the ones you don't use; a missing config is created):",
     "",
@@ -652,13 +727,16 @@ export function renderSetupOverview(
     "  # Cursor (%USERPROFILE%\\.cursor\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/cursor.ps1 | iex`,
     "",
+    "  # Other / manual (Cline, Aider, Windsurf, Zed, any harness not listed above)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/other.ps1 | iex`,
+    "",
     "  # Every client at once (prompts Y/n for each client)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/all.ps1 | iex`,
     "",
     "Update / reinstall (MCP broken after a server move? run this, then restart the app):",
     `Safe to re-run — replaces only the ${mcpName} entry, keeps every other entry.`,
-    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor — or all",
-    "for every client with a Y/n prompt each):",
+    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor, other — or all",
+    "for every auto-configured client with a Y/n prompt each; other prints manual JSON/TOML for",
     "",
     `  curl -fsSL ${setupBase}/update/codex | sh`,
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/update/codex.ps1 | iex`,
@@ -811,6 +889,12 @@ ${CLIENT_SETUP_JS}EOF
 for CLIENT in $SELECTED; do
   run_client "$CLIENT"
 done
+
+# Harnesses not listed above (Cline, Aider, Windsurf, Zed, …): MCP has no
+# universal config path, so add the endpoint by hand.
+echo ""
+echo "[tdei-mcp] Other clients (manual): $MCP_URL (entry: $SERVER_NAME)"
+echo "[tdei-mcp] Run this for the copy-paste JSON/TOML: curl -fsSL <this url>/other | sh"
 `;
 }
 
@@ -889,6 +973,12 @@ try {
 } finally {
   Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
 }
+
+# Harnesses not listed above (Cline, Aider, Windsurf, Zed, …): MCP has no
+# universal config path, so add the endpoint by hand.
+Write-Host ""
+Write-Host "[tdei-mcp] Other clients (manual): $McpUrl (entry: $ServerName)"
+Write-Host "[tdei-mcp] Run the matching other.ps1 installer for the copy-paste JSON/TOML."
 `;
 }
 
@@ -902,6 +992,9 @@ export function renderClientSetupScript(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "other") {
+    return renderOtherSetupScript(baseUrl, basePath, gatewaySlug, profile);
+  }
   if (client === "all" && action !== "cleanup") {
     return renderAllClientsSetupScript(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
   }
@@ -944,6 +1037,9 @@ export function renderClientSetupPowershell(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "other") {
+    return renderOtherSetupPowershell(baseUrl, basePath, gatewaySlug, profile);
+  }
   if (client === "all" && action !== "cleanup") {
     return renderAllClientsSetupPowershell(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
   }

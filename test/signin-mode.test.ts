@@ -17,7 +17,7 @@ test("tool mode names tdei_sso_login while gateway/bearer modes do not", () => {
     setSignInMode("gateway");
     const gateway = formatError(new Error("TDEI_SSO_REQUIRED"));
     const gatewayBody = JSON.parse(String(gateway.content[0].text)) as { message: string; hint: string };
-    assert.match(gatewayBody.message, /Reconnect this MCP server/);
+    assert.match(gatewayBody.message, /inline Sign in button/);
     assert.doesNotMatch(gatewayBody.message, /tdei_sso_login/);
     assert.doesNotMatch(gatewayBody.hint, /tdei_sso_login/);
 

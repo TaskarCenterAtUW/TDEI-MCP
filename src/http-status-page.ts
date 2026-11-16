@@ -167,6 +167,7 @@ button { cursor: pointer; }
 <option value="claude-desktop">Claude Desktop</option>
 <option value="vscode">VS Code</option>
 <option value="cursor">Cursor</option>
+<option value="other">Other / manual (Cline, Aider, …)</option>
 </select>
 </label>
 <label data-script-only>Operating system

@@ -276,16 +276,20 @@ function sendGatewayChallenge(
   gatewaySlug: string,
   mcpPath: string,
 ): void {
+  const endpoints = oauthEndpoints(publicBaseUrl, gatewaySlug, mcpPath);
   sendJson(
     response,
     401,
     {
       code: "TDEI_SSO_REQUIRED",
       message:
-        "TDEI sign-in is required. Reconnect this MCP server and approve the browser login. The client then sends the access token on every tool call.",
+        "TDEI sign-in is required. Click the inline Sign in button in this chat to open the browser login, then approve it. The client then sends the access token on every tool call (if no button appears, use the server's Sign in action in Settings).",
+      signInUrl: `${publicBaseUrl.replace(/\/$/, "")}/`,
+      authorizeUrl: endpoints.authorize,
+      resourceMetadataUrl: endpoints.protectedResourceMetadata,
     },
     {
-      "WWW-Authenticate": oauthChallengeHeader(oauthEndpoints(publicBaseUrl, gatewaySlug, mcpPath)),
+      "WWW-Authenticate": oauthChallengeHeader(endpoints),
       "Cache-Control": "no-store",
     },
   );
@@ -655,15 +659,15 @@ export async function serveHttp(
             clientSlug = parts[1];
           }
           const client =
-            clientSlug === "all"
-              ? ("all" as const)
+            clientSlug === "all" || clientSlug === "other"
+              ? (clientSlug as "all" | "other")
               : clientSlug !== undefined
                 ? normalizeSetupClientTarget(clientSlug)
                 : undefined;
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor, all (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (e.g. update/codex, update/all, cleanup/all). install/all and update/all prompt Y/n for each client so you can skip ones you don't use.`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor, other, all (append .ps1 for the Windows PowerShell installer). Use other for harnesses not listed (Cline, Aider, Windsurf, Zed, …): it prints the MCP URL plus copy-paste JSON/TOML to add by hand. Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (e.g. update/codex, update/all, cleanup/all). install/all and update/all prompt Y/n for each client so you can skip ones you don't use.`,
             });
             return;
           }
