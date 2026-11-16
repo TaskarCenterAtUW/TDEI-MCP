@@ -61,6 +61,8 @@ function evidenceFor(client: SetupClient, host: HostEnv, probe: DetectProbe): st
       return dirOf(dirname(configPath(client, host))) ?? bin("code");
     case "cursor":
       return dirOf(join(host.home, ".cursor")) ?? bin("cursor");
+    case "zed":
+      return dirOf(join(host.home, ".config", "zed")) ?? bin("zed");
   }
 }
 

@@ -93,7 +93,11 @@ export const TOOL_SPEC_BINDINGS: Readonly<Record<string, ToolSpecBinding>> = {
   tdei_cut_dataset_bbox: { ops: ["datasetBbox"] },
   tdei_tag_road: { ops: ["datasetTagRoad"] },
   tdei_tag_incline: { ops: ["datasetTagIncline"] },
-  tdei_check_dataset_incline: { ops: ["datasetTagIncline"] },
+  tdei_check_dataset_incline: {
+    ops: ["qualityMetricTag"],
+    waive: ["file"],
+    oneOf: ["tdeiDatasetId", "tdeiDatasetIds", "projectGroupId", "projectGroupName"],
+  },
   tdei_list_feedbacks: { ops: ["oswDatasetViewerFeedbacks"] },
   tdei_get_feedback_summary: { ops: ["oswDatasetViewerFeedbacksMetadata"] },
   tdei_download_feedbacks: { ops: ["oswDatasetViewerFeedbacksDownload"] },

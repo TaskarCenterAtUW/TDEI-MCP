@@ -9,7 +9,9 @@ import { promisify } from "node:util";
 
 import {
   buildRelayProgram,
+  ensureCallbackRelay,
   mergeRelayTargets,
+  RELAY_IDLE_TIMEOUT_MS,
   RELAY_PORT,
   stopCallbackRelay,
   writeRelayFiles,
@@ -42,8 +44,11 @@ test("relay program is syntactically valid and pins the single loopback port", a
     assert.match(src, /const port = 8765;/);
     assert.match(src, /sso-callback-targets\.json/);
     assert.match(src, /sso-callback-relay\.pid/);
-    // It must stay up: client-initiated OAuth cannot start it on demand.
-    assert.doesNotMatch(src, /IDLE_MS/);
+    // It must free the shared loopback port when idle so other local
+    // backends (e.g. TDEI-Orchestrator) can bind 8765; the next sign-in
+    // restarts it on demand.
+    assert.match(src, /IDLE_TIMEOUT_MS/);
+    assert.match(src, /600000|10 \* 60 \* 1000/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -187,6 +192,70 @@ test("relay redirects the browser so each gateway receives its own login cookie"
   }
 });
 
+test("relay idle timeout is ten minutes", () => {
+  assert.equal(RELAY_IDLE_TIMEOUT_MS, 10 * 60 * 1000);
+});
+
+test("relay exits after the idle timeout so the loopback port is freed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-relay-idle-"));
+  const relayPort = 18775;
+  try {
+    // Same program, but with a short idle fuse so the test does not wait.
+    const script = join(home, "relay-idle.cjs");
+    const src = buildRelayProgram(["https://gw.example/auth/callback"], relayPort).replace(
+      `const IDLE_TIMEOUT_MS = ${RELAY_IDLE_TIMEOUT_MS};`,
+      "const IDLE_TIMEOUT_MS = 300;",
+    );
+    assert.match(src, /const IDLE_TIMEOUT_MS = 300;/);
+    writeFileSync(script, src, "utf-8");
+    const child = spawn(process.execPath, [script], {
+      env: { ...process.env, HOME: home },
+      stdio: "ignore",
+    });
+    try {
+      // Wait for the listen socket (each probe resets the idle timer).
+      let up = false;
+      for (let attempt = 0; attempt < 50 && !up; attempt += 1) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${relayPort}/health`);
+          await res.arrayBuffer();
+          up = res.status === 200;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      assert.equal(up, true, "relay did not come up");
+      // No more traffic: the idle timer must exit the process on its own.
+      const exited = await new Promise<string>((resolve) => {
+        const done = (code: unknown) => resolve(`exit:${String(code)}`);
+        child.once("exit", done);
+        setTimeout(() => resolve("still-running"), 10_000);
+      });
+      assert.equal(exited, "exit:0");
+    } finally {
+      child.kill();
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ensureCallbackRelay reuses a listening relay without spawning", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-relay-ensure-"));
+  // A foreign listener on the port counts as listening; nothing is spawned.
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(18776, "127.0.0.1", resolve));
+  try {
+    const result = await ensureCallbackRelay(home, "https://gw.example", 18776);
+    assert.deepEqual(result, { listening: true, started: false });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 test("stopCallbackRelay stops the pid recorded by the previous install", async () => {
   const home = mkdtempSync(join(tmpdir(), "tdei-relay-stop-"));
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

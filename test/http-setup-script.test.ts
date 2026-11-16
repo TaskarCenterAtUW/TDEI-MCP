@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -29,12 +29,15 @@ test("installer relays the registered loopback callback to the gateway", () => {
   assert.match(js, /127\.0\.0\.1/);
 });
 
-test("installer relay stays running for client-initiated sign-ins", () => {
+test("installer relay exits after 10 minutes idle and restarts on demand", () => {
   const js = getClientSetupJs();
   // Client-initiated OAuth (Claude Desktop etc.) opens the loopback callback
-  // with no agent hook to start anything, so the relay must not self-exit.
-  assert.doesNotMatch(js, /IDLE_MS/);
-  assert.doesNotMatch(js, /setTimeout\(\(\) => process\.exit/);
+  // with no agent hook to start anything, so the relay must be listening when
+  // a sign-in starts — but it must not squat the shared port forever. It
+  // exits after 10 minutes without traffic (freeing 8765 for other local
+  // backends) and the next sign-in restarts it on demand.
+  assert.match(js, /IDLE_TIMEOUT_MS/);
+  assert.match(js, /process\.exit\(0\)/);
   // A reinstall replaces a relay from the previous install.
   assert.match(js, /sso-callback-relay\.pid/);
   assert.match(js, /process\.kill\(oldPid\)/);
@@ -56,7 +59,7 @@ test("installer relay hands the browser to every installed gateway in turn", () 
   assert.match(js, /const port = 8765;/);
 });
 
-const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 
 test("sh and ps1 installers embed the identical node program", () => {
   const shared = getClientSetupJs();
@@ -204,6 +207,7 @@ test("installer stdout prints a clear restart step for every client", () => {
       "claude-desktop": /Fully quit Claude Desktop.*Cmd\+Q/,
       vscode: /Reload VS Code|Reload Window/,
       cursor: /reopen Cursor/,
+      zed: /Agent panel/,
     };
     for (const client of CLIENTS) {
       const out = execFileSync(
@@ -249,10 +253,10 @@ test("status page builder generates install/update/remove commands with no manua
   for (const spec of ["both", "core", "workspace"]) {
     assert.match(html, new RegExp(`<option value="${spec}">`), `connectors dropdown must offer ${spec}`);
   }
-  for (const method of ["npx", "script"]) {
+  for (const method of ["npx", "script", "all"]) {
     assert.match(html, new RegExp(`<option value="${method}">`), `method dropdown must offer ${method}`);
   }
-  for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"]) {
+  for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"]) {
     assert.match(html, new RegExp(`<option value="${client}">`), `client dropdown must offer ${client}`);
   }
   for (const action of ["install", "update", "uninstall"]) {
@@ -260,15 +264,24 @@ test("status page builder generates install/update/remove commands with no manua
   }
   assert.match(html, /<option value="sh">/, "os dropdown must offer macOS / Linux");
   assert.match(html, /<option value="ps1">/, "os dropdown must offer Windows");
-  // Default (no-JS) command is a working npx installer, and the live builder
-  // covers every combination without the user editing the command text.
+  // Default (no-JS) command is a working per-client shell script (shown first),
+  // and the live builder covers every combination without the user editing the command text.
   assert.match(
     html,
-    /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup --env dev --gateway http:\/\/192\.168\.50\.11:3000/,
+    /curl -fsSL 'http:\/\/192\.168\.50\.11:3000\/tdei-core-dev\/mcp\/setup\/codex\?with=tdei-workspace-dev' \| sh/,
   );
+  // Script option is shown first (default); all-clients interactive second, npx last.
+  assert.match(
+    html,
+    /<option value="script">Per-client script \(recommended\)<\/option>[\s\S]*<option value="all">All clients \(interactive\)<\/option>[\s\S]*<option value="npx">/,
+  );
+  // The live builder covers the all-clients method (one command, Y/n per client).
+  assert.match(html, /method === 'all' \? 'all' : client/);
+  assert.match(html, /Prompts Y\/n for each client/);
   assert.match(html, /TDEI_SERVER_NAMES/);
   assert.match(html, /TDEI_NPX_PREFIX/);
-  assert.match(html, /action === 'install' \? client/);
+  assert.match(html, /method === 'all' \? 'all' : client/);
+  assert.match(html, /action === 'install' \? who/);
   assert.match(html, /\.ps1/);
   assert.match(html, /\| iex/);
 });
@@ -347,9 +360,16 @@ test("setup endpoints serve sh + ps1 installers and reject unknown clients", asy
     assert.equal(cleanupAllPs.status, 200);
     assert.match(await cleanupAllPs.text(), /\$Action = 'cleanup'/);
 
-    // "all" is only valid for cleanup.
-    assert.equal((await fetch(`${handle.url}/mcp/setup/all`)).status, 404);
-    assert.equal((await fetch(`${handle.url}/mcp/setup/update/all`)).status, 404);
+    // "all" covers every client: cleanup sweeps silently, install/update/uninstall prompt Y/n per client.
+    assert.equal((await fetch(`${handle.url}/mcp/setup/all`)).status, 200);
+    const installAll = await fetch(`${handle.url}/mcp/setup/all`);
+    assert.match(await installAll.text(), /Install for|Prompts for each client|Y\/n/);
+    assert.equal((await fetch(`${handle.url}/mcp/setup/update/all`)).status, 200);
+    assert.match(await (await fetch(`${handle.url}/mcp/setup/update/all`)).text(), /ACTION="update"/);
+    assert.equal((await fetch(`${handle.url}/mcp/setup/uninstall/all`)).status, 200);
+    assert.match(await (await fetch(`${handle.url}/mcp/setup/uninstall/all`)).text(), /ACTION="uninstall"/);
+    assert.equal((await fetch(`${handle.url}/mcp/setup/all.ps1`)).status, 200);
+    assert.match(await (await fetch(`${handle.url}/mcp/setup/all.ps1`)).text(), /Read-Host/);
 
     const updateBogus = await fetch(`${handle.url}/mcp/setup/update/bogus`);
     assert.equal(updateBogus.status, 404);
@@ -377,7 +397,104 @@ test("overview advertises update and uninstall commands", () => {
   assert.match(overview, /curl -fsSL http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/uninstall\/codex \| sh/);
   assert.match(overview, /irm http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/update\/codex\.ps1 \| iex/);
   assert.match(overview, /irm http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/uninstall\/codex\.ps1 \| iex/);
+  // The every-client interactive installer is advertised for sh and PowerShell.
+  assert.match(overview, /curl -fsSL http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/all \| sh/);
+  assert.match(overview, /irm http:\/\/192\.168\.50\.11:8080\/mcp\/setup\/all\.ps1 \| iex/);
+  // The variable must be set on sh (after the pipe); before curl it never reaches the script.
+  assert.match(overview, /\| TDEI_CLIENTS="codex cursor" sh/);
+  assert.doesNotMatch(overview, /TDEI_CLIENTS="[^"]*" curl/);
 });
+
+test("every-client installer prompts per client and honors TDEI_CLIENTS", () => {
+  const sh = renderClientSetupScript("all", "http://192.168.50.11:8080", 8765, "install");
+  // Interactive: one Y/n prompt per client, reading from the terminal
+  // (curl | sh leaves stdin on the pipe), skippable with n.
+  assert.match(sh, /for .*\[Y\/n\]/);
+  assert.match(sh, /<\/dev\/tty/);
+  assert.match(sh, /Skipping \$C\./);
+  assert.match(sh, /CLIENTS="codex opencode claude-cli claude-desktop vscode cursor zed"/);
+  // Non-interactive escape hatch for automation.
+  assert.match(sh, /TDEI_CLIENTS/);
+  // Each confirmed client runs the same per-client program (plus ?with= extras).
+  assert.match(sh, /for CLIENT in \$SELECTED/);
+  assert.match(sh, /\$EXTRA_ENTRIES <<'EOF'/);
+  // cleanup/all keeps the old silent sweep (no prompts).
+  assert.doesNotMatch(renderClientSetupScript("all", "http://192.168.50.11:8080", 8765, "cleanup"), /\/dev\/tty/);
+
+  const ps = renderClientSetupPowershell("all", "http://h:1", 8765, "install");
+  assert.match(ps, /Read-Host/);
+  assert.match(ps, /\[Y\/n\]/);
+  assert.match(ps, /Skipping \$C\./);
+  assert.match(ps, /\$env:TDEI_CLIENTS/);
+  const updatePs = renderClientSetupPowershell("all", "http://h:1", 8765, "update");
+  assert.match(updatePs, /\$Action = 'update'/);
+  assert.match(updatePs, /\$Verb = switch/);
+});
+
+test("every-client installer configures only the selected clients", { skip: process.platform === "win32" }, () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-install-all-"));
+  try {
+    const file = join(home, "install-all.sh");
+    writeFileSync(
+      file,
+      renderClientSetupScript(
+        "all",
+        "http://192.168.50.11:8080",
+        8765,
+        "install",
+        "/tdei-core-dev/mcp",
+        "tdei-core-dev",
+        "core",
+        ["tdei-workspace-dev"],
+      ),
+    );
+    const out = execFileSync("sh", [file], {
+      env: { ...process.env, HOME: home, TDEI_CLIENTS: "codex,cursor bogus" },
+      encoding: "utf-8",
+    });
+    assert.match(out, /unknown client 'bogus' ignored/);
+    assert.match(out, /Configured codex \(tdei-core-dev\)/);
+    assert.match(out, /Configured cursor \(tdei-workspace-dev\)/);
+    // Combined core + workspace entries land in each selected client, and nothing else is touched.
+    assert.equal(installedMcpUrl("codex", home, "tdei-core-dev"), "http://192.168.50.11:8080/tdei-core-dev/mcp");
+    assert.equal(
+      installedMcpUrl("codex", home, "tdei-workspace-dev"),
+      "http://192.168.50.11:8080/tdei-workspace-dev/mcp",
+    );
+    assert.equal(installedMcpUrl("cursor", home, "tdei-core-dev"), "http://192.168.50.11:8080/tdei-core-dev/mcp");
+    assert.throws(() => installedMcpUrl("opencode", home, "tdei-core-dev"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test(
+  "every-client installer changes nothing when there is no terminal to prompt on",
+  { skip: process.platform === "win32" },
+  () => {
+    const home = mkdtempSync(join(tmpdir(), "tdei-install-all-notty-"));
+    try {
+      const file = join(home, "install-all.sh");
+      writeFileSync(file, renderClientSetupScript("all", "http://192.168.50.11:8080", 8765, "install"));
+      const env = { ...process.env, HOME: home };
+      delete env["TDEI_CLIENTS"];
+      // detached => new session => no controlling terminal, so /dev/tty cannot be opened.
+      const result = spawnSync("sh", [file], {
+        env,
+        encoding: "utf-8",
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /nothing was changed/);
+      assert.match(result.stderr, /TDEI_CLIENTS='codex cursor' sh/);
+      assert.throws(() => installedMcpUrl("codex", home, "tdei"));
+      assert.throws(() => installedMcpUrl("cursor", home, "tdei"));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
 
 test("sh and ps1 wrappers pass the action through to the node program", () => {
   for (const client of CLIENTS) {
@@ -421,6 +538,11 @@ function clientConfigFile(client: SetupClientTarget, home: string): string {
         ? join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
         : join(home, ".config", "Code", "User", "mcp.json");
   }
+  if (client === "zed") {
+    return process.platform === "win32"
+      ? join(home, "AppData", "Roaming", "Zed", "settings.json")
+      : join(home, ".config", "zed", "settings.json");
+  }
   return join(home, ".cursor", "mcp.json");
 }
 
@@ -435,8 +557,16 @@ function installedMcpUrl(client: SetupClientTarget, home: string, name: string):
     mcp?: Record<string, { url?: string; args?: string[] }>;
     mcpServers?: Record<string, { url?: string; args?: string[] }>;
     servers?: Record<string, { url?: string; args?: string[] }>;
+    context_servers?: Record<string, { url?: string; args?: string[] }>;
   };
-  const parent = client === "opencode" ? doc.mcp : client === "vscode" ? doc.servers : doc.mcpServers;
+  const parent =
+    client === "opencode"
+      ? doc.mcp
+      : client === "vscode"
+        ? doc.servers
+        : client === "zed"
+          ? doc.context_servers
+          : doc.mcpServers;
   const entry = parent?.[name];
   if (!entry) return undefined;
   if (client === "claude-desktop") return entry.args?.find((arg) => arg.startsWith("http"));
@@ -820,16 +950,21 @@ test("server status page is a 3-step installer with one generated command", () =
   assert.match(html, /<option value="script">/, "method dropdown must offer script");
   // Step 3: one generated command with a copy button.
   assert.match(html, /id="tdei-command"/, "step 3 must render #tdei-command");
-  // No-JS default is a working npx install for this environment (both connectors).
+  // No-JS default is a working per-client shell install for this environment (both connectors).
   assert.match(
     html,
-    /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[^ ]+ setup --env dev --gateway https:\/\/gw\.example\.org/,
+    /curl -fsSL 'https:\/\/gw\.example\.org\/tdei-core-dev\/mcp\/setup\/codex\?with=tdei-workspace-dev' \| sh/,
+  );
+  assert.match(
+    html,
+    /<option value="script">Per-client script \(recommended\)<\/option>[\s\S]*<option value="all">All clients \(interactive\)<\/option>[\s\S]*<option value="npx">/,
   );
   // The live builder covers every combination: npx install/update plus the
   // global cleanup for Remove, and the per-client sh/ps1 scripts.
   assert.match(html, /TDEI_NPX_PREFIX \+ ' cleanup'/);
   assert.match(html, /--profile ' \+ spec|--profile "\s*\+ spec|\+ ' --profile ' \+ spec/);
-  assert.match(html, /action === 'install' \? client/);
+  assert.match(html, /method === 'all' \? 'all' : client/);
+  assert.match(html, /action === 'install' \? who/);
   assert.match(html, /\.ps1/);
   assert.match(html, /\| iex/);
   assert.match(html, /white-space: pre-wrap/);
@@ -842,11 +977,14 @@ test("server status page is a 3-step installer with one generated command", () =
     "tdei-workspace-stage",
     "workspace",
   );
-  assert.match(staging, /setup --env stage --gateway/);
+  assert.match(staging, /tdei-core-staging\/mcp\/setup\/codex\?with=tdei-workspace-stage/);
 
   // A name that maps to no environment still renders a working installer (dev default).
   const unknown = renderStatusPage("https://gw.example.org", "/mcp", undefined, "core");
-  assert.match(unknown, /setup --env dev --gateway/);
+  assert.match(
+    unknown,
+    /curl -fsSL 'https:\/\/gw\.example\.org\/tdei-core-dev\/mcp\/setup\/codex\?with=tdei-workspace-dev' \| sh/,
+  );
 });
 
 // The generator imports the compiled output, which a clean checkout only has after `pnpm build`.
@@ -908,6 +1046,9 @@ test("gateway page is a 3-step installer for every environment", { skip: !hasBui
     }
     assert.doesNotMatch(html, /"setup":undefined/);
     assert.match(html, /TDEI_NPX_PREFIX \+ ' cleanup'/);
+    // The interactive every-client method is offered alongside per-client and npx.
+    assert.match(html, /<option value="all">All clients \(interactive\)<\/option>/);
+    assert.match(html, /method === 'all' \? 'all' : client/);
     // One copy button per generated command plus restarts + sign-in explanation.
     assert.match(html, /Restart required/);
     assert.match(html, /first call starts the TDEI sign-in/);

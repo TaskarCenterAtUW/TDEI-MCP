@@ -6,7 +6,7 @@ import { buildRelayProgram, RELAY_PID_NAME, RELAY_PORT, RELAY_TARGETS_NAME } fro
 /** Relay source baked into installer scripts (fallback list empty: the installer writes the targets file first). */
 const EMBEDDED_RELAY_SOURCE = JSON.stringify(buildRelayProgram([], RELAY_PORT));
 
-export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
+export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor" | "zed";
 
 const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "codex",
@@ -15,7 +15,11 @@ const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "claude-desktop",
   "vscode",
   "cursor",
+  "zed",
 ];
+
+/** Space-separated client list the interactive "install to all" wrappers loop over. */
+const ALL_CLIENTS_WORDS = "codex opencode claude-cli claude-desktop vscode cursor zed";
 
 export function isSetupClientTarget(value: string): value is SetupClientTarget {
   return (SETUP_CLIENTS as readonly string[]).includes(value);
@@ -38,8 +42,8 @@ export function normalizeSetupClientTarget(value: string): SetupClientTarget | u
  */
 export type SetupScriptAction = "install" | "update" | "uninstall" | "cleanup";
 
-/** A concrete client, or `all` (cleanup only: sweep every supported harness). */
-export type SetupScriptTarget = SetupClientTarget | "all";
+/** A concrete client, or `all` (interactive sweep), or `other` (manual copy-paste for harnesses not listed above). */
+export type SetupScriptTarget = SetupClientTarget | "all" | "other";
 
 const MCP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
@@ -308,6 +312,21 @@ function configureCursor() {
   return filePath;
 }
 
+function configureZed() {
+  const filePath = zedFilePath();
+  ensureDir(filePath);
+  const root = readJsonOrEmpty(filePath);
+  root.context_servers =
+    typeof root.context_servers === "object" && root.context_servers !== null
+      ? root.context_servers
+      : {};
+  root.context_servers[serverName] = {
+    url: mcpUrl,
+  };
+  fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
+  return filePath;
+}
+
 function codexFilePath() {
   return path.join(home, ".codex", "config.toml");
 }
@@ -361,6 +380,12 @@ function vsCodeFilePath() {
       : path.join(home, ".config", "Code", "User", "mcp.json");
 }
 
+function zedFilePath() {
+  return process.platform === "win32"
+    ? path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Zed", "settings.json")
+    : path.join(home, ".config", "zed", "settings.json");
+}
+
 function removeClientEntry(target) {
   if (target === "codex") return removeCodex();
   if (target === "opencode")
@@ -369,6 +394,7 @@ function removeClientEntry(target) {
   if (target === "claude-desktop") return removeJsonEntry(claudeDesktopFilePath(), "mcpServers");
   if (target === "vscode") return removeJsonEntry(vsCodeFilePath(), "servers");
   if (target === "cursor") return removeJsonEntry(path.join(home, ".cursor", "mcp.json"), "mcpServers");
+  if (target === "zed") return removeJsonEntry(zedFilePath(), "context_servers");
   console.error("Unsupported client:", target);
   process.exit(1);
 }
@@ -380,6 +406,7 @@ const restartByClient = {
   "claude-desktop": "Fully quit Claude Desktop (Cmd+Q on macOS / File > Exit on Windows - closing the window is not enough), reopen it, then start a new chat.",
   vscode: "Reload VS Code (Cmd/Ctrl+Shift+P -> Developer: Reload Window) or quit and reopen it, then start a new chat.",
   cursor: "Quit and reopen Cursor, then start a new chat (open Cursor Settings > MCP to verify " + shownNames + " appears).",
+  zed: "Save Zed settings (it reloads automatically), then open the Agent panel and start a new thread (verify " + shownNames + " in Agent Settings > MCP Servers).",
 };
 
 function printRestart() {
@@ -390,7 +417,7 @@ function printRestart() {
 
 
 // ---- cleanup: remove EVERY tdei / tdei-* entry (tdei, tdei-core-dev, tdei-workspace-prod, ...) ----
-const ALL_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const ALL_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 const TDEI_NAME_RE = /^tdei(-[A-Za-z0-9_]+)*$/;
 
 function pruneTdeiKeys(parent) {
@@ -458,6 +485,7 @@ function cleanupClient(target) {
   if (target === "claude-desktop") return cleanupJsonFile(claudeDesktopFilePath(), "mcpServers", false);
   if (target === "vscode") return cleanupJsonFile(vsCodeFilePath(), "servers", false);
   if (target === "cursor") return cleanupJsonFile(path.join(home, ".cursor", "mcp.json"), "mcpServers", false);
+  if (target === "zed") return cleanupJsonFile(zedFilePath(), "context_servers", false);
   console.error("Unsupported client:", target);
   process.exit(1);
 }
@@ -512,6 +540,7 @@ for (const entry of entries) {
   else if (client === "claude-desktop") writtenPath = configureClaudeDesktop();
   else if (client === "vscode") writtenPath = configureVsCode();
   else if (client === "cursor") writtenPath = configureCursor();
+  else if (client === "zed") writtenPath = configureZed();
   else {
     console.error("Unsupported client:", client);
     process.exit(1);
@@ -570,13 +599,85 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
     windowsHide: true,
   });
   child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (stays running so client-initiated sign-ins always find it; redirects the browser to this gateway and any other installed TDEI gateway)\`);
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (exits after 10 min idle so the shared port stays free for other local backends; restarted on demand at the next sign-in; redirects the browser to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 
 /** Exposed for tests: the exact JS embedded in both sh and PowerShell installers. */
 export function getClientSetupJs(): string {
   return CLIENT_SETUP_JS;
+}
+
+/**
+ * Manual entry for harnesses with no auto-config writer (Cline, Aider,
+ * Windsurf, and any future client). MCP has no universal config path:
+ * every harness reads a different file/key (mcpServers vs servers vs
+ * context_servers vs mcp vs TOML), so `other` never writes a file — it prints
+ * the endpoint plus copy-paste snippets for plain Streamable HTTP. Same OAuth
+ * route as every listed client: first tool call starts the browser sign-in.
+ */
+export function renderManualEntryText(mcpUrl: string, serverName: string): string {
+  const httpJson = JSON.stringify({ [serverName]: { url: mcpUrl } }, null, 2);
+  return [
+    `MCP endpoint: ${mcpUrl}`,
+    `Entry name: ${serverName}`,
+    "",
+    "Add it manually in your client's MCP settings:",
+    "",
+    "  1) Streamable HTTP (Codex, Cursor, VS Code, Cline, Aider, Windsurf, most harnesses):",
+    `     {"mcpServers": ${JSON.stringify({ [serverName]: { url: mcpUrl } })}}`,
+    '     VS Code uses the same object under "servers" instead of "mcpServers".',
+    '     Zed uses "context_servers" instead of "mcpServers" (~/.config/zed/settings.json).',
+    '     OpenCode uses {"mcp": {"<name>": {"type": "remote", "url": "..."}}}.',
+    "     Codex TOML (~/.codex/config.toml):",
+    `     [mcp_servers.${serverName}]`,
+    `     url = ${JSON.stringify(mcpUrl)}`,
+    "",
+    "  2) Restart the app, start a new chat, ask the agent to use any TDEI tool.",
+    "     The first call starts the TDEI sign-in: approve the browser login and the call is retried.",
+    "",
+    "Full JSON (mcpServers shape):",
+    httpJson,
+  ].join("\n");
+}
+
+function renderOtherSetupScript(
+  baseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  _profile: TdeiServerProfile = "core",
+): string {
+  const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const manual = renderManualEntryText(mcpUrl, mcpName);
+  return `#!/usr/bin/env sh
+set -eu
+
+# TDEI MCP manual setup (entry: ${mcpName}): this harness has no auto-config writer,
+# so nothing is written. Copy the endpoint into your client's MCP settings by hand.
+cat <<'EOF'
+${manual}
+EOF
+`;
+}
+
+function renderOtherSetupPowershell(
+  baseUrl: string,
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  _profile: TdeiServerProfile = "core",
+): string {
+  const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const manual = renderManualEntryText(mcpUrl, mcpName);
+  const lines = manual
+    .split("\n")
+    .map((line) => (line === "" ? "Write-Host ''" : `Write-Host ${psQuote(line)}`))
+    .join("\n");
+  return `# TDEI MCP manual setup (entry: ${mcpName}) — nothing is written; copy the endpoint by hand.
+$ErrorActionPreference = "Stop"
+${lines}
+`;
 }
 
 export function renderSetupOverview(
@@ -618,6 +719,24 @@ export function renderSetupOverview(
     "  # Cursor (~/.cursor/mcp.json)",
     `  curl -fsSL ${setupBase}/cursor | sh`,
     "",
+    "  # Zed (~/.config/zed/settings.json)",
+    `  curl -fsSL ${setupBase}/zed | sh`,
+    "",
+    "  # Other / manual (Cline, Aider, Windsurf, any harness not listed above)",
+    "  # Prints the MCP URL plus copy-paste JSON/TOML — nothing is written, add it by hand:",
+    `  curl -fsSL ${setupBase}/other | sh`,
+    "",
+    "Install to every client at once — one command prompts Y/n for each client",
+    "(answer n to skip the ones you don't use; a missing config is created):",
+    "",
+    `  curl -fsSL ${setupBase}/all | sh`,
+    "",
+    'Non-interactive (CI, colleagues): curl -fsSL .../all | TDEI_CLIENTS="codex cursor" sh',
+    "configures exactly those clients without prompting (comma or space separated).",
+    "(Set the variable on sh, after the pipe — before curl it never reaches the script.)",
+    'PowerShell: $env:TDEI_CLIENTS = "codex,cursor"; then run the all.ps1 command above.',
+
+    "",
     "Windows (PowerShell 5.1+ with node on PATH) — run one of these:",
     "",
     "  # Codex (%USERPROFILE%\\.codex\\config.toml)",
@@ -638,9 +757,19 @@ export function renderSetupOverview(
     "  # Cursor (%USERPROFILE%\\.cursor\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/cursor.ps1 | iex`,
     "",
+    "  # Zed (%APPDATA%\\Zed\\settings.json on Windows, ~/.config/zed/settings.json otherwise)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/zed.ps1 | iex`,
+    "",
+    "  # Other / manual (Cline, Aider, Windsurf, any harness not listed above)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/other.ps1 | iex`,
+    "",
+    "  # Every client at once (prompts Y/n for each client)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/all.ps1 | iex`,
+    "",
     "Update / reinstall (MCP broken after a server move? run this, then restart the app):",
     `Safe to re-run — replaces only the ${mcpName} entry, keeps every other entry.`,
-    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor):",
+    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor, zed, other — or all",
+    "for every auto-configured client with a Y/n prompt each; other prints manual JSON/TOML for",
     "",
     `  curl -fsSL ${setupBase}/update/codex | sh`,
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/update/codex.ps1 | iex`,
@@ -677,11 +806,219 @@ export function renderSetupOverview(
     "  #                   reopen it, then start a new chat.",
     "  # VS Code:          Cmd/Ctrl+Shift+P -> Developer: Reload Window (or quit + reopen).",
     `  # Cursor:           quit and reopen Cursor, then start a new chat (verify ${mcpName}).`,
+    `  # Zed:              save settings (Zed reloads automatically), then open the Agent panel (verify ${mcpName} in Agent Settings > MCP Servers).`,
     "",
     "Then ask your agent to use any TDEI tool. The first call starts the TDEI sign-in: approve the browser login and the call is retried.",
     installCopy(profile).afterLogin,
     "",
   ].join("\n");
+}
+
+/** Interactive "every client" installer (POSIX sh): prompts Y/n per client so the user can skip ones they don't use. */
+function renderAllClientsSetupScript(
+  baseUrl: string,
+  callbackPort = 8765,
+  action: SetupScriptAction = "install",
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+  extraNames: readonly string[] = [],
+): string {
+  const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
+
+  return `#!/usr/bin/env sh
+set -eu
+
+MCP_URL=${JSON.stringify(mcpUrl)}
+REMOTE_CALLBACK_URL=${JSON.stringify(remoteCallbackUrl)}
+CALLBACK_PORT=${JSON.stringify(String(callbackPort))}
+ACTION=${JSON.stringify(action)}
+SERVER_NAME=${JSON.stringify(mcpName)}
+PROFILE=${JSON.stringify(profile)}
+EXTRA_ENTRIES=${JSON.stringify(extra.join(" "))}
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Error: node is required on the client machine to configure MCP clients." >&2
+  exit 1
+fi
+
+case "$ACTION" in
+  update) VERB="Update";;
+  uninstall) VERB="Remove";;
+  *) VERB="Install";;
+esac
+
+# Presence check only (decides the prompt tag); a missing config is created.
+client_found() {
+  case "$1" in
+    codex) [ -e "$HOME/.codex/config.toml" ] || [ -d "$HOME/.codex" ];;
+    opencode) [ -e "$HOME/.config/opencode/opencode.json" ];;
+    claude-cli) [ -e "$HOME/.claude.json" ];;
+    claude-desktop)
+      if [ "$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then
+        [ -e "$HOME/Library/Application Support/Claude/claude_desktop_config.json" ]
+      else
+        [ -e "$HOME/.config/Claude/claude_desktop_config.json" ]
+      fi;;
+    vscode)
+      if [ "$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then
+        [ -e "$HOME/Library/Application Support/Code/User/mcp.json" ]
+      else
+        [ -e "$HOME/.config/Code/User/mcp.json" ]
+      fi;;
+    cursor) [ -e "$HOME/.cursor/mcp.json" ];;
+    zed) [ -e "$HOME/.config/zed/settings.json" ] || [ -d "$HOME/.config/zed" ];;
+    *) return 1;;
+  esac
+}
+
+CLIENTS="${ALL_CLIENTS_WORDS}"
+SELECTED=""
+# Automation escape hatch: TDEI_CLIENTS="codex cursor" (space or comma separated)
+# skips the prompts and configures exactly those clients.
+if [ -n "\${TDEI_CLIENTS:-}" ]; then
+  for C in $(printf "%s" "$TDEI_CLIENTS" | tr ',' ' '); do
+    case " $CLIENTS " in
+      *" $C "*) SELECTED="$SELECTED $C";;
+      *) echo "Warning: unknown client '$C' ignored (choose from: $CLIENTS).";;
+    esac
+  done
+# curl | sh leaves stdin on the pipe, so prompts read from the terminal.
+# The probe runs in a subshell: on dash a failed /dev/tty redirection inside
+# { ...; } is fatal to the whole script (exit 2), while a subshell failure is
+# just a false condition — bash treats both the same, so this is portable.
+elif ( : </dev/tty ) 2>/dev/null; then
+  for C in $CLIENTS; do
+    if client_found "$C"; then TAG="detected on this machine"; else TAG="not detected - config will be created"; fi
+    printf "%s for %s (%s)? [Y/n] " "$VERB" "$C" "$TAG" >/dev/tty 2>/dev/null || true
+    ANS=""
+    # A failed read (terminal went away, EOF) skips the client; only an answer or a bare Enter selects it.
+    if IFS= read -r ANS </dev/tty 2>/dev/null; then
+      case "$ANS" in
+        [nN]|[nN][oO]) echo "Skipping $C.";;
+        *) SELECTED="$SELECTED $C";;
+      esac
+    else
+      echo "Skipping $C (no answer from the terminal)."
+    fi
+  done
+else
+  echo "No usable terminal to prompt on, so nothing was changed." >&2
+  echo "Name the clients explicitly: curl -fsSL <this url> | TDEI_CLIENTS='codex cursor' sh" >&2
+  exit 1
+fi
+
+if [ -z "$SELECTED" ]; then
+  echo "Nothing selected - nothing to do."
+  exit 0
+fi
+
+run_client() {
+  CLIENT="$1"
+  # EXTRA_ENTRIES is deliberately unquoted: it is a space-separated list of name|profile|url words.
+  set -f
+  # shellcheck disable=SC2086
+  node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" "$SERVER_NAME" "$PROFILE" $EXTRA_ENTRIES <<'EOF'
+${CLIENT_SETUP_JS}EOF
+}
+
+for CLIENT in $SELECTED; do
+  run_client "$CLIENT"
+done
+
+# Harnesses not listed above (Cline, Aider, Windsurf, …): MCP has no
+# universal config path, so add the endpoint by hand.
+echo ""
+echo "[tdei-mcp] Other clients (manual): $MCP_URL (entry: $SERVER_NAME)"
+echo "[tdei-mcp] Run this for the copy-paste JSON/TOML: curl -fsSL <this url>/other | sh"
+`;
+}
+
+/** Interactive "every client" installer (PowerShell): prompts Y/n per client so the user can skip ones they don't use. */
+function renderAllClientsSetupPowershell(
+  baseUrl: string,
+  callbackPort = 8765,
+  action: SetupScriptAction = "install",
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+  extraNames: readonly string[] = [],
+): string {
+  const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
+
+  return `# TDEI MCP setup for every client (${action}, entry: ${mcpName})
+# Prompts for each client so you can skip the ones you don't use.
+# Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; irm <server>/mcp/setup/${setupActionPath("all", action)}.ps1 | iex
+$ErrorActionPreference = "Stop"
+
+$McpUrl = ${psQuote(mcpUrl)}
+$RemoteCallbackUrl = ${psQuote(remoteCallbackUrl)}
+$CallbackPort = ${Number(callbackPort) || 8765}
+$Action = ${psQuote(action)}
+$ServerName = ${psQuote(mcpName)}
+$Profile = ${psQuote(profile)}
+$ExtraEntries = @(${extra.map(psQuote).join(", ")})
+$Clients = @(${SETUP_CLIENTS.map((c) => psQuote(c)).join(", ")})
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error "node is required on this machine to configure MCP clients. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
+  exit 1
+}
+
+function Test-ClientFound($C) {
+  switch ($C) {
+    'codex' { return ((Test-Path (Join-Path $env:USERPROFILE '.codex\\config.toml')) -or (Test-Path (Join-Path $env:USERPROFILE '.codex'))) }
+    'opencode' { return (Test-Path (Join-Path $env:USERPROFILE '.config\\opencode\\opencode.json')) }
+    'claude-cli' { return (Test-Path (Join-Path $env:USERPROFILE '.claude.json')) }
+    'claude-desktop' { return (Test-Path (Join-Path $env:APPDATA 'Claude\\claude_desktop_config.json')) }
+    'vscode' { return (Test-Path (Join-Path $env:APPDATA 'Code\\User\\mcp.json')) }
+    'cursor' { return (Test-Path (Join-Path $env:USERPROFILE '.cursor\\mcp.json')) }
+    'zed' { return ((Test-Path (Join-Path $env:APPDATA 'Zed\\settings.json')) -or (Test-Path (Join-Path $env:USERPROFILE '.config\\zed\\settings.json'))) }
+  }
+  return $false
+}
+
+$Verb = switch ($Action) { 'update' { 'Update' } 'uninstall' { 'Remove' } default { 'Install' } }
+
+$Selected = @()
+if ($env:TDEI_CLIENTS) {
+  foreach ($C in ($env:TDEI_CLIENTS -split '[,\\s]+' | Where-Object { $_ })) {
+    if ($Clients -contains $C) { $Selected += $C } else { Write-Host "Warning: unknown client '$C' ignored (choose from: $($Clients -join ', '))." }
+  }
+} else {
+foreach ($C in $Clients) {
+  $Tag = if (Test-ClientFound $C) { 'detected on this machine' } else { 'not detected - config will be created' }
+  $Ans = ''
+  try { $Ans = Read-Host "$Verb for $C ($Tag)? [Y/n]" } catch { $Ans = 'n' }
+  if ($Ans -match '^[nN]') { Write-Host "Skipping $C." } else { $Selected += $C }
+}
+}
+if ($Selected.Count -eq 0) { Write-Host 'Nothing selected - nothing to do.'; exit 0 }
+
+$setupJs = @'
+${CLIENT_SETUP_JS}'@
+
+$tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("tdei-mcp-setup-" + [Guid]::NewGuid().ToString("N") + ".cjs")
+Set-Content -Path $tempFile -Value $setupJs -Encoding utf8NoBOM
+try {
+  foreach ($C in $Selected) {
+    & node $tempFile $C $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action $ServerName $Profile @ExtraEntries
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
+} finally {
+  Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
+}
+
+# Harnesses not listed above (Cline, Aider, Windsurf, …): MCP has no
+# universal config path, so add the endpoint by hand.
+Write-Host ""
+Write-Host "[tdei-mcp] Other clients (manual): $McpUrl (entry: $ServerName)"
+Write-Host "[tdei-mcp] Run the matching other.ps1 installer for the copy-paste JSON/TOML."
+`;
 }
 
 export function renderClientSetupScript(
@@ -694,6 +1031,12 @@ export function renderClientSetupScript(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "other") {
+    return renderOtherSetupScript(baseUrl, basePath, gatewaySlug, profile);
+  }
+  if (client === "all" && action !== "cleanup") {
+    return renderAllClientsSetupScript(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
+  }
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
@@ -733,6 +1076,12 @@ export function renderClientSetupPowershell(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "other") {
+    return renderOtherSetupPowershell(baseUrl, basePath, gatewaySlug, profile);
+  }
+  if (client === "all" && action !== "cleanup") {
+    return renderAllClientsSetupPowershell(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
+  }
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);

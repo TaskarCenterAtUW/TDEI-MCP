@@ -84,7 +84,7 @@ test("versions and system info are fetched once per token, in parallel", async (
   assert.equal(ops.calls["versions:osw"], 2, "another token must not read the first token's cache");
 });
 
-test("checkDatasetIncline still returns the runbook when the dataset lookup fails", async () => {
+test("checkDatasetIncline works without a dataset metadata lookup", async () => {
   const module = new SemanticIntentModule({
     operations: {
       searchDatasets: async () => {
@@ -93,6 +93,12 @@ test("checkDatasetIncline still returns the runbook when the dataset lookup fail
       listServices: async () => [],
       listProjectGroups: async () => [],
       listJobs: async () => [],
+      getTagQualityMetric: async () => ({
+        entity_type: "Sidewalk",
+        total_entity_count: "10",
+        overall_quality_metric: "100",
+        metric_details: { incline: "100" },
+      }),
     },
     places: { forwardGeocode: async () => [] },
     apiUrl: "https://api.example.test",

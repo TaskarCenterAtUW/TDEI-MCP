@@ -15,6 +15,8 @@ import type {
 export interface DatasetSearch {
   name?: string;
   city?: string;
+  county?: string;
+  region?: string;
   bbox?: [number, number, number, number];
   dataType?: DataType;
   status: DatasetStatus;
@@ -22,6 +24,18 @@ export interface DatasetSearch {
   serviceId?: string;
   tdeiDatasetId?: string;
   collectionDate?: string;
+  /** Exact match on metadata.dataset_detail.version. */
+  version?: string;
+  dataSource?: "3rdParty" | "TDEITools" | "InHouse";
+  collectionMethod?: "manual" | "transform" | "generated" | "other";
+  /** Exact match on the collection agency or person. */
+  collectedBy?: string;
+  derivedFromDatasetId?: string;
+  /** Minimum confidence level (API returns datasets above this value). */
+  confidenceLevel?: number;
+  schemaVersion?: string;
+  validFrom?: string;
+  validTo?: string;
   sortField: "uploaded_timestamp";
   sortOrder: "desc";
   page: number;
@@ -90,6 +104,11 @@ export interface TdeiOperations {
     context: RequestContext,
   ): Promise<JobRecord>;
   editMetadata?(input: { tdeiDatasetId: string; metadata: DatasetMetadata }, context: RequestContext): Promise<unknown>;
+  /** Synchronous tag-quality metric (POST /api/v1/osw/quality-metric/tag/{id}). Returns the metric payload, not a job. */
+  getTagQualityMetric?(
+    input: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> },
+    context: RequestContext,
+  ): Promise<unknown>;
   /** Launch one async OSW/Pathways job op by operation name (per-op wrappers validate inputs). */
   launchJob?(
     input: {

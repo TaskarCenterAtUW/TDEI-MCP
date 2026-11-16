@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import { authManager, type AuthManager } from "./auth/auth-manager.js";
+import { ensureSessionAuth } from "./auth/require-auth.js";
 import { BUILD } from "./build-info.js";
 import type { OpenApiMcpClient } from "./openapi/openapi-mcp-client.js";
 import { openApiMcpClient } from "./tdei-shared/openapi-provider.js";
@@ -160,6 +161,10 @@ export async function createServer(
         baseUrl: getConfig().apiUrl,
         tokenProvider: () => auth.getAccessToken(),
       }),
+    // Pre-call auth gate: no tool runs without a usable session token. When
+    // signed out it starts (or reuses) the browser login and reports its
+    // copy-pasteable loginUrl instead of failing mid-call.
+    () => ensureSessionAuth(auth),
   );
   // Semantic intents call TDEI over HTTP with the SSO bearer, while raw
   // generated tools use the in-process OpenAPI provider.
@@ -179,7 +184,7 @@ export async function createServer(
     ...(typeof auth.getIdentity === "function" ? { identityProvider: () => (auth as AuthManager).getIdentity() } : {}),
   });
   // Semantic tdei_* tools target the TDEI core API; workspace servers only expose their own OpenAPI tools.
-  if (profile === "core") registerSemanticTools(server, semanticModule);
+  if (profile === "core") registerSemanticTools(server, semanticModule, undefined, () => ensureSessionAuth(auth));
 
   server.registerTool(
     "tdei_sso_login",

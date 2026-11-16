@@ -396,8 +396,9 @@ button { cursor: pointer; }
 <div class="builder" role="group" aria-label="Install method">
 <label>Method
 <select id="tdei-method">
-<option value="npx">Automatic with npx (recommended)</option>
-<option value="script">Per-client script</option>
+<option value="script">Per-client script (recommended)</option>
+<option value="all">All clients (interactive)</option>
+<option value="npx">Automatic with npx</option>
 </select>
 </label>
 <label>Purpose
@@ -407,7 +408,7 @@ button { cursor: pointer; }
 <option value="uninstall">Remove (uninstall)</option>
 </select>
 </label>
-<label data-script-only>Client / harness
+<label data-client-only>Client / harness
 <select id="tdei-harness">
 <option value="codex">Codex</option>
 <option value="opencode">OpenCode</option>
@@ -415,6 +416,7 @@ button { cursor: pointer; }
 <option value="claude-desktop">Claude Desktop</option>
 <option value="vscode">VS Code</option>
 <option value="cursor">Cursor</option>
+<option value="zed">Zed</option>
 </select>
 </label>
 <label data-script-only>Operating system
@@ -503,6 +505,11 @@ function tdeiHint(method, action, entryNames) {
     if (action === 'update') return 'Re-run of the install for ' + entryNames + ': replaces only those entries, keeps every other entry. Restart the app afterwards.';
     return 'Installs ' + entryNames + '. Detects your MCP clients, shows what it will change, and asks before writing. Needs Node 22+.';
   }
+  if (method === 'all') {
+    if (action === 'update') return 'Prompts Y/n for each client (answer n to skip the ones you don\\'t use) and re-installs ' + entryNames + ' everywhere you confirm. Restart the apps afterwards, then start a new chat.';
+    if (action === 'uninstall') return 'Prompts Y/n for each client and removes only the ' + entryNames + ' entries you confirm — every other MCP server entry is kept. Restart the apps afterwards.';
+    return 'Prompts Y/n for each client (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor) — answer n to skip the ones you don\\'t use. Installs ' + entryNames + ' everywhere you confirm. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
+  }
   if (action === 'update') return 'Safe to re-run — replaces only the ' + entryNames + ' entry, keeps every other entry. Run it, restart the app, start a new chat.';
   if (action === 'uninstall') return 'Removes only the ' + entryNames + ' entry — every other MCP server entry is kept. Restart the app afterwards.';
   return 'Writes the ' + entryNames + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
@@ -528,7 +535,8 @@ function tdeiBuildCommand() {
       : TDEI_NPX_PREFIX + ' --env ' + env + (spec === 'both' ? '' : ' --profile ' + spec) + ' --gateway ' + location.origin;
   } else {
     const setupBase = location.origin + target.primary.setup;
-    const scriptPath = action === 'install' ? client : action + '/' + client;
+    const who = method === 'all' ? 'all' : client;
+    const scriptPath = action === 'install' ? who : action + '/' + who;
     const withQuery = target.extra.length > 0 ? '?with=' + target.extra.map((w) => w.name).join(',') : '';
     const url = setupBase + '/' + scriptPath + withQuery;
     cmd = os === 'ps1'
@@ -539,7 +547,9 @@ function tdeiBuildCommand() {
   document.getElementById('tdei-hint').textContent = tdeiHint(method, action, entryNames);
   document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = entryNames; });
   const showClient = method === 'script';
-  document.querySelectorAll('[data-script-only]').forEach((el) => { el.style.display = showClient ? '' : 'none'; });
+  document.querySelectorAll('[data-client-only]').forEach((el) => { el.style.display = showClient ? '' : 'none'; });
+  const showShell = method !== 'npx';
+  document.querySelectorAll('[data-script-only]').forEach((el) => { el.style.display = showShell ? '' : 'none'; });
 }
 ['tdei-env', 'tdei-spec', 'tdei-method', 'tdei-harness', 'tdei-os', 'tdei-action'].forEach((id) => {
   document.getElementById(id).addEventListener('change', tdeiBuildCommand);

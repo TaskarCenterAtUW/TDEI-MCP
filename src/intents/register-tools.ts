@@ -22,6 +22,19 @@ const findDatasetsSchema = z.object({
   tdeiDatasetId: z.string().trim().min(1).optional(),
   uploadedAfter: z.string().trim().min(1).optional(),
   uploadedWithinDays: z.number().min(0).optional(),
+  version: z.string().trim().min(1).optional(),
+  dataSource: z.enum(["3rdParty", "TDEITools", "InHouse"]).optional(),
+  collectionMethod: z.enum(["manual", "transform", "generated", "other"]).optional(),
+  collectedBy: z.string().trim().min(1).optional(),
+  derivedFromDatasetId: z.string().trim().min(1).optional(),
+  collectionDate: z.string().trim().min(1).optional(),
+  confidenceLevel: z.number().int().min(0).max(100).optional(),
+  schemaVersion: z.string().trim().min(1).optional(),
+  validFrom: z.string().trim().min(1).optional(),
+  validTo: z.string().trim().min(1).optional(),
+  city: z.string().trim().min(1).optional(),
+  county: z.string().trim().min(1).optional(),
+  region: z.string().trim().min(1).optional(),
   latest: z.boolean().optional(),
   latestPerName: z.boolean().optional(),
   limit: z.number().int().min(1).max(50).optional(),
@@ -244,6 +257,16 @@ const tagRoadSchema = z.object({
   targetDatasetId: z.string().trim().min(1).optional(),
 });
 
+const checkInclineSchema = z.object({
+  tdeiDatasetId: z.string().trim().min(1).optional(),
+  tdeiDatasetIds: z.array(z.string().trim().min(1)).max(50).optional(),
+  projectGroupId: z.string().trim().min(1).optional(),
+  projectGroupName: z.string().trim().min(1).optional(),
+  uploadedAfter: z.string().trim().min(1).optional(),
+  uploadedWithinDays: z.number().min(0).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
 const feedbackListSchema = z.object({
   projectGroupId: z.string().trim().min(1).optional(),
   tdeiDatasetId: z.string().trim().min(1).optional(),
@@ -341,6 +364,12 @@ export function registerSemanticTools(
   server: McpServer,
   module: SemanticIntentModule,
   contextProvider: RequestContextProvider = () => ({}),
+  /**
+   * Pre-call auth gate. When provided it runs before every tool handler and
+   * throws (via formatError) when the session holds no usable token, so no
+   * tool call proceeds upstream unauthenticated.
+   */
+  authGate: () => Promise<void> = async () => undefined,
 ): void {
   let registered = registeredToolsByServer.get(server);
   if (!registered) {
@@ -364,6 +393,7 @@ export function registerSemanticTools(
       { description: describeWithFields(name, description, Object.keys(schema.shape)), inputSchema: schema.shape },
       (async (args: unknown) => {
         try {
+          await authGate();
           return jsonIntentResult(await invoke(args, contextProvider()));
         } catch (error) {
           return formatError(error);
@@ -415,7 +445,7 @@ export function registerSemanticTools(
   tool("tdei_cut_dataset_bbox", D.cutDatasetBbox, cutBboxSchema, (a, c) => module.cutDatasetBbox(a, c));
   tool("tdei_tag_road", D.tagRoad, tagRoadSchema, (a, c) => module.tagRoad(a, c));
   tool("tdei_tag_incline", D.tagIncline, getDatasetDetailsSchema, (a, c) => module.tagIncline(a, c));
-  tool("tdei_check_dataset_incline", D.checkDatasetIncline, getDatasetDetailsSchema, (a, c) =>
+  tool("tdei_check_dataset_incline", D.checkDatasetIncline, checkInclineSchema, (a, c) =>
     module.checkDatasetIncline(a, c),
   );
   tool("tdei_list_feedbacks", D.listFeedbacks, feedbackListSchema, (a, c) => module.listFeedbacks(a, c));

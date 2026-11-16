@@ -95,7 +95,7 @@ button, a.btn { display: inline-block; margin: 6px 4px; padding: 9px 16px; borde
 </section>
 <section id="missing" hidden>
 <h1>Sign-in helper is not running</h1>
-<p>After you sign in, TDEI sends you back to a small helper on this computer (<code>127.0.0.1:8765</code>). It is not answering, so the sign-in would end on a &ldquo;can&rsquo;t reach this page&rdquo; screen.</p>
+<p>After you sign in, TDEI sends you back to a small helper on this computer (<code>127.0.0.1:8765</code>). It is not answering, so the sign-in would end on a &ldquo;can&rsquo;t reach this page&rdquo; screen. (The helper exits after 10 minutes idle and is restarted on demand, so start it when a sign-in needs it.)</p>
 <ol class="steps">
 <li>Start it in a terminal: <code>${escapeHtml(RELAY_START_COMMAND)}</code></li>
 <li>If that file is missing, run the TDEI MCP setup again from your install page.</li>

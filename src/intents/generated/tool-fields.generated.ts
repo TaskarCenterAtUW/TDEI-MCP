@@ -34,7 +34,7 @@ export const TOOL_SPEC_FIELDS: Readonly<Record<string, ToolSpecFields>> = {
   tdei_cut_dataset_bbox: { required: ["bbox","fileType","tdeiDatasetId"] },
   tdei_tag_road: { required: ["sourceDatasetId","targetDatasetId"] },
   tdei_tag_incline: { required: ["tdeiDatasetId"] },
-  tdei_check_dataset_incline: { required: ["tdeiDatasetId"] },
+  tdei_check_dataset_incline: { required: ["tdeiDatasetId"], oneOf: ["tdeiDatasetId","tdeiDatasetIds","projectGroupId","projectGroupName"] },
   tdei_list_feedbacks: { required: [] },
   tdei_get_feedback_summary: { required: [] },
   tdei_download_feedbacks: { required: ["projectGroupId"] },

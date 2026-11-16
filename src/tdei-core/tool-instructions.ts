@@ -31,7 +31,7 @@ export const TDEI_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   oswQualityCalculate:
     "Calculate intersection quality for one OSW dataset. Requires tdei_dataset_id (ask for it if missing). The response returns a job_id; poll with tdei_list_jobs and fetch the completed result with job_download (GET /api/v1/job/download/<job_id>).",
   qualityMetricTag:
-    "Tag quality metrics on an OSW dataset. Requires tdei_dataset_id and a tag-quality file. The response returns a job_id; poll with tdei_list_jobs and fetch the completed result with job_download (GET /api/v1/job/download/<job_id>).",
+    "Tag quality metrics on an OSW dataset. Requires tdei_dataset_id and a tag-quality file. The response is synchronous (200 with a per-entity_type list: total_entity_count, overall_quality_metric, metric_details) — not a job, so do not poll tdei_list_jobs. For a Sidewalk incline check, tdei_check_dataset_incline already sends [{entity_type:'Sidewalk',tags:['incline']}] and parses the verdict.",
   sanitizeOswFile:
     "Sanitize an OSW ZIP. MCP never accepts file bytes: ask for the absolute path of the .zip on the CLIENT machine and run the upload via curl from that machine. The response returns a job_id; poll with tdei_list_jobs and fetch the completed result with job_download (GET /api/v1/job/download/<job_id>).",
   uploadOswFile:

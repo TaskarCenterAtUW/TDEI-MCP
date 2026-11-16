@@ -403,7 +403,7 @@ test("dataset details include status and the incline follow-up note", async () =
   assert.equal(result.status, "complete");
   if (result.status !== "complete") return;
   assert.equal(result.data.matches[0]?.dataset, dataset);
-  assert.match(result.data.inclineNote, /tdei_download_dataset/);
+  assert.match(result.data.inclineNote, /tdei_check_dataset_incline/);
 });
 
 test("identity falls back to decoding the request access token", async () => {
@@ -555,16 +555,26 @@ test("per-op job wrappers fan out to launchJob with the right operation and para
   assert.equal(byOp.get("oswConfidenceCalculate")?.tdeiDatasetId, "abc");
 });
 
-test("checkDatasetIncline returns a client-side runbook without touching bytes", async () => {
+test("checkDatasetIncline calls qualityMetricTag with Sidewalk/incline and parses the verdict", async () => {
+  let seen: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> } | undefined;
   const operations: TdeiOperations = {
     async searchDatasets() {
-      return [{ tdei_dataset_id: "abc", data_type: "osw" }];
+      return [];
     },
     async listServices() {
       return [];
     },
     async listProjectGroups() {
       return [];
+    },
+    async getTagQualityMetric(input) {
+      seen = input;
+      return {
+        entity_type: "Sidewalk",
+        total_entity_count: "100",
+        overall_quality_metric: "45",
+        metric_details: { incline: "45" },
+      };
     },
   };
   const module = new SemanticIntentModule({
@@ -580,14 +590,52 @@ test("checkDatasetIncline returns a client-side runbook without touching bytes",
 
   assert.equal(result.status, "complete");
   if (result.status !== "complete") return;
+  assert.deepEqual(seen?.tags, [{ entity_type: "Sidewalk", tags: ["incline"] }]);
+  assert.equal(seen?.tdeiDatasetId, "abc");
   assert.equal(result.data.tdeiDatasetId, "abc");
-  assert.equal(result.data.dataType, "osw");
-  assert.equal(result.data.method, "GET");
-  assert.equal(result.data.path, "/api/v1/osw/abc");
-  assert.match(result.data.curlCommand, /curl -L.*\/api\/v1\/osw\/abc/);
-  assert.match(result.data.instruction, /CLIENT machine/);
-  // The operations surface must not expose a byte-download path.
-  assert.equal("downloadFileBytes" in operations, false);
+  assert.equal(result.data.apiOperation, "qualityMetricTag");
+  assert.equal(result.data.method, "POST");
+  assert.equal(result.data.path, "/api/v1/osw/quality-metric/tag/abc");
+  assert.equal(result.data.hasIncline, true);
+  assert.equal(result.data.inclinePercent, 45);
+  assert.equal(result.data.totalEntityCount, 100);
+});
+
+test("checkDatasetIncline reports no inclines when the metric is zero", async () => {
+  const operations: TdeiOperations = {
+    async searchDatasets() {
+      return [];
+    },
+    async listServices() {
+      return [];
+    },
+    async listProjectGroups() {
+      return [];
+    },
+    async getTagQualityMetric() {
+      return {
+        entity_type: "Sidewalk",
+        total_entity_count: "50",
+        overall_quality_metric: "0",
+        metric_details: { incline: "0" },
+      };
+    },
+  };
+  const module = new SemanticIntentModule({
+    operations,
+    places: {
+      async forwardGeocode() {
+        return [];
+      },
+    },
+  });
+
+  const result = await module.checkDatasetIncline({ tdeiDatasetId: "abc" });
+
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  assert.equal(result.data.hasIncline, false);
+  assert.match(result.data.followUp, /No Sidewalk inclines found/);
 });
 
 test("checkDatasetIncline asks for the dataset id when missing", async () => {
@@ -615,4 +663,98 @@ test("checkDatasetIncline asks for the dataset id when missing", async () => {
   assert.equal(result.status, "needs_input");
   if (result.status !== "needs_input") return;
   assert.ok(result.missing.some((m) => m.field === "tdeiDatasetId"));
+});
+
+test("checkDatasetIncline fans out tdeiDatasetIds with bounded parallelism", async () => {
+  const seen: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const operations: TdeiOperations = {
+    async searchDatasets() {
+      return [];
+    },
+    async listServices() {
+      return [];
+    },
+    async listProjectGroups() {
+      return [];
+    },
+    async getTagQualityMetric(input) {
+      seen.push(input.tdeiDatasetId);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return {
+        entity_type: "Sidewalk",
+        total_entity_count: "10",
+        overall_quality_metric: input.tdeiDatasetId === "with" ? "80" : "0",
+        metric_details: { incline: input.tdeiDatasetId === "with" ? "80" : "0" },
+      };
+    },
+  };
+  const module = new SemanticIntentModule({
+    operations,
+    places: {
+      async forwardGeocode() {
+        return [];
+      },
+    },
+  });
+
+  const result = await module.checkDatasetIncline({ tdeiDatasetIds: ["with", "without", "with"] });
+
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  assert.ok(!("tdeiDatasetId" in result.data));
+  const batch = result.data as {
+    results: Array<{ tdeiDatasetId: string; hasIncline: boolean }>;
+    summary: { total: number; withIncline: number; withoutIncline: number; failed: number };
+  };
+  assert.equal(batch.results.length, 2);
+  assert.deepEqual(batch.summary, { total: 2, withIncline: 1, withoutIncline: 1, failed: 0 });
+  assert.ok(maxInFlight <= 5);
+  assert.deepEqual([...seen].sort(), ["with", "without"]);
+});
+
+test("checkDatasetIncline resolves a project group plus recency filter into a batch", async () => {
+  const seen: string[] = [];
+  const module = new SemanticIntentModule({
+    operations: {
+      async searchDatasets() {
+        return [
+          { tdei_dataset_id: "a", uploaded_timestamp: new Date().toISOString() },
+          { tdei_dataset_id: "b", uploaded_timestamp: new Date().toISOString() },
+        ];
+      },
+      async listServices() {
+        return [];
+      },
+      async listProjectGroups() {
+        return [{ tdei_project_group_id: "g1", project_group_name: "Group One" }];
+      },
+      async getTagQualityMetric(input) {
+        seen.push(input.tdeiDatasetId);
+        return {
+          entity_type: "Sidewalk",
+          total_entity_count: "5",
+          overall_quality_metric: "0",
+          metric_details: { incline: "0" },
+        };
+      },
+    },
+    places: {
+      async forwardGeocode() {
+        return [];
+      },
+    },
+  });
+
+  const result = await module.checkDatasetIncline({ projectGroupName: "Group One", uploadedWithinDays: 1 });
+
+  assert.equal(result.status, "complete");
+  if (result.status !== "complete") return;
+  const batch = result.data as { results: unknown[]; summary: { total: number } };
+  assert.equal(batch.summary.total, 2);
+  assert.deepEqual([...seen].sort(), ["a", "b"]);
 });

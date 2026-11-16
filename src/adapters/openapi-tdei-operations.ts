@@ -50,6 +50,8 @@ export class OpenApiTdeiOperations implements TdeiOperations {
     return this.callRecords("listDatasetFiles", {
       ...(input.name ? { name: input.name } : {}),
       ...(input.city ? { city: input.city } : {}),
+      ...(input.county ? { county: input.county } : {}),
+      ...(input.region ? { region: input.region } : {}),
       ...(input.bbox ? { bbox: input.bbox } : {}),
       ...(input.dataType ? { data_type: input.dataType } : {}),
       status: input.status,
@@ -57,6 +59,15 @@ export class OpenApiTdeiOperations implements TdeiOperations {
       ...(input.serviceId ? { tdei_service_id: input.serviceId } : {}),
       ...(input.tdeiDatasetId ? { tdei_dataset_id: input.tdeiDatasetId } : {}),
       ...(input.collectionDate ? { collection_date: input.collectionDate } : {}),
+      ...(input.version ? { version: input.version } : {}),
+      ...(input.dataSource ? { data_source: input.dataSource } : {}),
+      ...(input.collectionMethod ? { collection_method: input.collectionMethod } : {}),
+      ...(input.collectedBy ? { collected_by: input.collectedBy } : {}),
+      ...(input.derivedFromDatasetId ? { derived_from_dataset_id: input.derivedFromDatasetId } : {}),
+      ...(input.confidenceLevel !== undefined ? { confidence_level: input.confidenceLevel } : {}),
+      ...(input.schemaVersion ? { schema_version: input.schemaVersion } : {}),
+      ...(input.validFrom ? { valid_from: input.validFrom } : {}),
+      ...(input.validTo ? { valid_to: input.validTo } : {}),
       sort_field: input.sortField,
       sort_order: input.sortOrder,
       page_no: input.page,
@@ -119,6 +130,16 @@ export class OpenApiTdeiOperations implements TdeiOperations {
     return this.callTool("editMetadata", {
       tdei_dataset_id: input.tdeiDatasetId,
       file: JSON.stringify(input.metadata),
+    });
+  }
+
+  async getTagQualityMetric(
+    input: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> },
+    _context: RequestContext,
+  ): Promise<unknown> {
+    return this.callTool("qualityMetricTag", {
+      tdei_dataset_id: input.tdeiDatasetId,
+      file: new Blob([JSON.stringify(input.tags)], { type: "application/json" }),
     });
   }
 

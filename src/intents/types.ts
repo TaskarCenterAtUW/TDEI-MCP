@@ -48,6 +48,32 @@ export interface FindDatasetsInput {
   uploadedAfter?: string;
   /** Shorthand for uploadedAfter = now - N days. */
   uploadedWithinDays?: number;
+  /** Exact match on the dataset version (pushed to the API as a server-side filter). */
+  version?: string;
+  /** Exact match on the data source (pushed to the API as a server-side filter). */
+  dataSource?: "3rdParty" | "TDEITools" | "InHouse";
+  /** Exact match on the collection method (pushed to the API as a server-side filter). */
+  collectionMethod?: "manual" | "transform" | "generated" | "other";
+  /** Exact match on the collection agency or person (pushed to the API as a server-side filter). */
+  collectedBy?: string;
+  /** Only datasets derived from this dataset id (pushed to the API as a server-side filter). */
+  derivedFromDatasetId?: string;
+  /** Only datasets collected after this date-time (pushed to the API as collection_date). */
+  collectionDate?: string;
+  /** Minimum confidence level (pushed to the API as confidence_level). */
+  confidenceLevel?: number;
+  /** Only datasets on this data-type schema version (pushed to the API as a server-side filter). */
+  schemaVersion?: string;
+  /** Only datasets with a valid-from later than this date-time (pushed to the API as a server-side filter). */
+  validFrom?: string;
+  /** Only datasets with a valid-to earlier than this date-time (pushed to the API as a server-side filter). */
+  validTo?: string;
+  /** City-name contains filter (pushed to the API; independent of the place search). */
+  city?: string;
+  /** County-name contains filter (pushed to the API as a server-side filter). */
+  county?: string;
+  /** Region-name contains filter (pushed to the API as a server-side filter). */
+  region?: string;
   latest?: boolean;
   /**
    * Keep one row per dataset name: the newest version (numeric compare, so
@@ -88,6 +114,8 @@ export interface FindDatasetsData {
     versionsSuperseded: number;
     /** True when the page cap stopped the scan before the last page. */
     truncated: boolean;
+    /** True when a date filter stopped paging early (older pages cannot match). */
+    stoppedEarly: boolean;
     note: string;
   };
   /** Markdown table of the matches (#, name, version, uuid, type, status) for the user to pick from. */
@@ -345,16 +373,48 @@ export interface TagRoadInput {
 
 export interface TagInclineInput {
   tdeiDatasetId?: string;
+  /** Batch mode: check several datasets in one call (parallel, max 5 in flight). */
+  tdeiDatasetIds?: string[];
+  /** Batch mode: resolve ids via a project-group + recency filter instead of passing ids. */
+  projectGroupId?: string;
+  projectGroupName?: string;
+  uploadedAfter?: string;
+  uploadedWithinDays?: number;
+  limit?: number;
+}
+
+export interface CheckInclineRow {
+  tdeiDatasetId: string;
+  hasIncline: boolean;
+  inclinePercent?: number;
+  totalEntityCount?: number;
+  overallQualityMetric?: string;
+  metric?: unknown;
+  error?: string;
+}
+
+export interface CheckInclineBatchData {
+  apiOperation: "qualityMetricTag";
+  method: "POST";
+  path: string;
+  request: Array<{ entity_type: string; tags: string[] }>;
+  results: CheckInclineRow[];
+  summary: { total: number; withIncline: number; withoutIncline: number; failed: number };
+  followUp: string;
 }
 
 export interface CheckInclineData {
   tdeiDatasetId: string;
-  dataType: DataType;
-  apiOperation: "getOswFile";
-  method: "GET";
+  apiOperation: "qualityMetricTag";
+  method: "POST";
   path: string;
-  curlCommand: string;
-  instruction: string;
+  request: Array<{ entity_type: string; tags: string[] }>;
+  metric: unknown;
+  hasIncline: boolean;
+  inclinePercent?: number;
+  totalEntityCount?: number;
+  overallQualityMetric?: string;
+  followUp: string;
 }
 
 export interface ListFeedbacksInput {

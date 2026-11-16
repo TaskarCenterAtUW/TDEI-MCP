@@ -29,7 +29,7 @@ const GATEWAY = "https://gw.example.org";
 const CORE = "tdei-core-dev";
 const WORKSPACE = "tdei-workspace-dev";
 const BASE_PATH = `/${CORE}/mcp`;
-const CLIENTS: SetupClient[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const CLIENTS: SetupClient[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 
 /** npm's own full-SHA test (pacote/lib/git.js): the form that breaks npm 10's npx. */
 const FULL_SHA = /^[a-f0-9]{40}$/;
@@ -81,6 +81,7 @@ function entryMap(client: SetupClient, home: string): Record<string, unknown> {
     "claude-desktop": "mcpServers",
     vscode: "servers",
     cursor: "mcpServers",
+    zed: "context_servers",
   }[client as Exclude<SetupClient, "codex">] as string;
   return (doc[parent] ?? {}) as Record<string, unknown>;
 }
@@ -125,8 +126,10 @@ test("a published npm spec replaces the git fallback everywhere", async () => {
   try {
     const { renderStatusPage } = await import("../src/http-status-page.js");
     const page = renderStatusPage(GATEWAY, "/mcp", CORE, "core");
-    assert.match(page, /npx -y tdei-mcp@0\.1\.42 setup --env dev --gateway/);
+    assert.match(page, /npx -y tdei-mcp@0\.1\.42 setup/);
     assert.doesNotMatch(page, /github:TaskarCenterAtUW\/TDEI-MCP/);
+    // Shell script stays the default (no-JS) command even with an npm spec.
+    assert.match(page, /curl -fsSL '.*\/setup\/codex\?with=.*' \| sh/);
   } finally {
     delete process.env["TDEI_NPX_PACKAGE"];
   }
@@ -135,8 +138,10 @@ test("a published npm spec replaces the git fallback everywhere", async () => {
 test("the connector status page does not hand out a full-SHA npx command", async () => {
   const { renderStatusPage } = await import("../src/http-status-page.js");
   const page = renderStatusPage(GATEWAY, "/mcp", CORE, "core");
-  assert.match(page, /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[a-f0-9]{7,39} setup --env dev --gateway/);
+  assert.match(page, /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[a-f0-9]{7,12} setup/);
   assert.doesNotMatch(page, new RegExp(`TDEI-MCP#${SHA}`));
+  // Shell script is the default (no-JS) command; npx stays available via the builder.
+  assert.match(page, /curl -fsSL '.*\/setup\/codex\?with=.*' \| sh/);
 });
 
 test("install.sh configures every supported client and keeps other servers", () => {
@@ -155,6 +160,7 @@ test("install.sh configures every supported client and keeps other servers", () 
           "claude-desktop": "mcpServers",
           vscode: "servers",
           cursor: "mcpServers",
+          zed: "context_servers",
         }[client as Exclude<SetupClient, "codex">];
         writeFileSync(file, JSON.stringify({ [parent]: { other: { url: "keep-me" } } }));
       }
