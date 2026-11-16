@@ -667,7 +667,7 @@ export async function serveHttp(
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor, other, all (append .ps1 for the Windows PowerShell installer). Use other for harnesses not listed (Cline, Aider, Windsurf, Zed, …): it prints the MCP URL plus copy-paste JSON/TOML to add by hand. Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (e.g. update/codex, update/all, cleanup/all). install/all and update/all prompt Y/n for each client so you can skip ones you don't use.`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor, zed, other, all (append .ps1 for the Windows PowerShell installer). Use other for harnesses not listed (Cline, Aider, Windsurf, …): it prints the MCP URL plus copy-paste JSON/TOML to add by hand. Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (e.g. update/codex, update/all, cleanup/all). install/all and update/all prompt Y/n for each client so you can skip ones you don't use.`,
             });
             return;
           }

@@ -41,9 +41,11 @@ test("upsert writes each client's remote shape and keeps other entries", () =>
     upsertEntry("opencode", host, "tdei-core-dev", URL_DEV);
     upsertEntry("claude-desktop", host, "tdei-core-dev", URL_DEV);
     upsertEntry("codex", host, "tdei-core-dev", URL_DEV);
+    upsertEntry("zed", host, "tdei-core-dev", URL_DEV);
 
     const read = (c: Parameters<typeof configPath>[0]) => JSON.parse(readFileSync(configPath(c, host), "utf-8"));
     assert.deepEqual(read("cursor").mcpServers, { other: { url: "x" }, "tdei-core-dev": { url: URL_DEV } });
+    assert.deepEqual(read("zed").context_servers, { "tdei-core-dev": { url: URL_DEV } });
     assert.deepEqual(read("claude-cli").mcpServers["tdei-core-dev"], { type: "http", url: URL_DEV });
     assert.deepEqual(read("vscode").servers["tdei-core-dev"], { type: "http", url: URL_DEV });
     assert.equal(read("opencode").mcp["tdei-core-dev"].type, "remote");

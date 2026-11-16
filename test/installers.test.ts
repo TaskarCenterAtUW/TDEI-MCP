@@ -29,7 +29,7 @@ const GATEWAY = "https://gw.example.org";
 const CORE = "tdei-core-dev";
 const WORKSPACE = "tdei-workspace-dev";
 const BASE_PATH = `/${CORE}/mcp`;
-const CLIENTS: SetupClient[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const CLIENTS: SetupClient[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 
 /** npm's own full-SHA test (pacote/lib/git.js): the form that breaks npm 10's npx. */
 const FULL_SHA = /^[a-f0-9]{40}$/;
@@ -81,6 +81,7 @@ function entryMap(client: SetupClient, home: string): Record<string, unknown> {
     "claude-desktop": "mcpServers",
     vscode: "servers",
     cursor: "mcpServers",
+    zed: "context_servers",
   }[client as Exclude<SetupClient, "codex">] as string;
   return (doc[parent] ?? {}) as Record<string, unknown>;
 }
@@ -159,6 +160,7 @@ test("install.sh configures every supported client and keeps other servers", () 
           "claude-desktop": "mcpServers",
           vscode: "servers",
           cursor: "mcpServers",
+          zed: "context_servers",
         }[client as Exclude<SetupClient, "codex">];
         writeFileSync(file, JSON.stringify({ [parent]: { other: { url: "keep-me" } } }));
       }

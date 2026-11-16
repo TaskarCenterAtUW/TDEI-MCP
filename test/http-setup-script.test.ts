@@ -59,7 +59,7 @@ test("installer relay hands the browser to every installed gateway in turn", () 
   assert.match(js, /const port = 8765;/);
 });
 
-const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const CLIENTS: SetupClientTarget[] = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 
 test("sh and ps1 installers embed the identical node program", () => {
   const shared = getClientSetupJs();
@@ -207,6 +207,7 @@ test("installer stdout prints a clear restart step for every client", () => {
       "claude-desktop": /Fully quit Claude Desktop.*Cmd\+Q/,
       vscode: /Reload VS Code|Reload Window/,
       cursor: /reopen Cursor/,
+      zed: /Agent panel/,
     };
     for (const client of CLIENTS) {
       const out = execFileSync(
@@ -255,7 +256,7 @@ test("status page builder generates install/update/remove commands with no manua
   for (const method of ["npx", "script", "all"]) {
     assert.match(html, new RegExp(`<option value="${method}">`), `method dropdown must offer ${method}`);
   }
-  for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"]) {
+  for (const client of ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"]) {
     assert.match(html, new RegExp(`<option value="${client}">`), `client dropdown must offer ${client}`);
   }
   for (const action of ["install", "update", "uninstall"]) {
@@ -411,7 +412,7 @@ test("every-client installer prompts per client and honors TDEI_CLIENTS", () => 
   assert.match(sh, /for .*\[Y\/n\]/);
   assert.match(sh, /<\/dev\/tty/);
   assert.match(sh, /Skipping \$C\./);
-  assert.match(sh, /CLIENTS="codex opencode claude-cli claude-desktop vscode cursor"/);
+  assert.match(sh, /CLIENTS="codex opencode claude-cli claude-desktop vscode cursor zed"/);
   // Non-interactive escape hatch for automation.
   assert.match(sh, /TDEI_CLIENTS/);
   // Each confirmed client runs the same per-client program (plus ?with= extras).
@@ -537,6 +538,11 @@ function clientConfigFile(client: SetupClientTarget, home: string): string {
         ? join(home, "AppData", "Roaming", "Code", "User", "mcp.json")
         : join(home, ".config", "Code", "User", "mcp.json");
   }
+  if (client === "zed") {
+    return process.platform === "win32"
+      ? join(home, "AppData", "Roaming", "Zed", "settings.json")
+      : join(home, ".config", "zed", "settings.json");
+  }
   return join(home, ".cursor", "mcp.json");
 }
 
@@ -551,8 +557,16 @@ function installedMcpUrl(client: SetupClientTarget, home: string, name: string):
     mcp?: Record<string, { url?: string; args?: string[] }>;
     mcpServers?: Record<string, { url?: string; args?: string[] }>;
     servers?: Record<string, { url?: string; args?: string[] }>;
+    context_servers?: Record<string, { url?: string; args?: string[] }>;
   };
-  const parent = client === "opencode" ? doc.mcp : client === "vscode" ? doc.servers : doc.mcpServers;
+  const parent =
+    client === "opencode"
+      ? doc.mcp
+      : client === "vscode"
+        ? doc.servers
+        : client === "zed"
+          ? doc.context_servers
+          : doc.mcpServers;
   const entry = parent?.[name];
   if (!entry) return undefined;
   if (client === "claude-desktop") return entry.args?.find((arg) => arg.startsWith("http"));

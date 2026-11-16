@@ -33,7 +33,7 @@ function setupUsage(): string {
     "  tdei-mcp setup cleanup [--client <list>] [--dry-run] [--yes]",
     "",
     "Detects the MCP clients installed on this machine (codex, opencode, claude-cli, claude-desktop,",
-    "vscode, cursor) and adds the hosted TDEI connectors to them. `cleanup` removes every tdei / tdei-*",
+    "vscode, cursor, zed) and adds the hosted TDEI connectors to them. `cleanup` removes every tdei / tdei-*",
     "entry and keeps all other servers. --client skips detection. Nothing is written without --yes or a",
     "confirmation; --dry-run only prints the plan.",
   ].join("\n");
@@ -126,6 +126,7 @@ const RESTART: Record<SetupClient, string> = {
   "claude-desktop": "fully quit Claude Desktop (Cmd+Q / File > Exit), reopen it, then start a new chat",
   vscode: "reload the VS Code window (Developer: Reload Window), then start a new chat",
   cursor: "quit and reopen Cursor, then start a new chat",
+  zed: "save Zed settings (it reloads automatically), then open the Agent panel and start a new thread",
 };
 
 export interface SetupDeps {

@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
  * connectors; the stdio flow in `src/init/` is untouched.
  */
 
-export const SETUP_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"] as const;
+export const SETUP_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"] as const;
 export type SetupClient = (typeof SETUP_CLIENTS)[number];
 
 export interface HostEnv {
@@ -45,6 +45,10 @@ export function configPath(client: SetupClient, host: HostEnv): string {
       return join(appSupportDir(host, "Code"), "User", "mcp.json");
     case "cursor":
       return join(host.home, ".cursor", "mcp.json");
+    case "zed":
+      return host.platform === "win32"
+        ? join(host.appData || join(host.home, "AppData", "Roaming"), "Zed", "settings.json")
+        : join(host.home, ".config", "zed", "settings.json");
   }
 }
 
@@ -55,6 +59,7 @@ const JSON_PARENT: Record<Exclude<SetupClient, "codex">, string> = {
   "claude-desktop": "mcpServers",
   vscode: "servers",
   cursor: "mcpServers",
+  zed: "context_servers",
 };
 
 /** Claude Desktop only accepts stdio servers, so bridge to the HTTP endpoint with mcp-remote. */
@@ -74,6 +79,7 @@ function jsonEntry(client: Exclude<SetupClient, "codex">, url: string): Record<s
     case "claude-desktop":
       return claudeDesktopEntry(url);
     case "cursor":
+    case "zed":
       return { url };
   }
 }

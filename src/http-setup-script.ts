@@ -6,7 +6,7 @@ import { buildRelayProgram, RELAY_PID_NAME, RELAY_PORT, RELAY_TARGETS_NAME } fro
 /** Relay source baked into installer scripts (fallback list empty: the installer writes the targets file first). */
 const EMBEDDED_RELAY_SOURCE = JSON.stringify(buildRelayProgram([], RELAY_PORT));
 
-export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor";
+export type SetupClientTarget = "codex" | "opencode" | "claude-cli" | "claude-desktop" | "vscode" | "cursor" | "zed";
 
 const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "codex",
@@ -15,10 +15,11 @@ const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "claude-desktop",
   "vscode",
   "cursor",
+  "zed",
 ];
 
 /** Space-separated client list the interactive "install to all" wrappers loop over. */
-const ALL_CLIENTS_WORDS = "codex opencode claude-cli claude-desktop vscode cursor";
+const ALL_CLIENTS_WORDS = "codex opencode claude-cli claude-desktop vscode cursor zed";
 
 export function isSetupClientTarget(value: string): value is SetupClientTarget {
   return (SETUP_CLIENTS as readonly string[]).includes(value);
@@ -311,6 +312,21 @@ function configureCursor() {
   return filePath;
 }
 
+function configureZed() {
+  const filePath = zedFilePath();
+  ensureDir(filePath);
+  const root = readJsonOrEmpty(filePath);
+  root.context_servers =
+    typeof root.context_servers === "object" && root.context_servers !== null
+      ? root.context_servers
+      : {};
+  root.context_servers[serverName] = {
+    url: mcpUrl,
+  };
+  fs.writeFileSync(filePath, JSON.stringify(root, null, 2) + "\\n", "utf-8");
+  return filePath;
+}
+
 function codexFilePath() {
   return path.join(home, ".codex", "config.toml");
 }
@@ -364,6 +380,12 @@ function vsCodeFilePath() {
       : path.join(home, ".config", "Code", "User", "mcp.json");
 }
 
+function zedFilePath() {
+  return process.platform === "win32"
+    ? path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Zed", "settings.json")
+    : path.join(home, ".config", "zed", "settings.json");
+}
+
 function removeClientEntry(target) {
   if (target === "codex") return removeCodex();
   if (target === "opencode")
@@ -372,6 +394,7 @@ function removeClientEntry(target) {
   if (target === "claude-desktop") return removeJsonEntry(claudeDesktopFilePath(), "mcpServers");
   if (target === "vscode") return removeJsonEntry(vsCodeFilePath(), "servers");
   if (target === "cursor") return removeJsonEntry(path.join(home, ".cursor", "mcp.json"), "mcpServers");
+  if (target === "zed") return removeJsonEntry(zedFilePath(), "context_servers");
   console.error("Unsupported client:", target);
   process.exit(1);
 }
@@ -383,6 +406,7 @@ const restartByClient = {
   "claude-desktop": "Fully quit Claude Desktop (Cmd+Q on macOS / File > Exit on Windows - closing the window is not enough), reopen it, then start a new chat.",
   vscode: "Reload VS Code (Cmd/Ctrl+Shift+P -> Developer: Reload Window) or quit and reopen it, then start a new chat.",
   cursor: "Quit and reopen Cursor, then start a new chat (open Cursor Settings > MCP to verify " + shownNames + " appears).",
+  zed: "Save Zed settings (it reloads automatically), then open the Agent panel and start a new thread (verify " + shownNames + " in Agent Settings > MCP Servers).",
 };
 
 function printRestart() {
@@ -393,7 +417,7 @@ function printRestart() {
 
 
 // ---- cleanup: remove EVERY tdei / tdei-* entry (tdei, tdei-core-dev, tdei-workspace-prod, ...) ----
-const ALL_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor"];
+const ALL_CLIENTS = ["codex", "opencode", "claude-cli", "claude-desktop", "vscode", "cursor", "zed"];
 const TDEI_NAME_RE = /^tdei(-[A-Za-z0-9_]+)*$/;
 
 function pruneTdeiKeys(parent) {
@@ -461,6 +485,7 @@ function cleanupClient(target) {
   if (target === "claude-desktop") return cleanupJsonFile(claudeDesktopFilePath(), "mcpServers", false);
   if (target === "vscode") return cleanupJsonFile(vsCodeFilePath(), "servers", false);
   if (target === "cursor") return cleanupJsonFile(path.join(home, ".cursor", "mcp.json"), "mcpServers", false);
+  if (target === "zed") return cleanupJsonFile(zedFilePath(), "context_servers", false);
   console.error("Unsupported client:", target);
   process.exit(1);
 }
@@ -515,6 +540,7 @@ for (const entry of entries) {
   else if (client === "claude-desktop") writtenPath = configureClaudeDesktop();
   else if (client === "vscode") writtenPath = configureVsCode();
   else if (client === "cursor") writtenPath = configureCursor();
+  else if (client === "zed") writtenPath = configureZed();
   else {
     console.error("Unsupported client:", client);
     process.exit(1);
@@ -584,11 +610,11 @@ export function getClientSetupJs(): string {
 
 /**
  * Manual entry for harnesses with no auto-config writer (Cline, Aider,
- * Windsurf, Zed, and any future client). MCP has no universal config path:
- * every harness reads a different file/key (mcpServers vs servers vs mcp vs
- * TOML), so `other` never writes a file — it prints the endpoint plus
- * copy-paste snippets for plain Streamable HTTP. Same OAuth route as every
- * listed client: first tool call starts the browser sign-in.
+ * Windsurf, and any future client). MCP has no universal config path:
+ * every harness reads a different file/key (mcpServers vs servers vs
+ * context_servers vs mcp vs TOML), so `other` never writes a file — it prints
+ * the endpoint plus copy-paste snippets for plain Streamable HTTP. Same OAuth
+ * route as every listed client: first tool call starts the browser sign-in.
  */
 export function renderManualEntryText(mcpUrl: string, serverName: string): string {
   const httpJson = JSON.stringify({ [serverName]: { url: mcpUrl } }, null, 2);
@@ -598,9 +624,10 @@ export function renderManualEntryText(mcpUrl: string, serverName: string): strin
     "",
     "Add it manually in your client's MCP settings:",
     "",
-    "  1) Streamable HTTP (Codex, Cursor, VS Code, Cline, Aider, Windsurf, Zed, most harnesses):",
+    "  1) Streamable HTTP (Codex, Cursor, VS Code, Cline, Aider, Windsurf, most harnesses):",
     `     {"mcpServers": ${JSON.stringify({ [serverName]: { url: mcpUrl } })}}`,
     '     VS Code uses the same object under "servers" instead of "mcpServers".',
+    '     Zed uses "context_servers" instead of "mcpServers" (~/.config/zed/settings.json).',
     '     OpenCode uses {"mcp": {"<name>": {"type": "remote", "url": "..."}}}.',
     "     Codex TOML (~/.codex/config.toml):",
     `     [mcp_servers.${serverName}]`,
@@ -692,7 +719,10 @@ export function renderSetupOverview(
     "  # Cursor (~/.cursor/mcp.json)",
     `  curl -fsSL ${setupBase}/cursor | sh`,
     "",
-    "  # Other / manual (Cline, Aider, Windsurf, Zed, any harness not listed above)",
+    "  # Zed (~/.config/zed/settings.json)",
+    `  curl -fsSL ${setupBase}/zed | sh`,
+    "",
+    "  # Other / manual (Cline, Aider, Windsurf, any harness not listed above)",
     "  # Prints the MCP URL plus copy-paste JSON/TOML — nothing is written, add it by hand:",
     `  curl -fsSL ${setupBase}/other | sh`,
     "",
@@ -727,7 +757,10 @@ export function renderSetupOverview(
     "  # Cursor (%USERPROFILE%\\.cursor\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/cursor.ps1 | iex`,
     "",
-    "  # Other / manual (Cline, Aider, Windsurf, Zed, any harness not listed above)",
+    "  # Zed (%APPDATA%\\Zed\\settings.json on Windows, ~/.config/zed/settings.json otherwise)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/zed.ps1 | iex`,
+    "",
+    "  # Other / manual (Cline, Aider, Windsurf, any harness not listed above)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/other.ps1 | iex`,
     "",
     "  # Every client at once (prompts Y/n for each client)",
@@ -735,7 +768,7 @@ export function renderSetupOverview(
     "",
     "Update / reinstall (MCP broken after a server move? run this, then restart the app):",
     `Safe to re-run — replaces only the ${mcpName} entry, keeps every other entry.`,
-    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor, other — or all",
+    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor, zed, other — or all",
     "for every auto-configured client with a Y/n prompt each; other prints manual JSON/TOML for",
     "",
     `  curl -fsSL ${setupBase}/update/codex | sh`,
@@ -773,6 +806,7 @@ export function renderSetupOverview(
     "  #                   reopen it, then start a new chat.",
     "  # VS Code:          Cmd/Ctrl+Shift+P -> Developer: Reload Window (or quit + reopen).",
     `  # Cursor:           quit and reopen Cursor, then start a new chat (verify ${mcpName}).`,
+    `  # Zed:              save settings (Zed reloads automatically), then open the Agent panel (verify ${mcpName} in Agent Settings > MCP Servers).`,
     "",
     "Then ask your agent to use any TDEI tool. The first call starts the TDEI sign-in: approve the browser login and the call is retried.",
     installCopy(profile).afterLogin,
@@ -835,6 +869,7 @@ client_found() {
         [ -e "$HOME/.config/Code/User/mcp.json" ]
       fi;;
     cursor) [ -e "$HOME/.cursor/mcp.json" ];;
+    zed) [ -e "$HOME/.config/zed/settings.json" ] || [ -d "$HOME/.config/zed" ];;
     *) return 1;;
   esac
 }
@@ -893,7 +928,7 @@ for CLIENT in $SELECTED; do
   run_client "$CLIENT"
 done
 
-# Harnesses not listed above (Cline, Aider, Windsurf, Zed, …): MCP has no
+# Harnesses not listed above (Cline, Aider, Windsurf, …): MCP has no
 # universal config path, so add the endpoint by hand.
 echo ""
 echo "[tdei-mcp] Other clients (manual): $MCP_URL (entry: $SERVER_NAME)"
@@ -942,6 +977,7 @@ function Test-ClientFound($C) {
     'claude-desktop' { return (Test-Path (Join-Path $env:APPDATA 'Claude\\claude_desktop_config.json')) }
     'vscode' { return (Test-Path (Join-Path $env:APPDATA 'Code\\User\\mcp.json')) }
     'cursor' { return (Test-Path (Join-Path $env:USERPROFILE '.cursor\\mcp.json')) }
+    'zed' { return ((Test-Path (Join-Path $env:APPDATA 'Zed\\settings.json')) -or (Test-Path (Join-Path $env:USERPROFILE '.config\\zed\\settings.json'))) }
   }
   return $false
 }
@@ -977,7 +1013,7 @@ try {
   Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
 }
 
-# Harnesses not listed above (Cline, Aider, Windsurf, Zed, …): MCP has no
+# Harnesses not listed above (Cline, Aider, Windsurf, …): MCP has no
 # universal config path, so add the endpoint by hand.
 Write-Host ""
 Write-Host "[tdei-mcp] Other clients (manual): $McpUrl (entry: $ServerName)"

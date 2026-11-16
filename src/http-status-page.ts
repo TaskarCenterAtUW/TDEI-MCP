@@ -167,6 +167,7 @@ button { cursor: pointer; }
 <option value="claude-desktop">Claude Desktop</option>
 <option value="vscode">VS Code</option>
 <option value="cursor">Cursor</option>
+<option value="zed">Zed</option>
 <option value="other">Other / manual (Cline, Aider, …)</option>
 </select>
 </label>
@@ -197,6 +198,7 @@ button { cursor: pointer; }
 <tr><th>Claude Desktop</th><td>Fully quit with <code>Cmd+Q</code> (macOS) or <code>File &gt; Exit</code> (Windows), reopen it, then start a new chat.</td></tr>
 <tr><th>VS Code</th><td><code>Cmd/Ctrl+Shift+P</code> &rarr; <code>Developer: Reload Window</code> (or quit + reopen).</td></tr>
 <tr><th>Cursor</th><td>Quit and reopen Cursor, then start a new chat (open Cursor Settings &gt; MCP to verify <code data-entry-name>${e(defaultEntries)}</code>).</td></tr>
+<tr><th>Zed</th><td>Save settings (Zed reloads automatically), then open the Agent panel and start a new thread.</td></tr>
 </tbody>
 </table>
 </div>
