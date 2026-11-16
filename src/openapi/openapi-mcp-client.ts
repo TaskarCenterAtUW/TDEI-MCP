@@ -208,17 +208,63 @@ function serializeQuery(url: URL, name: string, value: unknown): void {
   url.searchParams.append(name, String(value));
 }
 
-function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): void {
-  if (binary && typeof value === "string") {
-    // File bytes never go through MCP and the gateway is never a relay: binary
-    // form fields only accept file paths for hands-free client-side curl.
-    throw new Error(
-      `MCP never accepts file bytes — execute the upload yourself with your shell tool via curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
-    );
+function isLocalPathAsset(value: unknown): value is { kind: "local_path"; path: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<string, unknown>).kind === "local_path" &&
+    typeof (value as Record<string, unknown>).path === "string"
+  );
+}
+
+function isDatasetAssetLike(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || value instanceof Blob) return false;
+  const kind = (value as Record<string, unknown>).kind;
+  return kind === "local_path" || kind === "inline_base64" || kind === "url" || kind === "object_ref";
+}
+
+function isJsonText(value: string): boolean {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return typeof parsed === "object" && parsed !== null;
+  } catch {
+    return false;
   }
+}
+
+function appendFormValue(form: FormData, name: string, value: unknown, binary: boolean): void {
   if (value instanceof Blob) {
     form.append(name, value);
     return;
+  }
+  if (binary) {
+    // File bytes never go through MCP and the gateway is never a relay: real
+    // file fields only accept hands-free client-side curl. Metadata/file
+    // fields on upload x3, clone and editMetadata carry JSON (object or JSON
+    // text), so serialize them as a JSON part instead of refusing them.
+    if (isLocalPathAsset(value) || isDatasetAssetLike(value)) {
+      const label = isLocalPathAsset(value) ? basename(value.path) : name;
+      throw new Error(
+        `MCP never accepts file bytes — execute the upload yourself with your shell tool via curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs. Refused local file "${label}".`,
+      );
+    }
+    if (typeof value === "object" && value !== null) {
+      const filename = name === "file" ? "metadata.json" : `${name}.json`;
+      form.append(name, new Blob([JSON.stringify(value)], { type: "application/json" }), filename);
+      return;
+    }
+    if (typeof value === "string") {
+      if (isJsonText(value)) {
+        const filename = name === "file" ? "metadata.json" : `${name}.json`;
+        form.append(name, new Blob([value], { type: "application/json" }), filename);
+        return;
+      }
+      throw new Error(
+        `MCP never accepts file bytes — execute the upload yourself with your shell tool via curl from the client machine directly against the TDEI backend (single hop, any size) then poll with tdei_list_jobs. Refused local file "${basename(value)}".`,
+      );
+    }
   }
   form.append(name, typeof value === "string" ? value : JSON.stringify(value));
 }
