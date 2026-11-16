@@ -33,6 +33,7 @@ test("workspace gets its own instructions while sharing login and transfer rules
   for (const instructions of [TDEI_CORE_SERVER_INSTRUCTIONS, TDEI_WORKSPACE_SERVER_INSTRUCTIONS]) {
     assert.ok(instructions.includes(TDEI_SHARED_SERVER_INSTRUCTIONS));
     assert.match(instructions, /tdei_sso_login/);
+    assert.match(instructions, /tdei_sso_logout/);
     assert.match(instructions, /CLIENT machine/);
     assert.match(instructions, /file bytes/i);
   }
@@ -93,7 +94,16 @@ test("workspace servers do not register the core semantic tdei_* tools", async (
   assert.ok(core.includes("tdei_upload_dataset"));
   assert.deepEqual(
     workspace.filter(
-      (name) => name.startsWith("tdei_") && !["tdei_sso_login", "tdei_auth_status", "tdei_sso_logout"].includes(name),
+      (name) =>
+        name.startsWith("tdei_") &&
+        ![
+          "tdei_sso_login",
+          "tdei_login",
+          "tdei_authenticate",
+          "tdei_auth_status",
+          "tdei_sso_logout",
+          "tdei_logout",
+        ].includes(name),
     ),
     [],
   );

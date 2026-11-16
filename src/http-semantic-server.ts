@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
@@ -145,6 +145,74 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
         )
       : undefined;
 
+    const ssoLoginHandler = async (): Promise<CallToolResult> => {
+      try {
+        if (auth.getStatus().authenticated) {
+          if (openApiLifecycle && !openApiLifecycle.isLoaded()) {
+            await openApiLifecycle.load().catch(() => undefined);
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: "TDEI SSO session is already authenticated.",
+              },
+            ],
+          };
+        }
+
+        // Validity-first shared login: another MCP on the same auth server may
+        // already hold a live session. Reuse it instead of opening a browser.
+        const restoredShared = await auth.restoreSharedSession(options.fetchImpl).catch(() => false);
+        if (restoredShared && auth.getStatus().authenticated) {
+          if (openApiLifecycle && !openApiLifecycle.isLoaded()) {
+            await openApiLifecycle.load().catch(() => undefined);
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: "TDEI SSO session is already authenticated (reused shared login).",
+              },
+            ],
+          };
+        }
+
+        const login = await auth.startSsoLogin({
+          ...ssoBrowserOptions,
+          preflight: true,
+          ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        });
+        void login.completion
+          .then(async () => {
+            if (openApiLifecycle) {
+              await openApiLifecycle.load().catch(() => undefined);
+            }
+          })
+          .catch(() => undefined);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "login_pending",
+                  loginUrl: login.loginUrl,
+                  callbackUrl: browserRedirectUri ?? login.callbackUrl,
+                  message:
+                    "Sign-in needs the local callback relay on the CLIENT machine (the installer starts it; it exits after 10 minutes idle and is restarted on demand at the next sign-in). If it is not running, start it in the background: `node ~/.tdei-mcp/sso-callback-relay.cjs` (sh: append `&`; PowerShell: `Start-Process -NoNewWindow node $HOME/.tdei-mcp/sso-callback-relay.cjs`). If that file is missing, re-run your TDEI install command. Then open loginUrl in your browser and approve the sign-in. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead. If port 8765 is held by another local backend (for example TDEI-Orchestrator), stop that backend first: only one process can hold the shared Keycloak redirect port at a time.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    };
     server.registerTool(
       "tdei_sso_login",
       {
@@ -152,74 +220,25 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
           "Start TDEI browser SSO login to fetch and store the TDEI access token for this MCP server session. Open the returned loginUrl in your browser to sign in.",
         inputSchema: z.object({}),
       },
-      async () => {
-        try {
-          if (auth.getStatus().authenticated) {
-            if (openApiLifecycle && !openApiLifecycle.isLoaded()) {
-              await openApiLifecycle.load().catch(() => undefined);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "TDEI SSO session is already authenticated.",
-                },
-              ],
-            };
-          }
-
-          // Validity-first shared login: another MCP on the same auth server may
-          // already hold a live session. Reuse it instead of opening a browser.
-          const restoredShared = await auth.restoreSharedSession(options.fetchImpl).catch(() => false);
-          if (restoredShared && auth.getStatus().authenticated) {
-            if (openApiLifecycle && !openApiLifecycle.isLoaded()) {
-              await openApiLifecycle.load().catch(() => undefined);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "TDEI SSO session is already authenticated (reused shared login).",
-                },
-              ],
-            };
-          }
-
-          const login = await auth.startSsoLogin({
-            ...ssoBrowserOptions,
-            preflight: true,
-            ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-          });
-          void login.completion
-            .then(async () => {
-              if (openApiLifecycle) {
-                await openApiLifecycle.load().catch(() => undefined);
-              }
-            })
-            .catch(() => undefined);
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(
-                  {
-                    status: "login_pending",
-                    loginUrl: login.loginUrl,
-                    callbackUrl: browserRedirectUri ?? login.callbackUrl,
-                    message:
-                      "Sign-in needs the local callback relay on the CLIENT machine (the installer starts it; it exits after 10 minutes idle and is restarted on demand at the next sign-in). If it is not running, start it in the background: `node ~/.tdei-mcp/sso-callback-relay.cjs` (sh: append `&`; PowerShell: `Start-Process -NoNewWindow node $HOME/.tdei-mcp/sso-callback-relay.cjs`). If that file is missing, re-run your TDEI install command. Then open loginUrl in your browser and approve the sign-in. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead. If port 8765 is held by another local backend (for example TDEI-Orchestrator), stop that backend first: only one process can hold the shared Keycloak redirect port at a time.",
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-          };
-        } catch (error) {
-          return errorResult(error);
-        }
+      ssoLoginHandler,
+    );
+    server.registerTool(
+      "tdei_login",
+      {
+        description:
+          "Alias of tdei_sso_login: start TDEI browser SSO login to fetch and store the TDEI access token for this MCP server session. Open the returned loginUrl in your browser to sign in.",
+        inputSchema: z.object({}),
       },
+      ssoLoginHandler,
+    );
+    server.registerTool(
+      "tdei_authenticate",
+      {
+        description:
+          "Alias of tdei_sso_login: start TDEI browser SSO login to fetch and store the TDEI access token for this MCP server session. Open the returned loginUrl in your browser to sign in.",
+        inputSchema: z.object({}),
+      },
+      ssoLoginHandler,
     );
 
     server.registerTool(
@@ -307,9 +326,10 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
     );
 
     server.registerTool(
-      "tdei_logout",
+      "tdei_sso_logout",
       {
-        description: "Log out of the current TDEI session.",
+        description:
+          "Log out of the current TDEI SSO session (GET /api/v1/sso-logout). Clears local tokens and returns the browser logout URL.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -328,7 +348,42 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
                     logoutUrl: logout.logoutUrl,
                     callbackUrl: logout.callbackUrl,
                     message:
-                      "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens have been cleared.",
+                      "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens have been cleared.",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          return errorResult(error);
+        }
+      },
+    );
+    server.registerTool(
+      "tdei_logout",
+      {
+        description: "Alias of tdei_sso_logout: log out of the current TDEI SSO session (GET /api/v1/sso-logout).",
+        inputSchema: z.object({}),
+      },
+      async () => {
+        try {
+          const logout = openApiLifecycle
+            ? await openApiLifecycle.logout(ssoBrowserOptions)
+            : await auth.logout(ssoBrowserOptions);
+          void logout.completion.catch(() => undefined);
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "logout_pending",
+                    logoutUrl: logout.logoutUrl,
+                    callbackUrl: logout.callbackUrl,
+                    message:
+                      "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens have been cleared.",
                   },
                   null,
                   2,

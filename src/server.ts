@@ -1,5 +1,5 @@
 import { resolveTdeiEnvironment } from "./tdei-shared/web-ui-handoffs.js";
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import { authManager, type AuthManager } from "./auth/auth-manager.js";
@@ -186,75 +186,94 @@ export async function createServer(
   // Semantic tdei_* tools target the TDEI core API; workspace servers only expose their own OpenAPI tools.
   if (profile === "core") registerSemanticTools(server, semanticModule, undefined, () => ensureSessionAuth(auth));
 
+  const ssoLoginHandler = async (): Promise<CallToolResult> => {
+    try {
+      if (auth.getStatus().authenticated) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "TDEI SSO session is already authenticated.",
+            },
+          ],
+        };
+      }
+
+      // Validity-first shared login: another MCP on the same auth server may
+      // already hold a live session. Reuse it instead of opening a browser.
+      if (typeof auth.restoreSharedSession === "function") {
+        const restored = await auth.restoreSharedSession().catch(() => false);
+        if (restored && auth.getStatus().authenticated) {
+          await openApiToolsLifecycle.load().catch(() => undefined);
+          return {
+            content: [
+              {
+                type: "text",
+                text: "TDEI SSO session is already authenticated (reused shared login).",
+              },
+            ],
+          };
+        }
+      }
+
+      const login = await auth.startSsoLogin({ preflight: true });
+
+      void login.completion
+        .then(async () => {
+          console.error("[auth] SSO login successful");
+          await openApiToolsLifecycle.load();
+        })
+        .catch((error) => {
+          console.error("[auth] SSO login did not complete:", error instanceof Error ? error.message : String(error));
+        });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                status: "login_pending",
+                loginUrl: login.loginUrl,
+                callbackUrl: login.callbackUrl,
+                message:
+                  "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead.",
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return errorResult(error);
+    }
+  };
   server.registerTool(
     "tdei_sso_login",
     {
       description: "Start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
       inputSchema: z.object({}),
     },
-    async () => {
-      try {
-        if (auth.getStatus().authenticated) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "TDEI SSO session is already authenticated.",
-              },
-            ],
-          };
-        }
-
-        // Validity-first shared login: another MCP on the same auth server may
-        // already hold a live session. Reuse it instead of opening a browser.
-        if (typeof auth.restoreSharedSession === "function") {
-          const restored = await auth.restoreSharedSession().catch(() => false);
-          if (restored && auth.getStatus().authenticated) {
-            await openApiToolsLifecycle.load().catch(() => undefined);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "TDEI SSO session is already authenticated (reused shared login).",
-                },
-              ],
-            };
-          }
-        }
-
-        const login = await auth.startSsoLogin({ preflight: true });
-
-        void login.completion
-          .then(async () => {
-            console.error("[auth] SSO login successful");
-            await openApiToolsLifecycle.load();
-          })
-          .catch((error) => {
-            console.error("[auth] SSO login did not complete:", error instanceof Error ? error.message : String(error));
-          });
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                {
-                  status: "login_pending",
-                  loginUrl: login.loginUrl,
-                  callbackUrl: login.callbackUrl,
-                  message:
-                    "Open loginUrl in your browser to sign in to TDEI. When the page says login complete, return here. If the browser cannot reach the callback, paste its address-bar URL into tdei_sso_complete instead.",
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (error) {
-        return errorResult(error);
-      }
+    ssoLoginHandler,
+  );
+  server.registerTool(
+    "tdei_login",
+    {
+      description:
+        "Alias of tdei_sso_login: start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
+      inputSchema: z.object({}),
     },
+    ssoLoginHandler,
+  );
+  server.registerTool(
+    "tdei_authenticate",
+    {
+      description:
+        "Alias of tdei_sso_login: start TDEI browser SSO login. Open the returned URL, complete login, then check tdei_auth_status.",
+      inputSchema: z.object({}),
+    },
+    ssoLoginHandler,
   );
 
   server.registerTool(
@@ -371,12 +390,13 @@ export async function createServer(
     },
   );
   server.registerTool(
-    "tdei_logout",
+    "tdei_sso_logout",
     {
-      description: "Log out of the current TDEI session.",
+      description:
+        "Log out of the current TDEI SSO session (GET /api/v1/sso-logout). Clears local tokens and returns the browser logout URL.",
       inputSchema: z.object({}),
     },
-    async (_args) => {
+    async () => {
       try {
         const logout = await openApiToolsLifecycle.logout();
 
@@ -399,7 +419,49 @@ export async function createServer(
                   logoutUrl: logout.logoutUrl,
                   callbackUrl: logout.callbackUrl,
                   message:
-                    "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the OpenAPI tool session have already been cleared.",
+                    "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens and the OpenAPI tool session have already been cleared.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "tdei_logout",
+    {
+      description: "Alias of tdei_sso_logout: log out of the current TDEI SSO session (GET /api/v1/sso-logout).",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const logout = await openApiToolsLifecycle.logout();
+
+        void logout.completion
+          .then(() => console.error("[auth] SSO logout successful"))
+          .catch((error) => {
+            console.error(
+              "[auth] SSO logout did not complete:",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "logout_pending",
+                  logoutUrl: logout.logoutUrl,
+                  callbackUrl: logout.callbackUrl,
+                  message:
+                    "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens and the OpenAPI tool session have already been cleared.",
                 },
                 null,
                 2,

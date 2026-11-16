@@ -840,7 +840,19 @@ PROFILE=${JSON.stringify(profile)}
 EXTRA_ENTRIES=${JSON.stringify(extra.join(" "))}
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "Error: node is required on the client machine to configure MCP clients." >&2
+  echo "Error: node is required on the client machine to configure MCP clients. Install Node.js 22+ from https://nodejs.org/ and re-run this script." >&2
+  exit 1
+fi
+
+NODE_VERSION=$(node --version 2>/dev/null || echo "")
+NODE_MAJOR=$(printf "%s" "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+case "$NODE_MAJOR" in
+  ''|*[!0-9]*)
+    echo "Error: could not determine the node version (got '$NODE_VERSION'). Install Node.js 22+ from https://nodejs.org/ and re-run this script." >&2
+    exit 1;;
+esac
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Error: tdei-mcp requires Node.js 22+ (found $NODE_VERSION). Please update Node.js from https://nodejs.org/ (check with \`node --version\`) and re-run this script." >&2
   exit 1
 fi
 
@@ -968,6 +980,13 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Error "node is required on this machine to configure MCP clients. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
   exit 1
 }
+try { $NodeVersion = (node --version 2>$null) } catch { $NodeVersion = "" }
+$NodeMajor = 0
+if ($NodeVersion -match '^v?(\\d+)') { [int]::TryParse($Matches[1], [ref]$NodeMajor) | Out-Null }
+if ($NodeMajor -lt 22) {
+  Write-Error "tdei-mcp requires Node.js 22+ (found $NodeVersion). Please update Node.js from https://nodejs.org/ (check with 'node --version') and re-run this script."
+  exit 1
+}
 
 function Test-ClientFound($C) {
   switch ($C) {
@@ -1054,7 +1073,19 @@ PROFILE=${JSON.stringify(profile)}
 EXTRA_ENTRIES=${JSON.stringify(extra.join(" "))}
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "Error: node is required on the client machine to configure $CLIENT." >&2
+  echo "Error: node is required on the client machine to configure $CLIENT. Install Node.js 22+ from https://nodejs.org/ and re-run this script." >&2
+  exit 1
+fi
+
+NODE_VERSION=$(node --version 2>/dev/null || echo "")
+NODE_MAJOR=$(printf "%s" "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+case "$NODE_MAJOR" in
+  ''|*[!0-9]*)
+    echo "Error: could not determine the node version (got '$NODE_VERSION'). Install Node.js 22+ from https://nodejs.org/ and re-run this script." >&2
+    exit 1;;
+esac
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Error: tdei-mcp requires Node.js 22+ (found $NODE_VERSION). Please update Node.js from https://nodejs.org/ (check with \`node --version\`) and re-run this script." >&2
   exit 1
 fi
 
@@ -1101,6 +1132,13 @@ $ExtraEntries = @(${extra.map(psQuote).join(", ")})
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Write-Error "node is required on this machine to configure $Client. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
+  exit 1
+}
+try { $NodeVersion = (node --version 2>$null) } catch { $NodeVersion = "" }
+$NodeMajor = 0
+if ($NodeVersion -match '^v?(\\d+)') { [int]::TryParse($Matches[1], [ref]$NodeMajor) | Out-Null }
+if ($NodeMajor -lt 22) {
+  Write-Error "tdei-mcp requires Node.js 22+ (found $NodeVersion). Please update Node.js from https://nodejs.org/ (check with 'node --version') and re-run this script."
   exit 1
 }
 

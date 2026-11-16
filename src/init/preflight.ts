@@ -19,7 +19,9 @@ export async function checkPreflight(exec: ExecFn, options: PreflightOptions = {
   }
   const major = Number.parseInt(nodeOut.replace(/^v/, "").split(".")[0] ?? "", 10);
   if (!Number.isFinite(major) || major < 22) {
-    throw new Error(`tdei-mcp requires Node.js >=22 (found ${nodeOut}). Download from https://nodejs.org/`);
+    throw new Error(
+      `tdei-mcp requires Node.js >=22 (found ${nodeOut}). Please update Node.js from https://nodejs.org/ (check with \`node --version\`) and re-run init.`,
+    );
   }
 
   return { nodeVersion: nodeOut };

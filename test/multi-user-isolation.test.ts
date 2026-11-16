@@ -123,7 +123,15 @@ test("gateway: handshake works without a token and exposes no shared-login tools
     assert.equal(listed.status, 200);
     const text = await listed.text();
     assert.match(text, /tdei_list_my_project_groups/);
-    for (const sessionTool of ["tdei_sso_login", "tdei_sso_complete", "tdei_auth_status", "tdei_logout"]) {
+    for (const sessionTool of [
+      "tdei_sso_login",
+      "tdei_login",
+      "tdei_authenticate",
+      "tdei_sso_complete",
+      "tdei_auth_status",
+      "tdei_sso_logout",
+      "tdei_logout",
+    ]) {
       assert.ok(!text.includes(`"${sessionTool}"`), `${sessionTool} would read or write a process-wide session`);
     }
   } finally {
