@@ -143,8 +143,8 @@ jobs:
           MCP_BASE_URL: ${{ secrets.MCP_BASE_URL }}
         run: |
           if [[ -z "${MCP_BASE_URL:-}" ]]; then
-            echo "MCP_BASE_URL secret is not configured — skipping post-deploy verification." >&2
-            exit 0
+            echo "::error::MCP_BASE_URL secret is not configured — cannot verify the deployed build. Failing closed: set it to the public gateway origin (e.g. https://<app>.azurecontainerapps.io) so deploys verify the served SHA."
+            exit 1
           fi
           for attempt in $(seq 1 30); do
             served_sha="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r .build.sha)" || true
