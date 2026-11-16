@@ -96,7 +96,14 @@ test("workspace servers do not register the core semantic tdei_* tools", async (
     workspace.filter(
       (name) =>
         name.startsWith("tdei_") &&
-        !["tdei_sso_login", "tdei_auth_status", "tdei_sso_logout", "tdei_logout"].includes(name),
+        ![
+          "tdei_sso_login",
+          "tdei_login",
+          "tdei_authenticate",
+          "tdei_auth_status",
+          "tdei_sso_logout",
+          "tdei_logout",
+        ].includes(name),
     ),
     [],
   );

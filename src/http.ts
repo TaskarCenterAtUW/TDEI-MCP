@@ -238,6 +238,8 @@ function sendOAuth(response: ServerResponse, result: OAuthHttpResult): void {
  */
 export const AUTH_FREE_TOOL_NAMES = new Set([
   "tdei_sso_login",
+  "tdei_login",
+  "tdei_authenticate",
   "tdei_sso_complete",
   "tdei_auth_status",
   "tdei_health",

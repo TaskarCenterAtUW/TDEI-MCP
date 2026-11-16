@@ -88,7 +88,7 @@ test("workspace gateway: a signed-in caller sees the workspace tools and calls t
     assert.equal(init.status, 200, await init.clone().text());
     const initText = await init.text();
     assert.doesNotMatch(initText, /tdei_sso_login"\s*\}/);
-    assert.match(initText, /no tdei_sso_login \/ tdei_sso_logout tool/);
+    assert.match(initText, /no login\/logout tools/);
     assert.match(initText, /tools are listed without signing in/);
 
     const listed = await post(`${handle.url}/mcp`, rpc("tools/list"), "alice-token");

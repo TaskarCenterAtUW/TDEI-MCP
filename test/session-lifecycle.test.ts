@@ -104,12 +104,24 @@ test("SSO login loads API tools and supports calls and logout", async () => {
     const initialTools = await client.listTools();
     assert.ok(initialTools.tools.some((tool) => tool.name === "tdei_sso_login"));
     assert.ok(
+      initialTools.tools.some((tool) => tool.name === "tdei_login"),
+      "tdei_login alias must be listed alongside tdei_sso_login",
+    );
+    assert.ok(
+      initialTools.tools.some((tool) => tool.name === "tdei_authenticate"),
+      "tdei_authenticate alias must be listed alongside tdei_sso_login",
+    );
+    assert.ok(
       initialTools.tools.some((tool) => tool.name === "listServices"),
       "API tools must be present in the initial catalogue before SSO",
     );
 
     const login = await client.callTool({ name: "tdei_sso_login", arguments: {} });
     assert.match(login.content[0]?.type === "text" ? login.content[0].text : "", /loginUrl/);
+    const loginAlias = await client.callTool({ name: "tdei_login", arguments: {} });
+    assert.match(loginAlias.content[0]?.type === "text" ? loginAlias.content[0].text : "", /loginUrl/);
+    const authenticateAlias = await client.callTool({ name: "tdei_authenticate", arguments: {} });
+    assert.match(authenticateAlias.content[0]?.type === "text" ? authenticateAlias.content[0].text : "", /loginUrl/);
     const completionResult = await client.callTool({
       name: "tdei_sso_complete",
       arguments: { callbackUrl: "http://127.0.0.1:8765/callback?code=test&state=test" },
