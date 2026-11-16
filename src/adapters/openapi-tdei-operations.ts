@@ -122,6 +122,16 @@ export class OpenApiTdeiOperations implements TdeiOperations {
     });
   }
 
+  async getTagQualityMetric(
+    input: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> },
+    _context: RequestContext,
+  ): Promise<unknown> {
+    return this.callTool("qualityMetricTag", {
+      tdei_dataset_id: input.tdeiDatasetId,
+      file: new Blob([JSON.stringify(input.tags)], { type: "application/json" }),
+    });
+  }
+
   async launchJob(
     input: {
       operation: string;

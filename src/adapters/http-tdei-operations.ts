@@ -226,6 +226,17 @@ export class HttpTdeiOperations implements TdeiOperations {
     return text ? parseJsonOrText(text) : { updated: true };
   }
 
+  async getTagQualityMetric(
+    input: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this.mutations.postForm(
+      `api/v1/osw/quality-metric/tag/${encodeURIComponent(input.tdeiDatasetId)}`,
+      { file: { json: input.tags, filename: "tag-quality.json" } },
+      context,
+    );
+  }
+
   async launchJob(
     input: {
       operation: string;

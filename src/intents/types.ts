@@ -345,16 +345,48 @@ export interface TagRoadInput {
 
 export interface TagInclineInput {
   tdeiDatasetId?: string;
+  /** Batch mode: check several datasets in one call (parallel, max 5 in flight). */
+  tdeiDatasetIds?: string[];
+  /** Batch mode: resolve ids via a project-group + recency filter instead of passing ids. */
+  projectGroupId?: string;
+  projectGroupName?: string;
+  uploadedAfter?: string;
+  uploadedWithinDays?: number;
+  limit?: number;
+}
+
+export interface CheckInclineRow {
+  tdeiDatasetId: string;
+  hasIncline: boolean;
+  inclinePercent?: number;
+  totalEntityCount?: number;
+  overallQualityMetric?: string;
+  metric?: unknown;
+  error?: string;
+}
+
+export interface CheckInclineBatchData {
+  apiOperation: "qualityMetricTag";
+  method: "POST";
+  path: string;
+  request: Array<{ entity_type: string; tags: string[] }>;
+  results: CheckInclineRow[];
+  summary: { total: number; withIncline: number; withoutIncline: number; failed: number };
+  followUp: string;
 }
 
 export interface CheckInclineData {
   tdeiDatasetId: string;
-  dataType: DataType;
-  apiOperation: "getOswFile";
-  method: "GET";
+  apiOperation: "qualityMetricTag";
+  method: "POST";
   path: string;
-  curlCommand: string;
-  instruction: string;
+  request: Array<{ entity_type: string; tags: string[] }>;
+  metric: unknown;
+  hasIncline: boolean;
+  inclinePercent?: number;
+  totalEntityCount?: number;
+  overallQualityMetric?: string;
+  followUp: string;
 }
 
 export interface ListFeedbacksInput {

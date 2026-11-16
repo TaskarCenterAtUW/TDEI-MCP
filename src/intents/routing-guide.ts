@@ -67,7 +67,10 @@ export const TOOL_ROUTING: readonly ToolRoute[] = [
   { tool: "tdei_cut_dataset_bbox", use: "cut an OSW dataset down to a bounding box" },
   { tool: "tdei_tag_road", use: "tag sidewalks with a road network from another dataset" },
   { tool: "tdei_tag_incline", use: "add incline tags to an OSW dataset" },
-  { tool: "tdei_check_dataset_incline", use: "does this dataset have inclines (run before tagging)" },
+  {
+    tool: "tdei_check_dataset_incline",
+    use: "do Sidewalks have inclines (sync tag-quality metric; single id or batch ids / group+recency with 5 parallel calls)",
+  },
   // Feedback and viewer
   { tool: "tdei_list_feedbacks", use: "list viewer feedbacks" },
   { tool: "tdei_get_feedback_summary", use: "feedback counts and overdue summary" },
@@ -89,7 +92,7 @@ const ROUTING_DISAMBIGUATION: readonly string[] = [
   "Identity vs project groups: tdei_list_my_project_groups lists groups visible to the login, not membership. Use tdei_my_project_group_roles for 'my roles in <project group>' or which groups the user belongs to, and tdei_get_my_identity for the user's own email or token roles.",
   "Details vs search: with an exact dataset id use tdei_get_dataset_details; with a place, name or filter use tdei_find_datasets.",
   "Report inventory vs generation: for existing QA/QC report links, report codes or missing reports across a project group or service use tdei_get_tcat_qa_reports; tdei_generate_quality_report CREATES one new report job for one dataset id.",
-  "Inclines: check with tdei_check_dataset_incline first, then tag with tdei_tag_incline only if the user wants it added.",
+  "Inclines: tdei_check_dataset_incline takes one id or a batch (tdeiDatasetIds, or projectGroupName/projectGroupId with uploadedWithinDays for 'uploaded today'); the batch fans out with 5 parallel tag-quality calls. For live per-dataset streaming, fire parallel single-id calls in one block so each verdict renders as it completes. A false result is report-only: no incline job is run.",
   "Destructive tools (delete, clone, edit metadata, union, regenerate API key) need an explicit user confirmation before you pass confirm:true.",
 ];
 

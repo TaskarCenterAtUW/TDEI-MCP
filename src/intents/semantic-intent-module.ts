@@ -10,7 +10,9 @@ import {
 import { createHash } from "node:crypto";
 import { signInText } from "../mcp/errors.js";
 import type {
+  CheckInclineBatchData,
   CheckInclineData,
+  CheckInclineRow,
   CloneDatasetInput,
   ConfidenceInput,
   ConvertOswInput,
@@ -174,6 +176,47 @@ function firstText(source: Record<string, unknown> | undefined, keys: readonly s
 /** metadata.dataset_detail block (name, version and custom metadata live here). */
 function readDatasetDetail(dataset: Record<string, unknown>): Record<string, unknown> | undefined {
   return asRecord(asRecord(dataset.metadata)?.dataset_detail);
+}
+
+/** True when a tag-quality row is the Sidewalk entity row. */
+function isSidewalkRow(value: unknown): boolean {
+  const record = asRecord(value);
+  const entity = record?.entity_type;
+  return typeof entity === "string" && entity.toLowerCase() === "sidewalk";
+}
+
+/** Parse a qualityMetricTag payload into an incline verdict. Handles the object form and one-element lists. */
+function parseInclineMetric(metric: unknown): {
+  hasIncline: boolean;
+  inclinePercent?: number;
+  totalEntityCount?: number;
+  overallQualityMetric?: string;
+} {
+  const record = asRecord(metric);
+  if (!record) return { hasIncline: false };
+  const details = asRecord(record.metric_details ?? record.metricDetails);
+  const rawIncline = details?.incline;
+  const inclinePercent =
+    typeof rawIncline === "number" && Number.isFinite(rawIncline)
+      ? rawIncline
+      : typeof rawIncline === "string" && rawIncline.trim() !== "" && Number.isFinite(Number(rawIncline))
+        ? Number(rawIncline)
+        : undefined;
+  const rawTotal = record.total_entity_count ?? record.totalEntityCount;
+  const totalEntityCount =
+    typeof rawTotal === "number" && Number.isFinite(rawTotal)
+      ? rawTotal
+      : typeof rawTotal === "string" && rawTotal.trim() !== "" && Number.isFinite(Number(rawTotal))
+        ? Number(rawTotal)
+        : undefined;
+  const overallRaw = record.overall_quality_metric ?? record.overallQualityMetric;
+  const overallQualityMetric = typeof overallRaw === "string" && overallRaw.trim() ? overallRaw.trim() : undefined;
+  return {
+    hasIncline: inclinePercent !== undefined ? inclinePercent > 0 : false,
+    ...(inclinePercent !== undefined ? { inclinePercent } : {}),
+    ...(totalEntityCount !== undefined ? { totalEntityCount } : {}),
+    ...(overallQualityMetric !== undefined ? { overallQualityMetric } : {}),
+  };
 }
 
 function readDatasetCustomMetadata(dataset: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -1034,8 +1077,8 @@ export class SemanticIntentModule {
 
   /**
    * Dataset details by id (status/release + metadata). For incline
-   * presence there is no metadata flag: download the OSW ZIP via the
-   * getOswFile raw tool and inspect edges for an incline tag; use
+   * presence there is no metadata flag: use tdei_check_dataset_incline
+   * (synchronous Sidewalk/incline tag-quality metric); use
    * datasetTagIncline to add it.
    */
   async getDatasetDetails(
@@ -1064,7 +1107,7 @@ export class SemanticIntentModule {
       data: {
         ...result.data,
         inclineNote:
-          "Incline presence is not in dataset metadata. Use tdei_check_dataset_incline for an automatic verdict, or download the dataset ZIP with tdei_download_dataset and inspect edges files; to tag it, call tdei_tag_incline.",
+          "Incline presence is not in dataset metadata. Use tdei_check_dataset_incline (synchronous Sidewalk/incline tag-quality metric, one call per dataset id) for an automatic verdict; to add inclines, call tdei_tag_incline.",
       },
     };
   }
@@ -2076,47 +2119,186 @@ export class SemanticIntentModule {
   }
 
   /**
-   * Client-side incline inspection runbook. The MCP server never downloads
-   * dataset bytes: it resolves the dataset id + data type from metadata and
-   * returns a ready-to-run curl command plus inspection steps the LLM
-   * executes on the CLIENT machine.
+   * Incline presence via the synchronous tag-quality metric
+   * (POST /api/v1/osw/quality-metric/tag/{id}) with a Sidewalk/incline
+   * payload. No dataset bytes are downloaded.
+   *
+   * Single id -> one verdict. Batch (tdeiDatasetIds, or a project-group +
+   * recency filter such as "datasets uploaded today in <group>") fans out
+   * with at most 5 tag-quality calls in flight and returns one row per
+   * dataset plus an N-of-M summary. For live per-dataset streaming in the
+   * client harness, prefer parallel single-id calls (one tool call per id
+   * in the same block): each result renders as it completes instead of
+   * waiting for the whole batch.
    */
   async checkDatasetIncline(
     input: TagInclineInput,
     context: RequestContext = {},
-  ): Promise<IntentResult<CheckInclineData>> {
-    const id = input.tdeiDatasetId?.trim() ?? "";
-    if (!id) {
+  ): Promise<IntentResult<CheckInclineData | CheckInclineBatchData>> {
+    const single = input.tdeiDatasetId?.trim() ?? "";
+    const extraIds = (input.tdeiDatasetIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+    const explicit = Array.from(new Set(single ? [single, ...extraIds] : extraIds));
+    const groupId = input.projectGroupId?.trim() ?? "";
+    const groupName = input.projectGroupName?.trim() ?? "";
+    if (explicit.length === 0 && !groupId && !groupName) {
       return {
         status: "needs_input",
-        missing: [{ field: "tdeiDatasetId", question: "Which TDEI dataset id should be checked for inclines?" }],
+        missing: [
+          {
+            field: "tdeiDatasetId",
+            question:
+              "Which TDEI dataset id should be checked for inclines? For a batch, pass tdeiDatasetIds, or give a project group name with uploadedWithinDays (e.g. 1 for 'uploaded today') so I can resolve today's ids and check each one.",
+          },
+        ],
         accepted: {},
       };
     }
-    // The lookup only refines the reported data type; a failed search must not block the runbook.
-    const lookup = await this.findDatasets({ tdeiDatasetId: id, limit: 5 }, context).catch(() => undefined);
-    let dataType: DataType = "osw";
-    if (lookup?.status === "complete" && lookup.data.matches[0]) {
-      const raw = (lookup.data.matches[0].dataset.data_type as string | undefined)?.toLowerCase();
-      if (raw === "flex" || raw === "pathways" || raw === "osw") dataType = raw;
+    if (!this.dependencies.operations.getTagQualityMetric) return this.unsupported("getTagQualityMetric");
+    if (explicit.length > 0) {
+      if (explicit.length === 1) return this.checkOneIncline(explicit[0] as string, context);
+      return this.checkManyInclines(explicit, context);
     }
-    const apiPath = `/api/v1/osw/${id}`;
-    const apiUrl = (this.dependencies.apiUrl ?? process.env.TDEI_API_URL?.trim() ?? "").replace(/\/+$/, "");
-    const bearer = (await this.resolveCurlToken(context)) ?? "$TDEI_TOKEN";
-    const curlCommand = buildClientDownloadCurl(`${apiUrl}${apiPath}`, bearer, `${id}.zip`);
+    let resolvedGroupId = groupId;
+    if (!resolvedGroupId && groupName) {
+      const resolvedGroup = await this.resolveSingleProjectGroup(
+        { projectGroupName: groupName },
+        context,
+        "Which project group should I check today's datasets in?",
+      );
+      if (resolvedGroup.status === "needs_input") {
+        return {
+          status: "needs_input",
+          missing: [{ field: "projectGroupName", question: resolvedGroup.question }],
+          accepted: {},
+        };
+      }
+      resolvedGroupId = resolvedGroup.id;
+    }
+    const resolved = await this.findDatasets(
+      {
+        projectGroupId: resolvedGroupId,
+        ...(input.uploadedAfter?.trim() ? { uploadedAfter: input.uploadedAfter.trim() } : {}),
+        ...(input.uploadedWithinDays !== undefined ? { uploadedWithinDays: input.uploadedWithinDays } : {}),
+        status: "All",
+        dataType: "osw",
+        latestPerName: false,
+        limit: Math.min(Math.max(input.limit ?? 50, 1), 50),
+      },
+      context,
+    ).catch(() => undefined);
+    if (resolved?.status !== "complete") {
+      return {
+        status: "needs_input",
+        missing: [
+          {
+            field: "tdeiDatasetId",
+            question:
+              "I could not resolve dataset ids for that project group filter. Pass explicit tdeiDatasetIds, or a different project group name.",
+          },
+        ],
+        accepted: {},
+      };
+    }
+    const ids = Array.from(
+      new Set(
+        resolved.data.matches
+          .map((match) => readDatasetId(match.dataset as unknown as Record<string, unknown>))
+          .filter((id): id is string => !!id),
+      ),
+    ).slice(0, 50);
+    if (ids.length === 0) {
+      return {
+        status: "complete",
+        data: {
+          apiOperation: "qualityMetricTag",
+          method: "POST",
+          path: "/api/v1/osw/quality-metric/tag/{tdei_dataset_id}",
+          request: [{ entity_type: "Sidewalk", tags: ["incline"] }],
+          results: [],
+          summary: { total: 0, withIncline: 0, withoutIncline: 0, failed: 0 },
+          followUp: "No datasets matched that filter, so there was nothing to check.",
+        } satisfies CheckInclineBatchData,
+      };
+    }
+    if (ids.length === 1) return this.checkOneIncline(ids[0] as string, context);
+    return this.checkManyInclines(ids, context);
+  }
+
+  private async checkOneIncline(id: string, context: RequestContext): Promise<IntentResult<CheckInclineData>> {
+    const request = [{ entity_type: "Sidewalk", tags: ["incline"] }];
+    const path = `/api/v1/osw/quality-metric/tag/${id}`;
+    const raw = await this.dependencies.operations.getTagQualityMetric?.({ tdeiDatasetId: id, tags: request }, context);
+    const metric = Array.isArray(raw) ? (raw.find((row) => isSidewalkRow(row)) ?? raw[0] ?? raw) : raw;
+    const parsed = parseInclineMetric(metric);
     return {
       status: "complete",
       data: {
         tdeiDatasetId: id,
-        dataType,
-        apiOperation: "getOswFile",
-        method: "GET",
-        path: apiPath,
-        curlCommand,
-        instruction:
-          `Execute this now with your shell tool on the CLIENT machine (no human step, do not ask the user to run it): 1) run ${curlCommand}${bearer === "$TDEI_TOKEN" ? " with $TDEI_TOKEN set to the SSO bearer (sign in first)" : " (caller bearer already embedded)"}; ` +
-          `2) unzip and inspect edges files (edges.geojson) for an incline tag/column; ` +
-          `3) if inclines are missing, tag them with tdei_tag_incline. File bytes flow directly from the TDEI backend; the gateway is not a relay.`,
+        apiOperation: "qualityMetricTag",
+        method: "POST",
+        path,
+        request,
+        metric,
+        hasIncline: parsed.hasIncline,
+        ...(parsed.inclinePercent !== undefined ? { inclinePercent: parsed.inclinePercent } : {}),
+        ...(parsed.totalEntityCount !== undefined ? { totalEntityCount: parsed.totalEntityCount } : {}),
+        ...(parsed.overallQualityMetric !== undefined ? { overallQualityMetric: parsed.overallQualityMetric } : {}),
+        followUp: parsed.hasIncline
+          ? `Sidewalk inclines are present (${parsed.inclinePercent ?? "?"}% of Sidewalk entities).`
+          : "No Sidewalk inclines found in this dataset.",
+      },
+    };
+  }
+
+  private async checkManyInclines(
+    ids: string[],
+    context: RequestContext,
+  ): Promise<IntentResult<CheckInclineBatchData>> {
+    const request = [{ entity_type: "Sidewalk", tags: ["incline"] }];
+    // Bounded parallelism (5 in flight, same bound as dataset scans): total
+    // latency tracks the slowest single tag-quality call, not the sum. The
+    // batch still returns as one payload; for per-dataset streaming, fire
+    // parallel single-id calls instead — each streams as it completes.
+    const results = await mapWithConcurrency(ids, 5, async (id): Promise<CheckInclineRow> => {
+      try {
+        const raw = await this.dependencies.operations.getTagQualityMetric?.(
+          { tdeiDatasetId: id, tags: request },
+          context,
+        );
+        const metric = Array.isArray(raw) ? (raw.find((row) => isSidewalkRow(row)) ?? raw[0] ?? raw) : raw;
+        const parsed = parseInclineMetric(metric);
+        return {
+          tdeiDatasetId: id,
+          hasIncline: parsed.hasIncline,
+          ...(parsed.inclinePercent !== undefined ? { inclinePercent: parsed.inclinePercent } : {}),
+          ...(parsed.totalEntityCount !== undefined ? { totalEntityCount: parsed.totalEntityCount } : {}),
+          ...(parsed.overallQualityMetric !== undefined ? { overallQualityMetric: parsed.overallQualityMetric } : {}),
+          metric,
+        };
+      } catch (error) {
+        return { tdeiDatasetId: id, hasIncline: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    const withIncline = results.filter((row) => row.hasIncline).length;
+    const failed = results.filter((row) => row.error !== undefined).length;
+    return {
+      status: "complete",
+      data: {
+        apiOperation: "qualityMetricTag",
+        method: "POST",
+        path: "/api/v1/osw/quality-metric/tag/{tdei_dataset_id}",
+        request,
+        results,
+        summary: {
+          total: results.length,
+          withIncline,
+          withoutIncline: results.length - withIncline - failed,
+          failed,
+        },
+        followUp:
+          `${withIncline} of ${results.length} datasets have Sidewalk inclines` +
+          (failed > 0 ? ` (${failed} checks failed)` : "") +
+          ".",
       },
     };
   }

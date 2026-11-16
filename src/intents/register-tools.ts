@@ -244,6 +244,16 @@ const tagRoadSchema = z.object({
   targetDatasetId: z.string().trim().min(1).optional(),
 });
 
+const checkInclineSchema = z.object({
+  tdeiDatasetId: z.string().trim().min(1).optional(),
+  tdeiDatasetIds: z.array(z.string().trim().min(1)).max(50).optional(),
+  projectGroupId: z.string().trim().min(1).optional(),
+  projectGroupName: z.string().trim().min(1).optional(),
+  uploadedAfter: z.string().trim().min(1).optional(),
+  uploadedWithinDays: z.number().min(0).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
 const feedbackListSchema = z.object({
   projectGroupId: z.string().trim().min(1).optional(),
   tdeiDatasetId: z.string().trim().min(1).optional(),
@@ -415,7 +425,7 @@ export function registerSemanticTools(
   tool("tdei_cut_dataset_bbox", D.cutDatasetBbox, cutBboxSchema, (a, c) => module.cutDatasetBbox(a, c));
   tool("tdei_tag_road", D.tagRoad, tagRoadSchema, (a, c) => module.tagRoad(a, c));
   tool("tdei_tag_incline", D.tagIncline, getDatasetDetailsSchema, (a, c) => module.tagIncline(a, c));
-  tool("tdei_check_dataset_incline", D.checkDatasetIncline, getDatasetDetailsSchema, (a, c) =>
+  tool("tdei_check_dataset_incline", D.checkDatasetIncline, checkInclineSchema, (a, c) =>
     module.checkDatasetIncline(a, c),
   );
   tool("tdei_list_feedbacks", D.listFeedbacks, feedbackListSchema, (a, c) => module.listFeedbacks(a, c));

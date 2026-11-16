@@ -90,6 +90,11 @@ export interface TdeiOperations {
     context: RequestContext,
   ): Promise<JobRecord>;
   editMetadata?(input: { tdeiDatasetId: string; metadata: DatasetMetadata }, context: RequestContext): Promise<unknown>;
+  /** Synchronous tag-quality metric (POST /api/v1/osw/quality-metric/tag/{id}). Returns the metric payload, not a job. */
+  getTagQualityMetric?(
+    input: { tdeiDatasetId: string; tags: Array<{ entity_type: string; tags: string[] }> },
+    context: RequestContext,
+  ): Promise<unknown>;
   /** Launch one async OSW/Pathways job op by operation name (per-op wrappers validate inputs). */
   launchJob?(
     input: {
