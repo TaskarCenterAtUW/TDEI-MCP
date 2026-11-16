@@ -19,6 +19,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     environment: Development
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build-image.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
       # Deploy runs on merge, and CI runs on the PR — nothing else gates dev
@@ -60,12 +62,17 @@ jobs:
       # vars.TDEI_NPX_PACKAGE stays empty until the CLI is published on npm.
       # Set that repository variable to tdei-mcp@<version> to switch every
       # install page/message from the git fallback to the npm spec.
-      - uses: docker/build-push-action@v6
+      - id: build-image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          # The run-numbered tag is immutable: rebuilding the same commit
+          # produces a new BUILD_VERSION, so a bare SHA tag would silently
+          # point at whichever build ran last. Deploys pin the digest below;
+          # dev-latest stays an explicitly floating pointer.
           tags: |
-            ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:${{ github.sha }}
+            ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:${{ github.sha }}-r${{ github.run_number }}
             ${{ secrets.REGISTRY_DOMAIN }}/${{ secrets.REGISTRY_REPO }}:dev-latest
           build-args: |
             GIT_SHA=${{ github.sha }}
@@ -113,11 +120,16 @@ jobs:
           RESOURCE_GROUP: GaussianRG
           REGISTRY_DOMAIN: ${{ secrets.REGISTRY_DOMAIN }}
           REGISTRY_REPO: ${{ secrets.REGISTRY_REPO }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
         run: |
           : "${CONTAINER_APP_NAME:?CONTAINER_APP_NAME secret is not configured}"
           : "${REGISTRY_DOMAIN:?REGISTRY_DOMAIN secret is not configured}"
           : "${REGISTRY_REPO:?REGISTRY_REPO secret is not configured}"
-          IMAGE="${REGISTRY_DOMAIN}/${REGISTRY_REPO}:${GITHUB_SHA}"
+          : "${IMAGE_DIGEST:?Build did not expose an image digest}"
+          # Pin the exact digest this run built. A tag (even a SHA tag) can be
+          # overwritten by a later rebuild of the same commit, so deploying by
+          # tag can silently run a different image than the one just verified.
+          IMAGE="${REGISTRY_DOMAIN}/${REGISTRY_REPO}@${IMAGE_DIGEST}"
 
           az containerapp update \
             --name "$CONTAINER_APP_NAME" \
@@ -134,26 +146,29 @@ jobs:
             --output tsv)"
 
           if [[ "$deployed_image" != "$IMAGE" ]]; then
-            echo "Azure Container App image does not match the image built by this run" >&2
+            echo "Azure Container App image does not match the image digest built by this run" >&2
             exit 1
           fi
 
       - name: Wait for deployed build to answer requests
         env:
           MCP_BASE_URL: ${{ secrets.MCP_BASE_URL }}
+          # Full build id (version+sha): two builds of the same commit differ
+          # in BUILD_VERSION, so a SHA-only check can pass against a stale build.
+          EXPECTED_ID: 0.1.${{ github.run_number }}+${{ github.sha }}
         run: |
           if [[ -z "${MCP_BASE_URL:-}" ]]; then
-            echo "MCP_BASE_URL secret is not configured — skipping post-deploy verification." >&2
-            exit 0
+            echo "::error::MCP_BASE_URL secret is not configured — cannot verify the deployed build. Failing closed: set it to the public gateway origin (e.g. https://<app>.azurecontainerapps.io) so deploys verify the served build id."
+            exit 1
           fi
           for attempt in $(seq 1 30); do
-            served_sha="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r .build.sha)" || true
-            if [[ "$served_sha" == "$GITHUB_SHA" ]]; then
-              echo "Deployed build $served_sha is serving traffic."
+            served_id="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r '"\(.build.version)+\(.build.sha)"')" || true
+            if [[ "$served_id" == "$EXPECTED_ID" ]]; then
+              echo "Deployed build $served_id is serving traffic."
               exit 0
             fi
-            echo "Attempt $attempt: serving sha '${served_sha:-unreachable}', waiting for $GITHUB_SHA..."
+            echo "Attempt $attempt: serving build '${served_id:-unreachable}', waiting for $EXPECTED_ID..."
             sleep 20
           done
-          echo "Timed out waiting for build $GITHUB_SHA to serve traffic" >&2
+          echo "Timed out waiting for build $EXPECTED_ID to serve traffic" >&2
           exit 1
