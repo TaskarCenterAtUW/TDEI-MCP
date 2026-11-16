@@ -55,9 +55,15 @@ export function renderStatusPage(
   // which connectors of that environment to add.
   const defaultEnv = setupEnvForServer(mcpName) ?? "dev";
   const npxPrefix = npxSetupCommand(BUILD.sha);
-  const defaultCommand = `${npxPrefix} --env ${defaultEnv} --gateway ${urls.origin}`;
   const entryNames = SETUP_SERVER_NAMES[defaultEnv];
   const defaultEntries = `${entryNames.core}, ${entryNames.workspace}`;
+  // Default (no-JS) command is the per-client shell script (shown first);
+  // the npx installer remains available via the Method dropdown.
+  const defaultPrimary = entryNames.core;
+  const defaultSetupBase = defaultPrimary === mcpName ? urls.setupBase : `${urls.origin}/${defaultPrimary}/mcp/setup`;
+  const defaultScriptUrl = `${defaultSetupBase}/codex?with=${entryNames.workspace}`;
+  const defaultCommand = `curl -fsSL '${defaultScriptUrl}' | sh`;
+  const defaultHint = `Writes the ${defaultEntries} entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -141,8 +147,9 @@ button { cursor: pointer; }
 <div class="builder" role="group" aria-label="Install method">
 <label>Method
 <select id="tdei-method">
-<option value="npx">Automatic with npx (recommended)</option>
-<option value="script">Per-client script</option>
+<option value="script">Per-client script (recommended)</option>
+<option value="all">All clients (interactive)</option>
+<option value="npx">Automatic with npx</option>
 </select>
 </label>
 <label>Purpose
@@ -152,7 +159,7 @@ button { cursor: pointer; }
 <option value="uninstall">Remove (uninstall)</option>
 </select>
 </label>
-<label data-script-only>Client / harness
+<label data-client-only>Client / harness
 <select id="tdei-harness">
 <option value="codex">Codex</option>
 <option value="opencode">OpenCode</option>
@@ -173,7 +180,7 @@ button { cursor: pointer; }
 <h3 class="step"><span class="step-num">3</span>Run this command</h3>
 <p class="muted">Copy and run it as-is on the client machine. Needs <code>node 22+</code> (<code>sh</code> on macOS / Linux, PowerShell on Windows).</p>
 <div class="cmd" data-copy-wrap><button type="button" class="copy-btn" data-copy title="Copy" aria-label="Copy generated command">${copyIcons}</button><pre id="tdei-command">${e(defaultCommand)}</pre></div>
-<p class="muted" id="tdei-hint">Installs <code>${e(defaultEntries)}</code>. Detects your MCP clients, shows what it will change, and asks before writing.</p>
+<p class="muted" id="tdei-hint">${e(defaultHint)}</p>
 
 <h3>What happens next</h3>
 <div class="next">
@@ -260,6 +267,11 @@ function tdeiHint(method, action, entryNames) {
     if (action === 'update') return 'Re-run of the install for ' + entryNames + ': replaces only those entries, keeps every other entry. Restart the app afterwards.';
     return 'Installs ' + entryNames + '. Detects your MCP clients, shows what it will change, and asks before writing. Needs Node 22+.';
   }
+  if (method === 'all') {
+    if (action === 'update') return 'Prompts Y/n for each client (answer n to skip the ones you don\\'t use) and re-installs ' + entryNames + ' everywhere you confirm. Restart the apps afterwards, then start a new chat.';
+    if (action === 'uninstall') return 'Prompts Y/n for each client and removes only the ' + entryNames + ' entries you confirm — every other MCP server entry is kept. Restart the apps afterwards.';
+    return 'Prompts Y/n for each client (Codex, OpenCode, Claude Code, Claude Desktop, VS Code, Cursor) — answer n to skip the ones you don\\'t use. Installs ' + entryNames + ' everywhere you confirm. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
+  }
   if (action === 'update') return 'Safe to re-run — replaces only the ' + entryNames + ' entry, keeps every other entry. Run it, restart the app, start a new chat.';
   if (action === 'uninstall') return 'Removes only the ' + entryNames + ' entry — every other MCP server entry is kept. Restart the app afterwards.';
   return 'Writes the ' + entryNames + ' entry for your client. Needs sh + node 22+ on the client machine (PowerShell + node on Windows).';
@@ -283,7 +295,8 @@ function tdeiBuildCommand() {
       : TDEI_NPX_PREFIX + ' --env ' + env + (spec === 'both' ? '' : ' --profile ' + spec) + ' --gateway ' + TDEI_ORIGIN;
   } else {
     const setupBase = tdeiSetupBase(names.primary);
-    const scriptPath = action === 'install' ? client : action + '/' + client;
+    const who = method === 'all' ? 'all' : client;
+    const scriptPath = action === 'install' ? who : action + '/' + who;
     const withQuery = names.extra.length > 0 ? '?with=' + names.extra.join(',') : '';
     const url = setupBase + '/' + scriptPath + withQuery;
     cmd = os === 'ps1'
@@ -294,7 +307,9 @@ function tdeiBuildCommand() {
   document.getElementById('tdei-hint').textContent = tdeiHint(method, action, entryNames);
   document.querySelectorAll('[data-entry-name]').forEach((el) => { el.textContent = entryNames; });
   const showClient = method === 'script';
-  document.querySelectorAll('[data-script-only]').forEach((el) => { el.style.display = showClient ? '' : 'none'; });
+  document.querySelectorAll('[data-client-only]').forEach((el) => { el.style.display = showClient ? '' : 'none'; });
+  const showShell = method !== 'npx';
+  document.querySelectorAll('[data-script-only]').forEach((el) => { el.style.display = showShell ? '' : 'none'; });
 }
 document.getElementById('tdei-env').value = TDEI_DEFAULT_ENV;
 ['tdei-env', 'tdei-spec', 'tdei-method', 'tdei-harness', 'tdei-os', 'tdei-action'].forEach((id) => {

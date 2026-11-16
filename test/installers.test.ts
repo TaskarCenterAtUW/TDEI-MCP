@@ -125,8 +125,10 @@ test("a published npm spec replaces the git fallback everywhere", async () => {
   try {
     const { renderStatusPage } = await import("../src/http-status-page.js");
     const page = renderStatusPage(GATEWAY, "/mcp", CORE, "core");
-    assert.match(page, /npx -y tdei-mcp@0\.1\.42 setup --env dev --gateway/);
+    assert.match(page, /npx -y tdei-mcp@0\.1\.42 setup/);
     assert.doesNotMatch(page, /github:TaskarCenterAtUW\/TDEI-MCP/);
+    // Shell script stays the default (no-JS) command even with an npm spec.
+    assert.match(page, /curl -fsSL '.*\/setup\/codex\?with=.*' \| sh/);
   } finally {
     delete process.env["TDEI_NPX_PACKAGE"];
   }
@@ -135,8 +137,10 @@ test("a published npm spec replaces the git fallback everywhere", async () => {
 test("the connector status page does not hand out a full-SHA npx command", async () => {
   const { renderStatusPage } = await import("../src/http-status-page.js");
   const page = renderStatusPage(GATEWAY, "/mcp", CORE, "core");
-  assert.match(page, /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[a-f0-9]{7,39} setup --env dev --gateway/);
+  assert.match(page, /npx -y github:TaskarCenterAtUW\/TDEI-MCP#[a-f0-9]{7,12} setup/);
   assert.doesNotMatch(page, new RegExp(`TDEI-MCP#${SHA}`));
+  // Shell script is the default (no-JS) command; npx stays available via the builder.
+  assert.match(page, /curl -fsSL '.*\/setup\/codex\?with=.*' \| sh/);
 });
 
 test("install.sh configures every supported client and keeps other servers", () => {

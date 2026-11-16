@@ -17,6 +17,9 @@ const SETUP_CLIENTS: readonly SetupClientTarget[] = [
   "cursor",
 ];
 
+/** Space-separated client list the interactive "install to all" wrappers loop over. */
+const ALL_CLIENTS_WORDS = "codex opencode claude-cli claude-desktop vscode cursor";
+
 export function isSetupClientTarget(value: string): value is SetupClientTarget {
   return (SETUP_CLIENTS as readonly string[]).includes(value);
 }
@@ -570,7 +573,7 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
     windowsHide: true,
   });
   child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (stays running so client-initiated sign-ins always find it; redirects the browser to this gateway and any other installed TDEI gateway)\`);
+  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (exits after 10 min idle so the shared port stays free for other local backends; restarted on demand at the next sign-in; redirects the browser to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 
@@ -618,6 +621,17 @@ export function renderSetupOverview(
     "  # Cursor (~/.cursor/mcp.json)",
     `  curl -fsSL ${setupBase}/cursor | sh`,
     "",
+    "Install to every client at once — one command prompts Y/n for each client",
+    "(answer n to skip the ones you don't use; a missing config is created):",
+    "",
+    `  curl -fsSL ${setupBase}/all | sh`,
+    "",
+    'Non-interactive (CI, colleagues): curl -fsSL .../all | TDEI_CLIENTS="codex cursor" sh',
+    "configures exactly those clients without prompting (comma or space separated).",
+    "(Set the variable on sh, after the pipe — before curl it never reaches the script.)",
+    'PowerShell: $env:TDEI_CLIENTS = "codex,cursor"; then run the all.ps1 command above.',
+
+    "",
     "Windows (PowerShell 5.1+ with node on PATH) — run one of these:",
     "",
     "  # Codex (%USERPROFILE%\\.codex\\config.toml)",
@@ -638,9 +652,13 @@ export function renderSetupOverview(
     "  # Cursor (%USERPROFILE%\\.cursor\\mcp.json)",
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/cursor.ps1 | iex`,
     "",
+    "  # Every client at once (prompts Y/n for each client)",
+    `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/all.ps1 | iex`,
+    "",
     "Update / reinstall (MCP broken after a server move? run this, then restart the app):",
     `Safe to re-run — replaces only the ${mcpName} entry, keeps every other entry.`,
-    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor):",
+    "Swap in your client (codex, opencode, claude-cli, claude-desktop, vscode, cursor — or all",
+    "for every client with a Y/n prompt each):",
     "",
     `  curl -fsSL ${setupBase}/update/codex | sh`,
     `  Set-ExecutionPolicy Bypass -Scope Process -Force; irm ${setupBase}/update/codex.ps1 | iex`,
@@ -684,6 +702,196 @@ export function renderSetupOverview(
   ].join("\n");
 }
 
+/** Interactive "every client" installer (POSIX sh): prompts Y/n per client so the user can skip ones they don't use. */
+function renderAllClientsSetupScript(
+  baseUrl: string,
+  callbackPort = 8765,
+  action: SetupScriptAction = "install",
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+  extraNames: readonly string[] = [],
+): string {
+  const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
+
+  return `#!/usr/bin/env sh
+set -eu
+
+MCP_URL=${JSON.stringify(mcpUrl)}
+REMOTE_CALLBACK_URL=${JSON.stringify(remoteCallbackUrl)}
+CALLBACK_PORT=${JSON.stringify(String(callbackPort))}
+ACTION=${JSON.stringify(action)}
+SERVER_NAME=${JSON.stringify(mcpName)}
+PROFILE=${JSON.stringify(profile)}
+EXTRA_ENTRIES=${JSON.stringify(extra.join(" "))}
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Error: node is required on the client machine to configure MCP clients." >&2
+  exit 1
+fi
+
+case "$ACTION" in
+  update) VERB="Update";;
+  uninstall) VERB="Remove";;
+  *) VERB="Install";;
+esac
+
+# Presence check only (decides the prompt tag); a missing config is created.
+client_found() {
+  case "$1" in
+    codex) [ -e "$HOME/.codex/config.toml" ] || [ -d "$HOME/.codex" ];;
+    opencode) [ -e "$HOME/.config/opencode/opencode.json" ];;
+    claude-cli) [ -e "$HOME/.claude.json" ];;
+    claude-desktop)
+      if [ "$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then
+        [ -e "$HOME/Library/Application Support/Claude/claude_desktop_config.json" ]
+      else
+        [ -e "$HOME/.config/Claude/claude_desktop_config.json" ]
+      fi;;
+    vscode)
+      if [ "$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then
+        [ -e "$HOME/Library/Application Support/Code/User/mcp.json" ]
+      else
+        [ -e "$HOME/.config/Code/User/mcp.json" ]
+      fi;;
+    cursor) [ -e "$HOME/.cursor/mcp.json" ];;
+    *) return 1;;
+  esac
+}
+
+CLIENTS="${ALL_CLIENTS_WORDS}"
+SELECTED=""
+# Automation escape hatch: TDEI_CLIENTS="codex cursor" (space or comma separated)
+# skips the prompts and configures exactly those clients.
+if [ -n "\${TDEI_CLIENTS:-}" ]; then
+  for C in $(printf "%s" "$TDEI_CLIENTS" | tr ',' ' '); do
+    case " $CLIENTS " in
+      *" $C "*) SELECTED="$SELECTED $C";;
+      *) echo "Warning: unknown client '$C' ignored (choose from: $CLIENTS).";;
+    esac
+  done
+# curl | sh leaves stdin on the pipe, so prompts read from the terminal.
+elif { : </dev/tty; } 2>/dev/null; then
+  for C in $CLIENTS; do
+    if client_found "$C"; then TAG="detected on this machine"; else TAG="not detected - config will be created"; fi
+    printf "%s for %s (%s)? [Y/n] " "$VERB" "$C" "$TAG" >/dev/tty 2>/dev/null || true
+    ANS=""
+    # A failed read (terminal went away, EOF) skips the client; only an answer or a bare Enter selects it.
+    if IFS= read -r ANS </dev/tty 2>/dev/null; then
+      case "$ANS" in
+        [nN]|[nN][oO]) echo "Skipping $C.";;
+        *) SELECTED="$SELECTED $C";;
+      esac
+    else
+      echo "Skipping $C (no answer from the terminal)."
+    fi
+  done
+else
+  echo "No usable terminal to prompt on, so nothing was changed." >&2
+  echo "Name the clients explicitly: curl -fsSL <this url> | TDEI_CLIENTS='codex cursor' sh" >&2
+  exit 1
+fi
+
+if [ -z "$SELECTED" ]; then
+  echo "Nothing selected - nothing to do."
+  exit 0
+fi
+
+run_client() {
+  CLIENT="$1"
+  # EXTRA_ENTRIES is deliberately unquoted: it is a space-separated list of name|profile|url words.
+  set -f
+  # shellcheck disable=SC2086
+  node - "$CLIENT" "$MCP_URL" "$REMOTE_CALLBACK_URL" "$CALLBACK_PORT" "$ACTION" "$SERVER_NAME" "$PROFILE" $EXTRA_ENTRIES <<'EOF'
+${CLIENT_SETUP_JS}EOF
+}
+
+for CLIENT in $SELECTED; do
+  run_client "$CLIENT"
+done
+`;
+}
+
+/** Interactive "every client" installer (PowerShell): prompts Y/n per client so the user can skip ones they don't use. */
+function renderAllClientsSetupPowershell(
+  baseUrl: string,
+  callbackPort = 8765,
+  action: SetupScriptAction = "install",
+  basePath = "/mcp",
+  gatewaySlug?: string,
+  profile: TdeiServerProfile = "core",
+  extraNames: readonly string[] = [],
+): string {
+  const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
+  const mcpName = clientMcpName(gatewaySlug);
+  const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
+
+  return `# TDEI MCP setup for every client (${action}, entry: ${mcpName})
+# Prompts for each client so you can skip the ones you don't use.
+# Run with: Set-ExecutionPolicy Bypass -Scope Process -Force; irm <server>/mcp/setup/${setupActionPath("all", action)}.ps1 | iex
+$ErrorActionPreference = "Stop"
+
+$McpUrl = ${psQuote(mcpUrl)}
+$RemoteCallbackUrl = ${psQuote(remoteCallbackUrl)}
+$CallbackPort = ${Number(callbackPort) || 8765}
+$Action = ${psQuote(action)}
+$ServerName = ${psQuote(mcpName)}
+$Profile = ${psQuote(profile)}
+$ExtraEntries = @(${extra.map(psQuote).join(", ")})
+$Clients = @(${SETUP_CLIENTS.map((c) => psQuote(c)).join(", ")})
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error "node is required on this machine to configure MCP clients. Install Node.js 22+ from https://nodejs.org/ and re-run this script."
+  exit 1
+}
+
+function Test-ClientFound($C) {
+  switch ($C) {
+    'codex' { return ((Test-Path (Join-Path $env:USERPROFILE '.codex\\config.toml')) -or (Test-Path (Join-Path $env:USERPROFILE '.codex'))) }
+    'opencode' { return (Test-Path (Join-Path $env:USERPROFILE '.config\\opencode\\opencode.json')) }
+    'claude-cli' { return (Test-Path (Join-Path $env:USERPROFILE '.claude.json')) }
+    'claude-desktop' { return (Test-Path (Join-Path $env:APPDATA 'Claude\\claude_desktop_config.json')) }
+    'vscode' { return (Test-Path (Join-Path $env:APPDATA 'Code\\User\\mcp.json')) }
+    'cursor' { return (Test-Path (Join-Path $env:USERPROFILE '.cursor\\mcp.json')) }
+  }
+  return $false
+}
+
+$Verb = switch ($Action) { 'update' { 'Update' } 'uninstall' { 'Remove' } default { 'Install' } }
+
+$Selected = @()
+if ($env:TDEI_CLIENTS) {
+  foreach ($C in ($env:TDEI_CLIENTS -split '[,\\s]+' | Where-Object { $_ })) {
+    if ($Clients -contains $C) { $Selected += $C } else { Write-Host "Warning: unknown client '$C' ignored (choose from: $($Clients -join ', '))." }
+  }
+} else {
+foreach ($C in $Clients) {
+  $Tag = if (Test-ClientFound $C) { 'detected on this machine' } else { 'not detected - config will be created' }
+  $Ans = ''
+  try { $Ans = Read-Host "$Verb for $C ($Tag)? [Y/n]" } catch { $Ans = 'n' }
+  if ($Ans -match '^[nN]') { Write-Host "Skipping $C." } else { $Selected += $C }
+}
+}
+if ($Selected.Count -eq 0) { Write-Host 'Nothing selected - nothing to do.'; exit 0 }
+
+$setupJs = @'
+${CLIENT_SETUP_JS}'@
+
+$tempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("tdei-mcp-setup-" + [Guid]::NewGuid().ToString("N") + ".cjs")
+Set-Content -Path $tempFile -Value $setupJs -Encoding utf8NoBOM
+try {
+  foreach ($C in $Selected) {
+    & node $tempFile $C $McpUrl $RemoteCallbackUrl "$CallbackPort" $Action $ServerName $Profile @ExtraEntries
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
+} finally {
+  Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
+}
+`;
+}
+
 export function renderClientSetupScript(
   client: SetupScriptTarget,
   baseUrl: string,
@@ -694,6 +902,9 @@ export function renderClientSetupScript(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "all" && action !== "cleanup") {
+    return renderAllClientsSetupScript(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
+  }
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
@@ -733,6 +944,9 @@ export function renderClientSetupPowershell(
   profile: TdeiServerProfile = "core",
   extraNames: readonly string[] = [],
 ): string {
+  if (client === "all" && action !== "cleanup") {
+    return renderAllClientsSetupPowershell(baseUrl, callbackPort, action, basePath, gatewaySlug, profile, extraNames);
+  }
   const { origin, mcpUrl, remoteCallbackUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
   const extra = extraEntryArgs(extraNames, origin, basePath, gatewaySlug?.trim() || undefined, mcpName);
