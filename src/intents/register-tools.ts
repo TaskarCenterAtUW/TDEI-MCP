@@ -364,6 +364,12 @@ export function registerSemanticTools(
   server: McpServer,
   module: SemanticIntentModule,
   contextProvider: RequestContextProvider = () => ({}),
+  /**
+   * Pre-call auth gate. When provided it runs before every tool handler and
+   * throws (via formatError) when the session holds no usable token, so no
+   * tool call proceeds upstream unauthenticated.
+   */
+  authGate: () => Promise<void> = async () => undefined,
 ): void {
   let registered = registeredToolsByServer.get(server);
   if (!registered) {
@@ -387,6 +393,7 @@ export function registerSemanticTools(
       { description: describeWithFields(name, description, Object.keys(schema.shape)), inputSchema: schema.shape },
       (async (args: unknown) => {
         try {
+          await authGate();
           return jsonIntentResult(await invoke(args, contextProvider()));
         } catch (error) {
           return formatError(error);

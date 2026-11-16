@@ -118,6 +118,12 @@ export class OpenApiToolsLifecycle {
     private readonly openApiSession: OpenApiSession,
     private readonly registrar: OpenApiToolRegistrar,
     private readonly downloads?: DownloadHandler,
+    /**
+     * Pre-call auth gate. When provided it runs before every tool call and
+     * throws when the session holds no usable token, so no call proceeds
+     * upstream unauthenticated.
+     */
+    private readonly ensureAuth?: () => Promise<void>,
   ) {}
 
   load(): Promise<"loaded" | "already-loaded"> {
@@ -143,6 +149,8 @@ export class OpenApiToolsLifecycle {
   async callTool(tool: string, input: Record<string, unknown>): Promise<unknown> {
     // Only load/reload/logout are serialized. The call itself runs outside the
     // queue so a slow upstream request never blocks unrelated tool calls.
+    // Auth gate first: never run a tool (or embed a bearer) without a session.
+    if (this.ensureAuth) await this.ensureAuth();
     if (this.state !== "loaded") {
       await this.serialize(() => this.ensureLoadedLocked());
     }

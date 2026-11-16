@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { HttpTdeiOperations } from "./adapters/http-tdei-operations.js";
 import { BUILD } from "./build-info.js";
 import type { AuthManager } from "./auth/auth-manager.js";
+import { ensureSessionAuth } from "./auth/require-auth.js";
 import { getConfig } from "./config.js";
 import { tdeiServerInstructions, type TdeiServerProfile } from "./intents/server-instructions.js";
 import { registerSemanticTools } from "./intents/register-tools.js";
@@ -107,7 +108,9 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
   const profile = options.profile ?? "core";
   // The semantic tdei_* tools talk to the TDEI core API; a workspace server has
   // its own backend and exposes only its OpenAPI tools.
-  if (profile === "core") {
+  // Without a session auth manager (per-request bearer mode) there is no
+  // session to gate on: the bearer is validated per request instead.
+  if (profile === "core" && !auth) {
     registerSemanticTools(server, module, accessToken !== undefined ? () => ({ accessToken }) : undefined);
   }
 
@@ -119,12 +122,26 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
       bindCallbackListener,
       ...(browserRedirectUri ? { redirectUri: browserRedirectUri } : {}),
     };
+    // Pre-call auth gate: no tool runs without a usable session token. When
+    // the session is signed out it starts (or reuses) the browser login and
+    // reports its copy-pasteable loginUrl instead of failing mid-call.
+    const authGate = (): Promise<void> =>
+      ensureSessionAuth(auth, {
+        ...ssoBrowserOptions,
+        preflight: true,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+    if (profile === "core") {
+      registerSemanticTools(server, module, accessToken !== undefined ? () => ({ accessToken }) : undefined, authGate);
+    }
     const openApiLifecycle = options.openApiMcpClient
       ? new OpenApiToolsLifecycle(
           server,
           auth,
           options.openApiMcpClient,
           profile === "workspace" ? registerTdeiWorkspaceOpenApiTools : registerTdeiOpenApiTools,
+          undefined,
+          authGate,
         )
       : undefined;
 

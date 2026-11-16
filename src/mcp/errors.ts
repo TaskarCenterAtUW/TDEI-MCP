@@ -23,6 +23,24 @@ export function tokenExpiredText(): string {
   return signInText();
 }
 
+/**
+ * Thrown when a tool call needs a signed-in session but none is usable.
+ * Carries the browser URLs so the agent can show a copy-pasteable sign-in
+ * link instead of sending the user to client Settings. formatError() copies
+ * them into the JSON payload.
+ */
+export class SsoRequiredError extends Error {
+  loginUrl?: string | undefined;
+  callbackUrl?: string | undefined;
+
+  constructor(message: string, options?: { loginUrl?: string | undefined; callbackUrl?: string | undefined }) {
+    super(message);
+    this.name = "SsoRequiredError";
+    if (options?.loginUrl !== undefined) this.loginUrl = options.loginUrl;
+    if (options?.callbackUrl !== undefined) this.callbackUrl = options.callbackUrl;
+  }
+}
+
 const TRUNCATION_HINT = "Output exceeded 256KB; refine filters or call a narrower operation.";
 
 type TdeiErrorCode =
@@ -50,6 +68,10 @@ interface TdeiMcpError {
   hint: string;
   retryable: boolean;
   stepRef?: TdeiErrorStepRef;
+  /** Copy-pasteable browser sign-in URL, present on TDEI_SSO_REQUIRED when a login is pending. */
+  loginUrl?: string;
+  /** Loopback callback the browser returns to; paste its address-bar URL into tdei_sso_complete if unreachable. */
+  callbackUrl?: string;
 }
 
 interface BackendShaped {
@@ -72,6 +94,13 @@ function extractBackendMessage(body: unknown): string | undefined {
 // getErrorMessage(). That module is gone: nothing imported its request
 // helper, and workflow steps must go through the version-gated child.
 function inferCode(err: unknown): { code: TdeiErrorCode; message: string; retryable: boolean } {
+  if (err instanceof SsoRequiredError) {
+    return {
+      code: "TDEI_SSO_REQUIRED",
+      message: err.message,
+      retryable: false,
+    };
+  }
   const message = err instanceof Error ? err.message : String(err ?? "");
   const status =
     typeof err === "object" && err !== null && typeof (err as BackendShaped).status === "number"
@@ -177,6 +206,10 @@ export function formatError(err: unknown): { isError: true; content: [{ type: "t
     retryable: inferred.retryable,
     ...(stepRef ? { stepRef } : {}),
   };
+  if (err instanceof SsoRequiredError) {
+    if (err.loginUrl !== undefined) payload.loginUrl = err.loginUrl;
+    if (err.callbackUrl !== undefined) payload.callbackUrl = err.callbackUrl;
+  }
   return {
     isError: true,
     content: [{ type: "text" as const, text: JSON.stringify(payload) }],
