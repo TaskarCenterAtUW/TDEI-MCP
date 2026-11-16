@@ -851,7 +851,10 @@ if [ -n "\${TDEI_CLIENTS:-}" ]; then
     esac
   done
 # curl | sh leaves stdin on the pipe, so prompts read from the terminal.
-elif { : </dev/tty; } 2>/dev/null; then
+# The probe runs in a subshell: on dash a failed /dev/tty redirection inside
+# { ...; } is fatal to the whole script (exit 2), while a subshell failure is
+# just a false condition — bash treats both the same, so this is portable.
+elif ( : </dev/tty ) 2>/dev/null; then
   for C in $CLIENTS; do
     if client_found "$C"; then TAG="detected on this machine"; else TAG="not detected - config will be created"; fi
     printf "%s for %s (%s)? [Y/n] " "$VERB" "$C" "$TAG" >/dev/tty 2>/dev/null || true
