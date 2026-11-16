@@ -9,11 +9,14 @@ import { publicAuthCallbackUrl } from "../sso-public-callback.js";
  * http://127.0.0.1:8765/callback, so a small relay on the CLIENT machine
  * forwards that hit to the hosted gateway(s).
  *
- * Lifecycle: the installer starts the relay and it stays running. A
- * client-initiated OAuth flow opens the browser at the loopback callback with
- * no agent hook to start anything first, so an on-demand-only relay produces
- * ERR_CONNECTION_REFUSED on every later login. Starting it twice is safe: a
- * new install replaces the previous relay before binding the port.
+ * Lifecycle: the installer starts the relay and it stays running while
+ * sign-ins are happening, then exits after 10 minutes idle so the shared
+ * loopback port (127.0.0.1:8765) is freed for other tools on the same
+ * machine (for example the TDEI-Orchestrator backend, which must bind 8765
+ * itself during its own login). The next TDEI sign-in restarts it on demand
+ * (see ensureCallbackRelay, called from the login path, or re-run the
+ * installer / the one-liner in the login message). Starting it twice is
+ * safe: a new start replaces the previous relay before binding the port.
  *
  * One relay serves every environment. Installers merge their gateway into
  * ~/.tdei-mcp/sso-callback-targets.json (most-recent-first); the relay reads
@@ -25,6 +28,8 @@ import { publicAuthCallbackUrl } from "../sso-public-callback.js";
  * production side by side on one machine with a single loopback port.
  */
 export const RELAY_PORT = 8765;
+/** Idle time after which the relay exits so the loopback port is freed. */
+export const RELAY_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const RELAY_SCRIPT_NAME = "sso-callback-relay.cjs";
 export const RELAY_TARGETS_NAME = "sso-callback-targets.json";
 export const RELAY_PID_NAME = "sso-callback-relay.pid";
@@ -93,17 +98,34 @@ function targets() {
   return FALLBACK;
 }
 
-// Long-lived listener. Client-initiated OAuth (Claude Desktop/Cursor/VS Code)
-// redirects the browser to this loopback URL without any chance for the agent
-// to start a helper first, so the relay must already be listening. It is
-// started by the installer and stays up until the machine restarts or another
-// install replaces it. Every hop is a browser navigation (302), never a
-// server-side proxy, because the gateway's pending login lives in an
-// origin-scoped tdei_oauth cookie that only the browser can send.
+// Long-lived while needed. Client-initiated OAuth (Claude Desktop/Cursor/VS
+// Code) redirects the browser to this loopback URL without any chance for
+// the agent to start a helper first, so the relay must already be listening
+// when a sign-in starts. It is started by the installer (or re-started on
+// demand at the next login) and exits after IDLE_TIMEOUT_MS without traffic
+// so the shared loopback port is freed for other local tools. Every hop is
+// a browser navigation (302), never a server-side proxy, because the
+// gateway's pending login lives in an origin-scoped tdei_oauth cookie that
+// only the browser can send.
 try { fs.mkdirSync(relayDir, { recursive: true }); } catch {}
 try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch {}
 
 const TRY_PARAM = ${JSON.stringify(RELAY_TRY_PARAM)};
+const IDLE_TIMEOUT_MS = ${RELAY_IDLE_TIMEOUT_MS};
+let idleTimer = null;
+function armIdleTimer() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    try {
+      const recorded = fs.readFileSync(pidFile, "utf-8").trim();
+      if (recorded === String(process.pid)) { try { fs.unlinkSync(pidFile); } catch {} }
+    } catch {}
+    server.close(() => process.exit(0));
+    // If connections keep the server open, force out shortly after.
+    setTimeout(() => process.exit(0), 1000).unref();
+  }, IDLE_TIMEOUT_MS);
+  if (idleTimer.unref) idleTimer.unref();
+}
 
 function noPendingPage() {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8" />' +
@@ -144,6 +166,7 @@ function forward(url, res) {
 }
 
 const server = http.createServer((req, res) => {
+  armIdleTimer();
   const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
   if (req.method === "GET" && (url.pathname === "/callback" || url.pathname === "/auth/callback")) {
     forward(url, res);
@@ -169,6 +192,7 @@ server.on("error", (error) => {
   process.exit(0);
 });
 server.listen(port, "127.0.0.1");
+armIdleTimer();
 `;
 }
 
@@ -220,8 +244,9 @@ export function stopCallbackRelay(home: string): boolean {
 }
 
 /**
- * Writes the relay files and starts the relay detached. It stays running so
- * a client-initiated sign-in can reach the loopback callback at any time.
+ * Writes the relay files and starts the relay detached. It stays running
+ * while sign-ins are happening and exits after 10 minutes idle (see
+ * RELAY_IDLE_TIMEOUT_MS); the next login restarts it on demand.
  * Returns the script path.
  */
 export function startCallbackRelay(home: string, gatewayOrigin: string, port = RELAY_PORT): string {
@@ -229,4 +254,47 @@ export function startCallbackRelay(home: string, gatewayOrigin: string, port = R
   const { script } = writeRelayFiles(home, gatewayOrigin, port);
   spawn(process.execPath, [script], { detached: true, stdio: "ignore", windowsHide: true }).unref();
   return script;
+}
+
+/**
+ * On-demand restart: ensure the loopback relay is listening, starting it
+ * when a TDEI tool call finds the client signed out and the relay has
+ * exited after its idle timeout (or was never installed). Returns true when
+ * the relay is (now) listening, false when the port is held by something
+ * else (for example another backend such as TDEI-Orchestrator) or the relay
+ * could not be started.
+ */
+export async function ensureCallbackRelay(
+  home: string,
+  gatewayOrigin: string,
+  port = RELAY_PORT,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ listening: boolean; started: boolean }> {
+  try {
+    const health = await fetchImpl(`http://127.0.0.1:${port}/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (health.ok) return { listening: true, started: false };
+  } catch {
+    // Not listening: fall through and start it.
+  }
+  try {
+    startCallbackRelay(home, gatewayOrigin, port);
+  } catch {
+    return { listening: false, started: false };
+  }
+  // Wait briefly for the listen socket (or a foreign holder to win).
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    try {
+      const health = await fetchImpl(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      await health.body?.cancel().catch(() => undefined);
+      if (health.ok) return { listening: true, started: true };
+    } catch {
+      // Not up yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return { listening: false, started: true };
 }

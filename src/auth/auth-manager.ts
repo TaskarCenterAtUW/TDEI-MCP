@@ -352,8 +352,11 @@ export class AuthManager {
       try {
         await bindLoopback();
       } catch (error) {
+        const holding = isRelayPortConflict(error)
+          ? " Another process already holds the shared Keycloak redirect port 127.0.0.1:8765 (check `lsof -nP -iTCP:8765`): it may be the TDEI SSO relay (it exits after 10 minutes idle — wait or stop it), another TDEI login in progress, or a different local backend such as TDEI-Orchestrator, which must bind 8765 itself during its own login. Stop that process (or wait for the idle relay to exit), then start the sign-in again."
+          : "";
         throw new Error(
-          `Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}`,
+          `Unable to start TDEI SSO callback server at ${callbackUrl.origin}: ${error instanceof Error ? error.message : String(error)}.${holding}`,
           { cause: error },
         );
       }

@@ -182,8 +182,9 @@ test("POST /mcp without hardcoded token exposes tdei_sso_login, completes login 
     assert.equal(loginCall.status, 200);
     const loginText = await loginCall.text();
     assert.match(loginText, /login_pending/);
-    // The agent must start the on-demand relay before opening the URL —
-    // nothing keeps the loopback port listening otherwise.
+    // The agent must start the on-demand relay before opening the URL when it
+    // has exited after its idle timeout — nothing keeps the loopback port
+    // listening otherwise.
     assert.match(loginText, /sso-callback-relay\.cjs/);
     assert.match(loginText, /tdei_sso_complete/);
 

@@ -655,7 +655,7 @@ export async function serveHttp(
             clientSlug = parts[1];
           }
           const client =
-            clientSlug === "all" && action === "cleanup"
+            clientSlug === "all"
               ? ("all" as const)
               : clientSlug !== undefined
                 ? normalizeSetupClientTarget(clientSlug)
@@ -663,7 +663,7 @@ export async function serveHttp(
           if (!client) {
             sendJson(response, 404, {
               code: "TDEI_SETUP_CLIENT_UNKNOWN",
-              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (cleanup/all covers every client), e.g. update/codex.`,
+              message: `Unknown setup client "${rawClient}". Supported clients: codex, opencode, claude-cli, claude-desktop, vscode, cursor, all (append .ps1 for the Windows PowerShell installer). Prefix with update/ to reinstall, uninstall/ to remove the ${mcpName} entry, or cleanup/ to remove every tdei / tdei-* entry (e.g. update/codex, update/all, cleanup/all). install/all and update/all prompt Y/n for each client so you can skip ones you don't use.`,
             });
             return;
           }
