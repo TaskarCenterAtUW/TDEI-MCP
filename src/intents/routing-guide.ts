@@ -87,6 +87,7 @@ export const TOOL_ROUTING: readonly ToolRoute[] = [
 
 /** Cases where two tools look alike and a wrong pick is easy. */
 const ROUTING_DISAMBIGUATION: readonly string[] = [
+  'Auth: "logout", "log out", "logoff", "sign out", "disconnect", "tdei logout", "tdei sign out", "sso logout" and "sso logoff" all mean the same action: call tdei_sso_logout (tdei_logout is the same tool, GET /api/v1/sso-logout). "login", "log in", "sign in", "connect", "tdei login", "tdei sign in", "tdei connect", "connect to tdei" and "sso login" all mean call tdei_sso_login. If the user asks to log in / connect without naming an environment and several are connected, ask which environment (dev, stage, prod) first. Never ask which login/logout tool.',
   'Jobs vs actions: "upload status", "validation status", "recent uploads" or "did my upload finish" ask about a job, so use tdei_list_jobs. Only "upload this" or "validate this" with a file is an action.',
   'Dataset vs feedback: "download feedbacks" is tdei_download_feedbacks, never tdei_download_dataset. "Download the dataset" is tdei_download_dataset.',
   "Identity vs project groups: tdei_list_my_project_groups lists groups visible to the login, not membership. Use tdei_my_project_group_roles for 'my roles in <project group>' or which groups the user belongs to, and tdei_get_my_identity for the user's own email or token roles.",

@@ -371,12 +371,13 @@ export async function createServer(
     },
   );
   server.registerTool(
-    "tdei_logout",
+    "tdei_sso_logout",
     {
-      description: "Log out of the current TDEI session.",
+      description:
+        "Log out of the current TDEI SSO session (GET /api/v1/sso-logout). Clears local tokens and returns the browser logout URL.",
       inputSchema: z.object({}),
     },
-    async (_args) => {
+    async () => {
       try {
         const logout = await openApiToolsLifecycle.logout();
 
@@ -399,7 +400,49 @@ export async function createServer(
                   logoutUrl: logout.logoutUrl,
                   callbackUrl: logout.callbackUrl,
                   message:
-                    "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens and the OpenAPI tool session have already been cleared.",
+                    "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens and the OpenAPI tool session have already been cleared.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "tdei_logout",
+    {
+      description: "Alias of tdei_sso_logout: log out of the current TDEI SSO session (GET /api/v1/sso-logout).",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const logout = await openApiToolsLifecycle.logout();
+
+        void logout.completion
+          .then(() => console.error("[auth] SSO logout successful"))
+          .catch((error) => {
+            console.error(
+              "[auth] SSO logout did not complete:",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "logout_pending",
+                  logoutUrl: logout.logoutUrl,
+                  callbackUrl: logout.callbackUrl,
+                  message:
+                    "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens and the OpenAPI tool session have already been cleared.",
                 },
                 null,
                 2,

@@ -307,9 +307,10 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
     );
 
     server.registerTool(
-      "tdei_logout",
+      "tdei_sso_logout",
       {
-        description: "Log out of the current TDEI session.",
+        description:
+          "Log out of the current TDEI SSO session (GET /api/v1/sso-logout). Clears local tokens and returns the browser logout URL.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -328,7 +329,42 @@ export function createHttpSemanticServer(options: HttpSemanticServerOptions): Mc
                     logoutUrl: logout.logoutUrl,
                     callbackUrl: logout.callbackUrl,
                     message:
-                      "Open logoutUrl in your browser to complete TDEI SSO logout. Local tokens have been cleared.",
+                      "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens have been cleared.",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          return errorResult(error);
+        }
+      },
+    );
+    server.registerTool(
+      "tdei_logout",
+      {
+        description: "Alias of tdei_sso_logout: log out of the current TDEI SSO session (GET /api/v1/sso-logout).",
+        inputSchema: z.object({}),
+      },
+      async () => {
+        try {
+          const logout = openApiLifecycle
+            ? await openApiLifecycle.logout(ssoBrowserOptions)
+            : await auth.logout(ssoBrowserOptions);
+          void logout.completion.catch(() => undefined);
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "logout_pending",
+                    logoutUrl: logout.logoutUrl,
+                    callbackUrl: logout.callbackUrl,
+                    message:
+                      "Open logoutUrl in your browser to complete TDEI SSO logout (GET /api/v1/sso-logout). Local tokens have been cleared.",
                   },
                   null,
                   2,

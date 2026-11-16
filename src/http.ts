@@ -242,6 +242,7 @@ export const AUTH_FREE_TOOL_NAMES = new Set([
   "tdei_auth_status",
   "tdei_health",
   "tdei_test_authentication",
+  "tdei_sso_logout",
   "tdei_logout",
   "tdei_load_api_tools",
   "tdei_reload_config",
