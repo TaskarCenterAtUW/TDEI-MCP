@@ -478,7 +478,12 @@ test(
       const env = { ...process.env, HOME: home };
       delete env["TDEI_CLIENTS"];
       // detached => new session => no controlling terminal, so /dev/tty cannot be opened.
-      const result = spawnSync("sh", [file], { env, encoding: "utf-8", detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      const result = spawnSync("sh", [file], {
+        env,
+        encoding: "utf-8",
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       assert.equal(result.status, 1);
       assert.match(result.stderr, /nothing was changed/);
       assert.match(result.stderr, /TDEI_CLIENTS='codex cursor' sh/);

@@ -35,7 +35,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@12.6.0",
+  "packageManager": "pnpm@12.21.0",
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:multi": "tsx src/multi-serve.ts",
@@ -75,9 +75,9 @@
     "@stryker-mutator/core": "^10.1.1",
     "@types/node": "^26.6.6",
     "husky": "^9.1.7",
-    "knip": "^6.44.0",
-    "oxlint": "^1.90.0",
-    "prettier": "^3.9.10",
+    "knip": "^6.45.1",
+    "oxlint": "^1.94.0",
+    "prettier": "^3.10.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

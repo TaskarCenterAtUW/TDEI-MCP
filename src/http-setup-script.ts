@@ -600,8 +600,8 @@ export function renderManualEntryText(mcpUrl: string, serverName: string): strin
     "",
     "  1) Streamable HTTP (Codex, Cursor, VS Code, Cline, Aider, Windsurf, Zed, most harnesses):",
     `     {"mcpServers": ${JSON.stringify({ [serverName]: { url: mcpUrl } })}}`,
-    "     VS Code uses the same object under \"servers\" instead of \"mcpServers\".",
-    "     OpenCode uses {\"mcp\": {\"<name>\": {\"type\": \"remote\", \"url\": \"...\"}}}.",
+    '     VS Code uses the same object under "servers" instead of "mcpServers".',
+    '     OpenCode uses {"mcp": {"<name>": {"type": "remote", "url": "..."}}}.',
     "     Codex TOML (~/.codex/config.toml):",
     `     [mcp_servers.${serverName}]`,
     `     url = ${JSON.stringify(mcpUrl)}`,
@@ -618,7 +618,7 @@ function renderOtherSetupScript(
   baseUrl: string,
   basePath = "/mcp",
   gatewaySlug?: string,
-  profile: TdeiServerProfile = "core",
+  _profile: TdeiServerProfile = "core",
 ): string {
   const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
@@ -638,7 +638,7 @@ function renderOtherSetupPowershell(
   baseUrl: string,
   basePath = "/mcp",
   gatewaySlug?: string,
-  profile: TdeiServerProfile = "core",
+  _profile: TdeiServerProfile = "core",
 ): string {
   const { mcpUrl } = setupUrls(baseUrl, basePath, gatewaySlug);
   const mcpName = clientMcpName(gatewaySlug);
