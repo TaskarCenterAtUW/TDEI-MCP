@@ -2,11 +2,12 @@ import { pendingFeaturesNote, pendingToolBanner } from "./pending-features.js";
 import { webUiHandoff } from "../tdei-shared/web-ui-handoffs.js";
 import { coreCompanionNote } from "../tdei-shared/companion-servers.js";
 import { lookupToolInstruction } from "../tdei-shared/register-openapi-tools.js";
+import { shortWorkspaceOperationName } from "./operation-names.js";
 
 /**
  * Extra LLM-facing guidance appended to discovered Workspace OpenAPI tool
- * descriptions. Keys are the SHORT operation name (the FastAPI operationId up
- * to "_api_v1_"), so they survive the long generated suffixes. Facts come from
+ * descriptions. Keys are the final short tool names (the FastAPI operationId up
+ * to "_api_v1_"). Facts come from
  * the Workspaces OpenAPI spec and the TCAT wiki (taskarcenteratuw.github.io/tcat-wiki).
  */
 
@@ -121,11 +122,8 @@ const TDEI_WORKSPACE_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   reset_project: DESTRUCTIVE,
 };
 
-/** "create_workspace_api_v1_workspaces_post" -> "create_workspace". */
-export function shortWorkspaceOperationName(operationName: string): string {
-  const cut = operationName.indexOf("_api_v1_");
-  return cut > 0 ? operationName.slice(0, cut) : operationName;
-}
+/** "create_workspace_api_v1_workspaces_post" -> "create_workspace". Kept here for backwards compat. */
+export { shortWorkspaceOperationName } from "./operation-names.js";
 
 export function augmentWorkspaceToolDescription(operationName: string, description: string | undefined) {
   const short = shortWorkspaceOperationName(operationName);
