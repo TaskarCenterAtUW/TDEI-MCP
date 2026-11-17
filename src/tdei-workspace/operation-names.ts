@@ -1,4 +1,4 @@
-import { defaultOperationName, enforceToolNameLength } from "../openapi/openapi-mcp-client.js";
+import { enforceToolNameLength } from "../openapi/openapi-mcp-client.js";
 
 /**
  * Final MCP tool name for a Workspace API operationId.
@@ -25,6 +25,3 @@ export function shortWorkspaceOperationName(operationName: string): string {
   const cut = operationName.indexOf("_api_v1_");
   return cut > 0 ? operationName.slice(0, cut) : operationName;
 }
-
-// Re-export for callers that only need the default cap.
-export { defaultOperationName };
