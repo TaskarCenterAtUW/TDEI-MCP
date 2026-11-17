@@ -72,9 +72,6 @@ test("workspace client maps long operationIds to short tool names within the lim
     }),
   });
   const { tools } = await client.listTools();
-  assert.deepEqual(
-    tools.map((t) => t.name).sort(),
-    ["get_project_role", "put_project_role"],
-  );
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["get_project_role", "put_project_role"]);
   for (const tool of tools) assert.ok(tool.name.length <= 64);
 });
