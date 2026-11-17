@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { OpenApiMcpClient } from "../openapi/openapi-mcp-client.js";
 import type { TdeiServerProfile } from "../intents/server-instructions.js";
+import { workspaceOperationName } from "../tdei-workspace/operation-names.js";
 import { CompositeOpenApiClient, type OpenApiClientLike } from "./composite-client.js";
 import { userOperationName } from "./operation-names.js";
 
@@ -28,6 +29,7 @@ export function createOpenApiClient({
     apiUrl: config.apiUrl,
     specUrl: config.specUrl,
     headersProvider,
+    ...(profile === "workspace" ? { operationName: workspaceOperationName } : {}),
     ...(fetchImpl ? { fetchImpl } : {}),
     ...(loadSpec ? { loadSpec: () => loadSpec(config.specUrl) } : {}),
   });

@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 
-import { defaultOperationName, OpenApiMcpClient, type OpenApiMcpClientOptions } from "./openapi-mcp-client.js";
+import { defaultOperationName, enforceToolNameLength, OpenApiMcpClient, type OpenApiMcpClientOptions } from "./openapi-mcp-client.js";
 import {
   registerOpenApiTools,
   type OpenApiToolCall,
@@ -40,7 +40,7 @@ export async function createOpenApiMcpServer(options: OpenApiMcpServerOptions): 
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.loadSpec ? { loadSpec: options.loadSpec } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
-    operationName: (operationId) => `${prefix}${defaultOperationName(operationId)}`,
+    operationName: (operationId) => enforceToolNameLength(`${prefix}${defaultOperationName(operationId)}`, `${prefix}${operationId}`),
   });
   const server = new McpServer({ name: options.name, version: options.version });
   const call: OpenApiToolCall = (name, input) => provider.callTool(name, input);

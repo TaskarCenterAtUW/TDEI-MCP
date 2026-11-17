@@ -1,4 +1,5 @@
 import SwaggerParser from "@apidevtools/swagger-parser";
+import { createHash } from "node:crypto";
 import { basename } from "node:path";
 
 import { summarizeFields } from "../mcp/field-summary.js";
@@ -108,8 +109,24 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export const MAX_TOOL_NAME_LENGTH = 64;
+
+/**
+ * Enforce the MCP / OpenAI tool-name limit (64 chars, `^[A-Za-z0-9_-]{1,64}$`).
+ * Names within the limit pass through untouched. Longer names are truncated
+ * with a short hash of the full operationId so they stay stable, unique and
+ * within the limit. Codex sends tools as `mcp__<server>__<tool>`, which is why
+ * even a 75-char workspace name breaks Meta's 64-char check.
+ */
+export function enforceToolNameLength(sanitized: string, operationId: string): string {
+  if (sanitized.length <= MAX_TOOL_NAME_LENGTH) return sanitized;
+  const hash = createHash("sha256").update(operationId).digest("hex").slice(0, 8);
+  return `${sanitized.slice(0, MAX_TOOL_NAME_LENGTH - 9)}_${hash}`;
+}
+
 export function defaultOperationName(operationId: string): string {
-  return operationId.replace(/[^A-Za-z0-9_]/g, "_");
+  const sanitized = operationId.replace(/[^A-Za-z0-9_]/g, "_");
+  return enforceToolNameLength(sanitized, operationId);
 }
 
 function schemaForParameter(parameter: OpenApiParameter): JsonObject {
