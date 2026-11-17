@@ -6,7 +6,11 @@
  * are therefore left out of the tool catalog by default. They stay callable
  * from configured workflows (their schemas are still collected), and can be
  * exposed again with `TDEI_EXPOSE_ALL_RAW_TOOLS=1` or by naming them in an
- * `endpoints.allow` list.
+ * `endpoints.allow` list. The confirm-gated destructive subset
+ * (`ALWAYS_HIDDEN_RAW_OPERATIONS`: union, delete, clone, edit-metadata,
+ * API-key regeneration) stays hidden even under `TDEI_EXPOSE_ALL_RAW_TOOLS=1`
+ * because the raw form bypasses the semantic `confirm:true` gate; only an
+ * explicit `endpoints.allow` entry exposes those.
  *
  * Deliberately NOT listed (no semantic equivalent): `job-download`,
  * `listApiVersions`.
@@ -74,3 +78,21 @@ export const SEMANTIC_COVERED_RAW_OPERATIONS: ReadonlySet<string> = new Set([
 export function exposeAllRawTools(env: NodeJS.ProcessEnv = process.env): boolean {
   return /^(1|true|yes)$/i.test((env.TDEI_EXPOSE_ALL_RAW_TOOLS ?? "").trim());
 }
+
+/**
+ * Confirm-gated destructive operations that stay out of the tool catalog even
+ * when `TDEI_EXPOSE_ALL_RAW_TOOLS=1` is set. Their semantic `tdei_*` wrappers
+ * enforce `confirm:true` (see `confirmGuard` in the semantic intent module);
+ * the raw operations would let the model merge, overwrite, delete or
+ * invalidate without that gate, and would duplicate the union capability the
+ * colleague report flagged (`tdei_union_datasets` vs `osw-union`). Naming one
+ * of these in an `endpoints.allow` list still exposes it (explicit operator
+ * intent); schemas are always collected so workflows can call them.
+ */
+export const ALWAYS_HIDDEN_RAW_OPERATIONS: ReadonlySet<string> = new Set([
+  "osw-union",
+  "deleteDataset",
+  "cloneDataset",
+  "editMetadata",
+  "regenerateApiKey",
+]);
