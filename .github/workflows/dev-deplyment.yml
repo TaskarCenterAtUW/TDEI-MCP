@@ -126,10 +126,11 @@ jobs:
           # rejected. Override per environment with repository/environment vars.
           APP_CPU: ${{ vars.TDEI_APP_CPU || '0.5' }}
           APP_MEMORY: ${{ vars.TDEI_APP_MEMORY || '1Gi' }}
-          # Always on (min 1) so in-process tdei_sso_login sessions survive idle
-          # periods; set TDEI_MIN_REPLICAS=0 to scale to zero and save more. Max
-          # stays 1: sessions live in-process, so a second replica would split them.
-          MIN_REPLICAS: ${{ vars.TDEI_MIN_REPLICAS || '1' }}
+          # 0 = scale to zero when idle (no Always On); the HTTP rule wakes a
+          # replica on the next request. Set TDEI_MIN_REPLICAS=1 to stay always
+          # on. Max stays 1: the tdei_sso_login session lives in-process, so a
+          # second replica would split sessions.
+          MIN_REPLICAS: ${{ vars.TDEI_MIN_REPLICAS || '0' }}
           MAX_REPLICAS: '1'
         run: |
           : "${CONTAINER_APP_NAME:?CONTAINER_APP_NAME secret is not configured}"
@@ -184,8 +185,8 @@ jobs:
             echo "::error::MCP_BASE_URL secret is not configured — cannot verify the deployed build. Failing closed: set it to the public gateway origin (e.g. https://<app>.azurecontainerapps.io) so deploys verify the served build id."
             exit 1
           fi
-          # After a new revision starts (nginx + 6 node children loading their
-          # OpenAPI specs) the first probes may fail; 30 x 20s covers it.
+          # With min-replicas 0 the first probe triggers a cold start (nginx +
+          # 6 node children loading their OpenAPI specs); 30 x 20s covers it.
           for attempt in $(seq 1 30); do
             served_id="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r '"\(.build.version)+\(.build.sha)"')" || true
             if [[ "$served_id" == "$EXPECTED_ID" ]]; then
