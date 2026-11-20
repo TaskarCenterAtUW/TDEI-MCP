@@ -45,7 +45,10 @@ command -v az >/dev/null || { echo "az CLI not found" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq not found" >&2; exit 1; }
 
 SUB="${SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
-SCOPE="/subscriptions/${SUB}"
+# Resource-group scope: works with a deploy principal that has a role on the
+# group only (no subscription-level cost access needed). Queries still filter
+# by ResourceId.
+SCOPE="/subscriptions/${SUB}/resourceGroups/${RG}"
 
 # Portable date math (GNU date on Linux, BSD date on macOS).
 day() { # day <offset-days>  -> YYYY-MM-DD (UTC)
