@@ -126,12 +126,6 @@ jobs:
           # rejected. Override per environment with repository/environment vars.
           APP_CPU: ${{ vars.TDEI_APP_CPU || '0.5' }}
           APP_MEMORY: ${{ vars.TDEI_APP_MEMORY || '1Gi' }}
-          # 0 = scale to zero when idle (no Always On); the HTTP rule wakes a
-          # replica on the next request. Set TDEI_MIN_REPLICAS=1 to stay always
-          # on. Max stays 1: the tdei_sso_login session lives in-process, so a
-          # second replica would split sessions.
-          MIN_REPLICAS: ${{ vars.TDEI_MIN_REPLICAS || '0' }}
-          MAX_REPLICAS: '1'
         run: |
           : "${CONTAINER_APP_NAME:?CONTAINER_APP_NAME secret is not configured}"
           : "${REGISTRY_DOMAIN:?REGISTRY_DOMAIN secret is not configured}"
@@ -149,11 +143,6 @@ jobs:
             --set-env-vars "TDEI_OAUTH_SECRET=secretref:tdei-oauth-secret" \
             --cpu "$APP_CPU" \
             --memory "$APP_MEMORY" \
-            --min-replicas "$MIN_REPLICAS" \
-            --max-replicas "$MAX_REPLICAS" \
-            --scale-rule-name http-wake \
-            --scale-rule-type http \
-            --scale-rule-http-concurrency 50 \
             --only-show-errors \
             --output none
 
@@ -168,6 +157,19 @@ jobs:
             exit 1
           fi
 
+      # Scale policy (HTTP wake, 1h cooldown, min 0 / max 1).
+      # Applied after every deploy because the image update does not carry it.
+      - name: Apply dev scale policy
+        env:
+          CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
+          RESOURCE_GROUP: GaussianRG
+          # 0 = scale to zero when idle (HTTP rule wakes it); 1 = always on.
+          MIN_REPLICAS: ${{ vars.TDEI_MIN_REPLICAS || '0' }}
+          # Max stays 1: the tdei_sso_login session lives in-process, so a
+          # second replica would split sessions.
+          MAX_REPLICAS: '1'
+        run: |
+          bash .github/scripts/set-dev-scale.sh
           az containerapp show \
             --name "$CONTAINER_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
