@@ -121,6 +121,17 @@ jobs:
           REGISTRY_DOMAIN: ${{ secrets.REGISTRY_DOMAIN }}
           REGISTRY_REPO: ${{ secrets.REGISTRY_REPO }}
           IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          # Sizing/scale. Consumption plan only accepts memory = 2 x vCPU
+          # (0.25/0.5Gi, 0.5/1Gi, 0.75/1.5Gi, 1/2Gi ...); 1 vCPU + 0.5Gi is
+          # rejected. Override per environment with repository/environment vars.
+          APP_CPU: ${{ vars.TDEI_APP_CPU || '0.5' }}
+          APP_MEMORY: ${{ vars.TDEI_APP_MEMORY || '1Gi' }}
+          # 0 = scale to zero when idle (no Always On); the HTTP rule wakes a
+          # replica on the next request. Set TDEI_MIN_REPLICAS=1 to stay always
+          # on. Max stays 1: the tdei_sso_login session lives in-process, so a
+          # second replica would split sessions.
+          MIN_REPLICAS: ${{ vars.TDEI_MIN_REPLICAS || '0' }}
+          MAX_REPLICAS: '1'
         run: |
           : "${CONTAINER_APP_NAME:?CONTAINER_APP_NAME secret is not configured}"
           : "${REGISTRY_DOMAIN:?REGISTRY_DOMAIN secret is not configured}"
@@ -136,6 +147,13 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --image "$IMAGE" \
             --set-env-vars "TDEI_OAUTH_SECRET=secretref:tdei-oauth-secret" \
+            --cpu "$APP_CPU" \
+            --memory "$APP_MEMORY" \
+            --min-replicas "$MIN_REPLICAS" \
+            --max-replicas "$MAX_REPLICAS" \
+            --scale-rule-name http-wake \
+            --scale-rule-type http \
+            --scale-rule-http-concurrency 50 \
             --only-show-errors \
             --output none
 
@@ -150,6 +168,12 @@ jobs:
             exit 1
           fi
 
+          az containerapp show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query '{cpu: properties.template.containers[0].resources.cpu, memory: properties.template.containers[0].resources.memory, minReplicas: properties.template.scale.minReplicas, maxReplicas: properties.template.scale.maxReplicas, workloadProfile: properties.workloadProfileName}' \
+            --output table
+
       - name: Wait for deployed build to answer requests
         env:
           MCP_BASE_URL: ${{ secrets.MCP_BASE_URL }}
@@ -161,6 +185,8 @@ jobs:
             echo "::error::MCP_BASE_URL secret is not configured — cannot verify the deployed build. Failing closed: set it to the public gateway origin (e.g. https://<app>.azurecontainerapps.io) so deploys verify the served build id."
             exit 1
           fi
+          # With min-replicas 0 the first probe triggers a cold start (nginx +
+          # 6 node children loading their OpenAPI specs); 30 x 20s covers it.
           for attempt in $(seq 1 30); do
             served_id="$(curl -fsS "$MCP_BASE_URL/tdei-core-dev/health" | jq -r '"\(.build.version)+\(.build.sha)"')" || true
             if [[ "$served_id" == "$EXPECTED_ID" ]]; then

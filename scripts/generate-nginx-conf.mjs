@@ -196,6 +196,10 @@ server {
     listen ${listen};
     server_name _;
 
+    # No per-request access log: in Azure every line is billed Log Analytics
+    # ingestion. Errors still go to error_log.
+    access_log off;
+
     root ${rootDir};
 
 ${resolverBlock}    client_max_body_size 25m;
@@ -241,7 +245,7 @@ error_log logs/error.log;
 pid logs/nginx.pid;
 events { worker_connections 1024; }
 http {
-    access_log logs/access.log;
+    access_log off;
     default_type text/html;
 ${serverBody}}
 `

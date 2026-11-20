@@ -34,10 +34,24 @@ function indexEntry(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "index.js");
 }
 
+// V8 old-space cap per child (MB). Six children + parent + nginx share one
+// container (1Gi in Azure), so an uncapped child could OOM-kill the whole
+// gateway. Override with TDEI_CHILD_MAX_OLD_SPACE_MB; 0 disables the cap.
+const DEFAULT_CHILD_MAX_OLD_SPACE_MB = 96;
+
+function childNodeArgs(): string[] {
+  const raw = process.env.TDEI_CHILD_MAX_OLD_SPACE_MB;
+  const mb = raw === undefined || raw.trim() === "" ? DEFAULT_CHILD_MAX_OLD_SPACE_MB : Number(raw);
+  if (!Number.isInteger(mb) || mb < 0) {
+    throw new Error(`TDEI_CHILD_MAX_OLD_SPACE_MB must be a non-negative integer, got "${raw}"`);
+  }
+  return mb === 0 ? [] : [`--max-old-space-size=${mb}`];
+}
+
 function startChild(server: ResolvedMultiMcpServer, extraEnv: NodeJS.ProcessEnv): ChildProcess {
   const child = spawn(
     process.execPath,
-    [indexEntry(), "--transport=http", "--port", String(server.port), "--host", server.host],
+    [...childNodeArgs(), indexEntry(), "--transport=http", "--port", String(server.port), "--host", server.host],
     {
       env: {
         ...process.env,
