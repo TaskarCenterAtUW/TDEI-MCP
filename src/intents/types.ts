@@ -10,6 +10,27 @@ export type Dataset = Record<string, unknown>;
 export type ProjectGroup = Record<string, unknown>;
 export type TdeiService = Record<string, unknown>;
 
+/**
+ * Uniform paging info for every list tool, so clients never guess the end
+ * of a list by waiting for a short page (which wastes a full request when
+ * the total is an exact multiple of the page size).
+ * - Single API-page results: `page`/`pageSize` echo the API page and
+ *   `hasMore` is exact (a 1-row lookahead settles full pages).
+ * - Multi-page scans: `page` is 1, `pageSize` is the display limit,
+ *   `returned` is the rows in this response, and `total` is the exact
+ *   match count because the tool read every page.
+ * `total` is present only when the module knows the exact count — the TDEI
+ * core list APIs return bare arrays with no total. `hasMore` is always
+ * exact: when true, the next page/window holds at least one more row.
+ */
+export interface PaginationBlock {
+  page: number;
+  pageSize: number;
+  returned: number;
+  total?: number;
+  hasMore: boolean;
+}
+
 interface MissingInput {
   field: string;
   question: string;
@@ -105,6 +126,15 @@ export interface FindDatasetsData {
     field: "uploaded_timestamp";
     order: "desc";
   };
+  /**
+   * Uniform paging info. Single-page searches (name/city/bbox/id) report the
+   * API page with an exact hasMore (a 1-row lookahead settles full pages, so
+   * clients never spend a wasted request on an exact-multiple total).
+   * Project-group/service scans report the display window over every match
+   * with an exact total. `total` is present only when the module knows the
+   * exact count; the core list APIs return bare arrays with no total.
+   */
+  pagination: PaginationBlock;
   /** Present when the search scanned beyond the first page (latestPerName). */
   scan?: {
     pagesRead: number;
@@ -136,6 +166,7 @@ export interface ListServicesData {
   apiOperation: "listServices";
   method: "GET";
   path: "/api/v1/services";
+  pagination: PaginationBlock;
 }
 
 export interface ListProjectGroupsInput {
@@ -152,6 +183,7 @@ export interface ListProjectGroupsData {
   apiOperation: "listProjectGroups";
   method: "GET";
   path: "/api/v1/project-groups";
+  pagination: PaginationBlock;
 }
 
 export interface ListJobsInput {
@@ -200,6 +232,8 @@ export interface ListJobsData {
     pagesRead: number;
     runtime: ListJobsRuntimeSummary;
   };
+  /** Display window over every match: page 1, the display limit, exact total. */
+  pagination: PaginationBlock;
   /**
    * The tool pages through the jobs API itself (up to 20 pages of 50 per
    * group) and dedupes by job id, so callers never page manually. The table
@@ -297,6 +331,8 @@ export interface TcatQaReportsData {
   rows: TcatQaReportRow[];
   /** Markdown table of the shown rows (presence flags, not full URLs). */
   table: string;
+  /** Display window over every match: page 1, the row limit, exact total. */
+  pagination: PaginationBlock;
   truncation: {
     shown: number;
     available: number;
@@ -463,6 +499,8 @@ export interface ListFeedbacksData {
     matchingFeedbacks: number;
     pagesRead: number;
   };
+  /** Display window over every match: page 1, the display limit, exact total. */
+  pagination: PaginationBlock;
   truncation: {
     matching: number;
     shown: number;
