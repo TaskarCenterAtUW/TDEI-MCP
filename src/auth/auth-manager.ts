@@ -22,6 +22,12 @@ import type {
 const DEFAULT_TOKEN_LIFETIME_SECONDS = 29 * 60;
 const REFRESH_SAFETY_WINDOW_MS = 2 * 60 * 1000;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+/** How long to keep retrying a loopback bind after stopping our own relay. */
+const BIND_RETRY_ATTEMPTS = 20;
+const BIND_RETRY_INTERVAL_MS = 250;
+/** How long to wait for a SIGTERM'd relay to actually release the port. */
+const RELAY_STOP_WAIT_ATTEMPTS = 8;
+const RELAY_STOP_WAIT_INTERVAL_MS = 250;
 const DEFAULT_TOKEN_VALIDATION_TTL_MS = 60 * 1000;
 const MAX_TOKEN_CACHE_ENTRIES = 1000;
 const TOKEN_PROBE_TIMEOUT_MS = 5_000;
@@ -50,29 +56,85 @@ function isRelayPortConflict(error: unknown): boolean {
 }
 
 /**
+ * One port probe with a single retry. The loopback port is handed from one
+ * local server to the next (relay restarts, login listeners), and an HTTP
+ * client can hold a pooled keep-alive socket to the previous holder: the
+ * first request after a handover can fail on the dead socket while a fresh
+ * connection succeeds. Retrying once tells a dead handover apart from a
+ * genuinely absent holder.
+ */
+async function probePort(url: string): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- the retry must observe the previous attempt
+      return await fetch(url, { signal: AbortSignal.timeout(2000) });
+    } catch (error) {
+      if (attempt >= 1) throw error;
+      // oxlint-disable-next-line no-await-in-loop -- back off before the single retry
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
+/**
  * Identify what is holding the loopback callback port after a bind conflict.
- * Our own login listeners answer GET / with a bare `404 Not found`, while any
- * other backend (relay, orchestrator, …) answers differently or not at all.
+ * The detached SSO relay answers GET /health with its service name, while a
+ * sibling in-process login listener answers GET / with a bare
+ * `404 Not found`. Anything else (or nothing readable) is unknown.
  * Never throws: an unreadable holder is just "unknown".
  */
-async function isSiblingTdeiLogin(port: number, host: string): Promise<boolean> {
+type PortHolder = "relay" | "sibling-login" | "unknown";
+
+async function identifyPortHolder(port: number, host: string): Promise<PortHolder> {
   try {
-    const response = await fetch(`http://${host}:${port}/`, {
-      method: "GET",
-      signal: AbortSignal.timeout(2000),
-    });
-    const body = (await response.text()).trim();
-    return response.status === 404 && body === "Not found";
+    const health = await probePort(`http://${host}:${port}/health`);
+    const body = (await health.text()).trim();
+    if (health.ok && body.includes("tdei-mcp-sso-relay")) return "relay";
   } catch {
-    return false;
+    // Not the relay (or not answering): fall through to the root probe.
   }
+  try {
+    const response = await probePort(`http://${host}:${port}/`);
+    const body = (await response.text()).trim();
+    if (response.status === 404 && body === "Not found") return "sibling-login";
+  } catch {
+    // Unreadable holder.
+  }
+  return "unknown";
+}
+
+/**
+ * One loopback bind attempt. Resolves "bound" on success and "conflict" on
+ * EADDRINUSE; any other listen error rejects. Safe to call again: a failed
+ * server accepts another listen() call.
+ */
+function tryBindLoopback(listener: Server, port: number, host: string): Promise<"bound" | "conflict"> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      listener.off("listening", onListening);
+      if (isRelayPortConflict(error)) {
+        resolve("conflict");
+        return;
+      }
+      reject(error);
+    };
+    const onListening = () => {
+      listener.off("error", onError);
+      resolve("bound");
+    };
+    listener.once("error", onError);
+    listener.once("listening", onListening);
+    listener.listen(port, host);
+  });
 }
 
 /**
  * Stops the TDEI SSO relay previously started on this machine (by an
  * installer or an earlier on-demand start), if it is still running. The
  * relay records its pid next to the targets file; anything else holding the
- * loopback port is left alone.
+ * loopback port is left alone. Waits briefly for the process to actually
+ * exit, because a bind attempted the instant after SIGTERM still sees
+ * EADDRINUSE.
  */
 async function stopOwnRelay(): Promise<boolean> {
   let pid: number | undefined;
@@ -87,13 +149,16 @@ async function stopOwnRelay(): Promise<boolean> {
   } catch {
     return false;
   }
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch {
-    return true;
+  for (let attempt = 0; attempt < RELAY_STOP_WAIT_ATTEMPTS; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each probe must observe the previous wait
+    await new Promise((resolve) => setTimeout(resolve, RELAY_STOP_WAIT_INTERVAL_MS));
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
   }
+  return false;
 }
 
 export function sanitizeAuthErrorDetail(raw: string, maxLength = MAX_AUTH_ERROR_DETAIL_LENGTH): string {
@@ -339,46 +404,41 @@ export class AuthManager {
         }
       });
 
-      // Bind the loopback listener, retrying once after stopping our own stale
-      // SSO relay: an installer-started relay holds the same 127.0.0.1:8765
-      // port, and this login replaces it (the relay is one-shot and starts
-      // again on demand at the next login).
+      // Bind the loopback listener, retrying while our own just-stopped relay
+      // releases the port: a bind attempted the instant after SIGTERM still
+      // sees EADDRINUSE, so one immediate retry flakes. A foreign holder
+      // fails fast instead — waiting cannot free a port held by another
+      // backend such as TDEI-Orchestrator.
       const bindLoopback = async (): Promise<void> => {
-        try {
-          await new Promise<void>((resolve, reject) => {
-            const onError = (error: Error) => {
-              listener.off("listening", onListening);
-              reject(error);
-            };
-            const onListening = () => {
-              listener.off("error", onError);
-              resolve();
-            };
-            listener.once("error", onError);
-            listener.once("listening", onListening);
-            listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
-          });
-        } catch (error) {
-          if (!isRelayPortConflict(error) || !(await stopOwnRelay())) throw error;
-          await new Promise<void>((resolve, reject) => {
-            listener.once("error", reject);
-            listener.once("listening", () => resolve());
-            listener.listen(Number(callbackUrl.port), callbackUrl.hostname);
-          });
+        const port = Number(callbackUrl.port);
+        const host = callbackUrl.hostname;
+        if ((await tryBindLoopback(listener, port, host)) === "bound") return;
+        // First attempt hit EADDRINUSE: replace our own stale relay when the
+        // pid file names it, then poll until the port frees up.
+        if (!(await stopOwnRelay())) throw Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE" });
+        for (let attempt = 0; attempt < BIND_RETRY_ATTEMPTS; attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- each attempt must observe the previous wait
+          await new Promise((resolve) => setTimeout(resolve, BIND_RETRY_INTERVAL_MS));
+          // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
+          if ((await tryBindLoopback(listener, port, host)) === "bound") return;
         }
+        throw Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE" });
       };
 
+      let holder: PortHolder = "unknown";
       try {
         await bindLoopback();
       } catch (error) {
-        // Only one process can hold the shared Keycloak redirect port. When it
-        // is a sibling TDEI login (for example from VS Code or Cursor), the
-        // user should finish THAT sign-in instead of starting another one:
-        // completing it also unblocks this session via the shared login file.
+        if (!isRelayPortConflict(error)) throw error;
+        // The port is still held after our own relay was given time to exit
+        // (or no pid file named it at all). Name the actual holder so the
+        // user stops the right process instead of retrying blindly.
+        holder = await identifyPortHolder(Number(callbackUrl.port), callbackUrl.hostname);
         let holding: string;
-        if (!isRelayPortConflict(error)) {
-          holding = "";
-        } else if (await isSiblingTdeiLogin(Number(callbackUrl.port), callbackUrl.hostname)) {
+        if (holder === "relay") {
+          holding =
+            " The TDEI SSO relay is still holding the shared Keycloak redirect port 127.0.0.1:8765 (its pid file is stale or it was started by another install, so this login could not stop it). Stop it (`pkill -f sso-callback-relay.cjs`) or wait for its 10-minute idle exit, then start the sign-in again. (Holders: check `lsof -nP -iTCP:8765`.)";
+        } else if (holder === "sibling-login") {
           holding =
             " Another TDEI sign-in (for example from VS Code, Cursor, or another chat) is already waiting on the shared Keycloak redirect port 127.0.0.1:8765. Finish that sign-in in its browser window first, then start the sign-in again here — it will reuse the shared login without opening a browser. Only one TDEI login can hold the port at a time and each pending login times out after 5 minutes. (Holders: check `lsof -nP -iTCP:8765`.)";
         } else {
