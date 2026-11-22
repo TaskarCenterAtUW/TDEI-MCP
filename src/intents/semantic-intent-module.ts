@@ -107,9 +107,59 @@ function uploadedTimestampMs(dataset: Record<string, unknown>): number | undefin
 
 function createdTimestampMs(job: Record<string, unknown>): number | undefined {
   const raw = job.created_at ?? job.updated_at;
-  if (typeof raw !== "string" || raw.length === 0) return undefined;
-  const ms = Date.parse(raw);
-  return Number.isFinite(ms) ? ms : undefined;
+  if (typeof raw === "string" && raw.length > 0) {
+    const ms = Date.parse(raw);
+    return Number.isFinite(ms) ? ms : undefined;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  return undefined;
+}
+
+/** Stable dedupe key for a job record (job ids are numeric or string). */
+function jobIdKey(job: Record<string, unknown>): string | undefined {
+  const id = job.job_id ?? job.jobId ?? job.id;
+  if (typeof id === "string" && id.trim()) return id.trim().toLowerCase();
+  if (typeof id === "number" && Number.isFinite(id)) return String(id);
+  return undefined;
+}
+
+/** Non-negative created_at -> updated_at span in ms; undefined when either end is missing or unordered. */
+function jobRuntimeMs(job: Record<string, unknown>): number | undefined {
+  const startRaw = job.created_at;
+  const endRaw = job.updated_at;
+  const start = typeof startRaw === "string" && startRaw ? Date.parse(startRaw) : undefined;
+  const end = typeof endRaw === "string" && endRaw ? Date.parse(endRaw) : undefined;
+  if (start === undefined || end === undefined || !Number.isFinite(start) || !Number.isFinite(end)) return undefined;
+  return end >= start ? end - start : undefined;
+}
+
+/** One-decimal rounding for runtime summary seconds. */
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function summarizeJobRuntimes(jobs: Array<Record<string, unknown>>): {
+  jobsWithRuntime: number;
+  avgRuntimeSeconds?: number;
+  minRuntimeSeconds?: number;
+  maxRuntimeSeconds?: number;
+  stddevRuntimeSeconds?: number;
+} {
+  const seconds = jobs
+    .map(jobRuntimeMs)
+    .filter((ms): ms is number => ms !== undefined)
+    .map((ms) => ms / 1000);
+  if (seconds.length === 0) return { jobsWithRuntime: 0 };
+  const sum = seconds.reduce((total, value) => total + value, 0);
+  const avg = sum / seconds.length;
+  const variance = seconds.reduce((total, value) => total + (value - avg) ** 2, 0) / seconds.length;
+  return {
+    jobsWithRuntime: seconds.length,
+    avgRuntimeSeconds: round1(avg),
+    minRuntimeSeconds: round1(Math.min(...seconds)),
+    maxRuntimeSeconds: round1(Math.max(...seconds)),
+    stddevRuntimeSeconds: round1(Math.sqrt(variance)),
+  };
 }
 
 function resolveCutoffMs(after?: string, withinDays?: number): number | undefined {
@@ -337,6 +387,10 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 /** The jobs API returns at most this many records per call (page_size 1 to 50). */
 const JOBS_API_PAGE_SIZE = 50;
+/** Safety stop per project group (20 pages * 50 = 1,000 jobs); a short page ends the scan sooner. */
+const JOBS_SCAN_MAX_PAGES = 20;
+/** Safety stop for feedback scans (10 pages * 50 = 500 feedbacks); a short page ends the scan sooner. */
+const FEEDBACK_SCAN_MAX_PAGES = 10;
 
 /** Dataset API page size used by the QA/QC report inventory scan. */
 const DATASET_SCAN_PAGE_SIZE = 50;
@@ -455,7 +509,7 @@ export class SemanticIntentModule {
   }
 
   async findDatasets(input: FindDatasetsInput, context: RequestContext = {}): Promise<IntentResult<FindDatasetsData>> {
-    const pageSize = Math.min(Math.max(input.limit ?? 10, 1), 50);
+    const pageSize = Math.min(Math.max(input.limit ?? 10, 1), 500);
     const cutoffMs = resolveCutoffMs(input.uploadedAfter, input.uploadedWithinDays);
     const applyCutoff = <T extends Record<string, unknown>>(items: T[]): T[] =>
       cutoffMs === undefined
@@ -606,7 +660,7 @@ export class SemanticIntentModule {
         stoppedEarly: scan.stoppedEarly,
         note:
           rows.length > shown.length
-            ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 50) or narrow with serviceId/uploads.`
+            ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 500) or narrow with serviceId/uploads.`
             : note,
       });
     };
@@ -970,16 +1024,22 @@ export class SemanticIntentModule {
   }
 
   /**
-   * Jobs for one project group. The API requires tdei_project_group_id, so the
-   * group is resolved first: by id, or by name against the (cached) list of
-   * groups the caller can see. Without either, the tool asks which group,
-   * because most questions ("what is running?", "status of job X") concern one
-   * group. Only an explicit `allGroups` fans out across every group.
+   * Jobs for one project group (or every group with allGroups). The API
+   * requires tdei_project_group_id, so the group is resolved first: by id,
+   * or by name against the (cached) list of groups the caller can see.
+   * Without either, the tool asks which group, because most questions
+   * ("what is running?", "status of job X") concern one group. Only an
+   * explicit `allGroups` fans out across every group.
+   * The tool pages through the API itself (up to JOBS_SCAN_MAX_PAGES pages
+   * of 50 per group) and dedupes by job id, so callers never page manually.
    * Date filtering is client-side on created_at (the API has no date param).
    */
   async listJobs(input: ListJobsInput = {}, context: RequestContext = {}): Promise<IntentResult<ListJobsData>> {
-    const pageSize = Math.min(Math.max(input.limit ?? 20, 1), 50);
+    const displayLimit = Math.min(Math.max(input.limit ?? 50, 1), 500);
     const cutoffMs = resolveCutoffMs(input.createdAfter, input.createdWithinDays);
+    const beforeRaw = input.createdBefore?.trim();
+    const beforeParsed = beforeRaw ? Date.parse(beforeRaw) : Number.NaN;
+    const beforeMs = Number.isFinite(beforeParsed) ? beforeParsed : undefined;
 
     // The API only accepts its own job_type values; map portal labels ("Filter Dataset by BBox") and
     // aliases, and ask rather than send a value the API would reject.
@@ -1063,33 +1123,60 @@ export class SemanticIntentModule {
       }
     }
     const searchedProjectGroups = groupIds;
+    const wantedJobId = input.jobId?.trim() || undefined;
     // Bounded-concurrency fan-out; results keep project-group order so output
     // stays deterministic. One inaccessible group must not fail the whole call.
+    // Each group is paged through (short page ends the scan, the cap stops a
+    // runaway group) so older jobs are reachable without manual paging.
     const perGroup = await mapWithConcurrency(groupIds, JOB_FANOUT_CONCURRENCY, async (groupId) => {
+      const jobs: Array<Record<string, unknown>> = [];
+      let pagesRead = 0;
+      let truncated = false;
       try {
-        return await this.dependencies.operations.listJobs(
-          {
-            ...(input.jobId?.trim() ? { jobId: input.jobId.trim() } : {}),
-            projectGroupId: groupId,
-            ...(input.includeGroupJobs !== undefined ? { includeGroupJobs: input.includeGroupJobs } : {}),
-            ...(jobType ? { jobType } : {}),
-            ...(input.status ? { status: input.status } : {}),
-            page: 1,
-            // One call per group at the API maximum; the display limit is applied afterwards.
-            pageSize: JOBS_API_PAGE_SIZE,
-          },
-          context,
-        );
+        for (let page = 1; page <= JOBS_SCAN_MAX_PAGES; page += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- pages are read in order so a short page stops the scan
+          const batch = await this.dependencies.operations.listJobs(
+            {
+              ...(wantedJobId ? { jobId: wantedJobId } : {}),
+              projectGroupId: groupId,
+              ...(input.includeGroupJobs !== undefined ? { includeGroupJobs: input.includeGroupJobs } : {}),
+              ...(jobType ? { jobType } : {}),
+              ...(input.status ? { status: input.status } : {}),
+              page,
+              // The API maximum; the display limit is applied afterwards.
+              pageSize: JOBS_API_PAGE_SIZE,
+            },
+            context,
+          );
+          pagesRead += 1;
+          for (const job of batch) jobs.push(job);
+          if (wantedJobId && jobs.some((job) => jobIdKey(job) === wantedJobId.toLowerCase())) break;
+          if (batch.length < JOBS_API_PAGE_SIZE) break;
+          if (page >= JOBS_SCAN_MAX_PAGES) truncated = true;
+        }
       } catch {
-        return [] as Array<Record<string, unknown>>;
+        // Whatever was read before the failure is kept; the scan still reports it.
       }
+      return { jobs, pagesRead, truncated };
     });
-    const collected: Array<Record<string, unknown>> = perGroup.flat();
-    const apiPageFull = perGroup.some((jobs) => jobs.length >= JOBS_API_PAGE_SIZE);
+    const pagesRead = perGroup.reduce((total, group) => total + group.pagesRead, 0);
+    const scanTruncated = perGroup.some((group) => group.truncated);
+    // The same job repeats once per project group in allGroups searches:
+    // date-filter first, then count it once by job id so shared jobs do not
+    // use up the display cap as duplicates.
+    const dateFiltered = perGroup
+      .flatMap((group) => group.jobs)
+      .filter((job) => {
+        const ts = createdTimestampMs(job);
+        if (ts === undefined) return cutoffMs === undefined && beforeMs === undefined;
+        if (cutoffMs !== undefined && ts < cutoffMs) return false;
+        if (beforeMs !== undefined && ts > beforeMs) return false;
+        return true;
+      });
     // Newest first across all groups, so the page holds the most recent jobs
     // rather than whatever the first groups happened to return. Jobs without
     // a timestamp sort last; the sort is stable so ties keep group order.
-    const newestFirst = [...collected].sort((a, b) => {
+    const newestFirst = [...dateFiltered].sort((a, b) => {
       const ta = createdTimestampMs(a);
       const tb = createdTimestampMs(b);
       if (ta === tb) return 0;
@@ -1097,23 +1184,33 @@ export class SemanticIntentModule {
       if (tb === undefined) return -1;
       return tb - ta;
     });
-    const matching =
-      cutoffMs === undefined
-        ? newestFirst
-        : newestFirst.filter((job) => {
-            const ts = createdTimestampMs(job);
-            return ts !== undefined && ts >= cutoffMs;
-          });
-    const filtered = matching.slice(0, pageSize);
-    const mayHaveMore = apiPageFull || matching.length > filtered.length;
+    const seenJobIds = new Set<string>();
+    let duplicatesRemoved = 0;
+    const matching: Array<Record<string, unknown>> = [];
+    for (const job of newestFirst) {
+      const key = jobIdKey(job);
+      if (key === undefined) {
+        matching.push(job);
+        continue;
+      }
+      if (seenJobIds.has(key)) {
+        duplicatesRemoved += 1;
+        continue;
+      }
+      seenJobIds.add(key);
+      matching.push(job);
+    }
+    const filtered = matching.slice(0, displayLimit);
+    const mayHaveMore = scanTruncated || matching.length > filtered.length;
+    const runtime = summarizeJobRuntimes(matching);
     const truncation = {
-      returned: collected.length,
+      matching: matching.length,
       shown: filtered.length,
-      apiPageFull,
+      truncated: scanTruncated,
       mayHaveMore,
       note: mayHaveMore
-        ? `Showing ${filtered.length} jobs from one API page (the jobs API returns at most ${JOBS_API_PAGE_SIZE} per project group, has no total count and does not document its ordering; shown newest first by created_at). More matching jobs may exist. Do not call again to page: tell the user the list may be incomplete and ask them to narrow it, for example by status, job type, a specific job id, "submitted by me" versus the whole group, a recent-days filter, or a single project group.`
-        : `Complete for the filters used: ${filtered.length} job(s) matched.`,
+        ? `Showing ${filtered.length} of ${matching.length} matching jobs (newest first by created_at; summary counts cover all ${matching.length}).${scanTruncated ? ` Stopped at the ${JOBS_SCAN_MAX_PAGES}-page scan cap (${JOBS_SCAN_MAX_PAGES * JOBS_API_PAGE_SIZE} jobs per group); older jobs were not read.` : ""} Raise limit (max 500) or narrow the filters, for example by status, job type, a specific job id, "submitted by me" versus the whole group, a created-before/after window, or a single project group.`
+        : `Complete for the filters used: ${matching.length} job(s) matched across ${pagesRead} page(s)${duplicatesRemoved > 0 ? ` (${duplicatesRemoved} duplicate row(s) from overlapping groups counted once)` : ""}.`,
     };
     return {
       status: "complete",
@@ -1127,6 +1224,12 @@ export class SemanticIntentModule {
           groupIds.length === 1
             ? "Jobs for the requested project group."
             : "Jobs searched across all of your accessible project groups, as requested.",
+        summary: {
+          matchingJobs: matching.length,
+          duplicatesRemoved,
+          pagesRead,
+          runtime,
+        },
         truncation,
       },
     };
@@ -2399,26 +2502,45 @@ export class SemanticIntentModule {
     context: RequestContext = {},
   ): Promise<IntentResult<ListFeedbacksData>> {
     if (!this.dependencies.operations.listFeedbacks) return this.unsupported("listFeedbacks");
-    const pageSize = Math.min(Math.max(input.limit ?? 10, 1), 50);
+    const displayLimit = Math.min(Math.max(input.limit ?? 10, 1), 500);
+    const base = {
+      ...(input.projectGroupId?.trim() ? { projectGroupId: input.projectGroupId.trim() } : {}),
+      ...(input.tdeiDatasetId?.trim() ? { tdeiDatasetId: input.tdeiDatasetId.trim() } : {}),
+      ...(input.fromDate ? { fromDate: input.fromDate } : {}),
+      ...(input.toDate ? { toDate: input.toDate } : {}),
+      ...(input.status ? { status: input.status } : {}),
+    };
+    const collected: JobRecord[] = [];
+    let pagesRead = 0;
+    let truncated = false;
+    for (let page = 1; page <= FEEDBACK_SCAN_MAX_PAGES; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- pages are read in order so a short page stops the scan
+      const batch = await this.dependencies.operations.listFeedbacks({ ...base, page, pageSize: 50 }, context);
+      pagesRead += 1;
+      for (const feedback of batch) collected.push(feedback);
+      if (batch.length < 50) break;
+      if (page >= FEEDBACK_SCAN_MAX_PAGES) truncated = true;
+    }
+    const shown = collected.slice(0, displayLimit);
+    const mayHaveMore = truncated || collected.length > shown.length;
     return {
       status: "complete",
       data: {
-        feedbacks: await this.dependencies.operations.listFeedbacks(
-          {
-            ...(input.projectGroupId?.trim() ? { projectGroupId: input.projectGroupId.trim() } : {}),
-            ...(input.tdeiDatasetId?.trim() ? { tdeiDatasetId: input.tdeiDatasetId.trim() } : {}),
-            ...(input.fromDate ? { fromDate: input.fromDate } : {}),
-            ...(input.toDate ? { toDate: input.toDate } : {}),
-            ...(input.status ? { status: input.status } : {}),
-            page: 1,
-            pageSize,
-          },
-          context,
-        ),
+        feedbacks: shown,
         appliedFilters: input,
         apiOperation: "oswDatasetViewerFeedbacks",
         method: "GET",
         path: "/api/v1/osw/dataset-viewer/feedbacks",
+        summary: { matchingFeedbacks: collected.length, pagesRead },
+        truncation: {
+          matching: collected.length,
+          shown: shown.length,
+          truncated,
+          mayHaveMore,
+          note: mayHaveMore
+            ? `Showing ${shown.length} of ${collected.length} matching feedbacks.${truncated ? ` Stopped at the ${FEEDBACK_SCAN_MAX_PAGES}-page scan cap; older feedbacks were not read.` : ""} Raise limit (max 500) or narrow the filters instead of calling again to page.`
+            : `Complete for the filters used: ${collected.length} feedback(s) matched across ${pagesRead} page(s).`,
+        },
       },
     };
   }

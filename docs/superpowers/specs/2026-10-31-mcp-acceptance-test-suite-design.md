@@ -54,7 +54,7 @@ Semantic tools (`src/intents/register-tools.ts`), registered on every path:
 | `tdei_validate_dataset` | `dataType`, `asset` | needs_input; runtime error when an asset is supplied | none: the client runs curl against TDEI |
 | `tdei_upload_dataset` | `dataType`, `asset`, `projectGroupId`, `serviceId`, `derivedFromDatasetId`, `changeset`, `metadata` | needs_input; runtime error when an asset is supplied | none: the client runs curl against TDEI |
 | `tdei_get_my_identity` | none | complete | none (JWT claims) |
-| `tdei_list_jobs` | `jobId`, `projectGroupId`, `includeGroupJobs`, `jobType`, `status`, `createdAfter`, `createdWithinDays`, `limit` | complete | `listJobs` |
+| `tdei_list_jobs` | `jobId`, `projectGroupId`, `includeGroupJobs`, `jobType`, `status`, `createdAfter`, `createdBefore`, `createdWithinDays`, `limit` | complete | `listJobs` |
 | `tdei_get_dataset_details` | `tdeiDatasetId`, `dataType` | complete | `listDatasetFiles` |
 
 File handling (working tree of 2026-10-31): the MCP never accepts file bytes. `tdei_validate_dataset` and `tdei_upload_dataset` collect `dataType`, `projectGroupId`, `serviceId` and the required metadata, then return `needs_input` for the `asset` field whose question carries the curl command for the client to run against the TDEI API (`POST <apiUrl>/api/v1/{osw|gtfs-flex|gtfs-pathways}/validate`, or `/upload/{projectGroupId}/{serviceId}` with `-F dataset=@file.zip -F metadata=@metadata.json`, bearer from `$TDEI_TOKEN`), then poll with `tdei_list_jobs`. A call that supplies an `asset` returns a tool error. The suite therefore never creates a job or dataset.

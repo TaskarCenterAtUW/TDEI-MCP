@@ -373,7 +373,13 @@ test("jobs fan out across project groups only when allGroups is requested", asyn
     },
     async listJobs(input) {
       jobSearches.push(input as unknown as Record<string, unknown>);
-      return [{ job_id: 1, tdei_project_group_id: input.projectGroupId, created_at: new Date().toISOString() }];
+      return [
+        {
+          job_id: `job-${input.projectGroupId}`,
+          tdei_project_group_id: input.projectGroupId,
+          created_at: new Date().toISOString(),
+        },
+      ];
     },
   };
   const module = new SemanticIntentModule({
