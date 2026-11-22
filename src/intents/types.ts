@@ -164,9 +164,23 @@ export interface ListJobsInput {
   includeGroupJobs?: boolean;
   jobType?: string;
   status?: "COMPLETED" | "FAILED" | "IN-PROGRESS" | "ABANDONED";
+  /** Only keep jobs created at or after this ISO date-time (client-side; the API has no date param). */
   createdAfter?: string;
+  /** Only keep jobs created at or before this ISO date-time (client-side; the API has no date param). */
+  createdBefore?: string;
+  /** Shorthand for createdAfter = now - N days. */
   createdWithinDays?: number;
+  /** Rows returned in the table (1-500). The summary always covers every match. */
   limit?: number;
+}
+
+export interface ListJobsRuntimeSummary {
+  /** Jobs where a non-negative created_at -> updated_at span could be computed. */
+  jobsWithRuntime: number;
+  avgRuntimeSeconds?: number;
+  minRuntimeSeconds?: number;
+  maxRuntimeSeconds?: number;
+  stddevRuntimeSeconds?: number;
 }
 
 export interface ListJobsData {
@@ -176,16 +190,27 @@ export interface ListJobsData {
   method: "GET";
   path: "/api/v1/jobs";
   scopeNote: string;
+  /** Aggregate counts over every match (after dedupe and date filtering), so stats never need the full row list. */
+  summary: {
+    /** Unique jobs matched, across all searched groups. */
+    matchingJobs: number;
+    /** Same job seen in more than one group (allGroups searches) and counted once. */
+    duplicatesRemoved: number;
+    /** API pages read across the searched groups. */
+    pagesRead: number;
+    runtime: ListJobsRuntimeSummary;
+  };
   /**
-   * The jobs API has no total count and no documented ordering, so the tool makes one call per project
-   * group (never loops) and reports whether the list may be incomplete.
+   * The tool pages through the jobs API itself (up to 20 pages of 50 per
+   * group) and dedupes by job id, so callers never page manually. The table
+   * holds the newest `limit` rows; the summary covers every match.
    */
   truncation: {
-    /** Jobs returned by the API across the searched groups, before date filtering and the display limit. */
-    returned: number;
+    /** Unique jobs matched (after dedupe and date filtering). */
+    matching: number;
     shown: number;
-    /** True when a group returned a full API page (50), so more matching jobs may exist. */
-    apiPageFull: boolean;
+    /** True when the per-group page cap stopped the scan before a short page. */
+    truncated: boolean;
     mayHaveMore: boolean;
     note: string;
   };
@@ -423,6 +448,7 @@ export interface ListFeedbacksInput {
   fromDate?: string;
   toDate?: string;
   status?: string;
+  /** Rows returned in the table (1-500). The summary always covers every match. */
   limit?: number;
 }
 
@@ -432,6 +458,19 @@ export interface ListFeedbacksData {
   apiOperation: "oswDatasetViewerFeedbacks";
   method: "GET";
   path: "/api/v1/osw/dataset-viewer/feedbacks";
+  /** Aggregate counts over every scanned page; the table holds the newest `limit` rows. */
+  summary: {
+    matchingFeedbacks: number;
+    pagesRead: number;
+  };
+  truncation: {
+    matching: number;
+    shown: number;
+    /** True when the page cap stopped the scan before a short page. */
+    truncated: boolean;
+    mayHaveMore: boolean;
+    note: string;
+  };
 }
 
 export interface FeedbackSummaryData {

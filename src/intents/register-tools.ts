@@ -37,7 +37,7 @@ const findDatasetsSchema = z.object({
   region: z.string().trim().min(1).optional(),
   latest: z.boolean().optional(),
   latestPerName: z.boolean().optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
 });
 
 const listJobsSchema = z.object({
@@ -49,8 +49,9 @@ const listJobsSchema = z.object({
   jobType: z.string().trim().min(1).optional(),
   status: z.enum(["COMPLETED", "FAILED", "IN-PROGRESS", "ABANDONED"]).optional(),
   createdAfter: z.string().trim().min(1).optional(),
+  createdBefore: z.string().trim().min(1).optional(),
   createdWithinDays: z.number().min(0).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
 });
 
 const getDatasetDetailsSchema = z.object({
@@ -273,7 +274,7 @@ const feedbackListSchema = z.object({
   fromDate: z.string().trim().min(1).optional(),
   toDate: z.string().trim().min(1).optional(),
   status: z.string().trim().min(1).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
 });
 
 const feedbackSummarySchema = z.object({
