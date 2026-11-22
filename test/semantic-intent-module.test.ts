@@ -84,6 +84,7 @@ test("latest dataset name match completes without geographic fallback", async ()
       matches: [{ dataset: seattle, matchedBy: "name", evidence: "name contains Seattle" }],
       selected: seattle,
       effectiveSort: { field: "uploaded_timestamp", order: "desc" },
+      pagination: { page: 1, pageSize: 10, returned: 1, hasMore: false },
       table:
         "| # | name | version | tdei_dataset_id | data_type | status |\n|---|------|---------|-----------------|-----------|--------|\n| 1 | Seattle Accessible Sidewalks |  | dataset-1 |  |  |",
     },
@@ -274,6 +275,7 @@ test("service listing returns normalized filters and results", async () => {
       apiOperation: "listServices",
       method: "GET",
       path: "/api/v1/services",
+      pagination: { page: 1, pageSize: 25, returned: 1, hasMore: false },
     },
   });
   assert.deepEqual(harness.serviceSearches, [
@@ -304,6 +306,7 @@ test("project-group membership lists groups visible to the authenticated login",
       apiOperation: "listProjectGroups",
       method: "GET",
       path: "/api/v1/project-groups",
+      pagination: { page: 1, pageSize: 50, returned: 1, hasMore: false },
     },
   });
   assert.deepEqual(harness.searches, []);

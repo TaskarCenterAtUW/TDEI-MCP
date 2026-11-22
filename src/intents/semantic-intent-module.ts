@@ -385,6 +385,21 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
+/**
+ * Exact end-of-list for one API page. A full page may still be the last one
+ * (exact-multiple totals), so a short page alone cannot settle it: fetch one
+ * row of the next page. Costs one tiny request, and only when the page came
+ * back full — clients never spend a wasted full-page request guessing.
+ */
+async function withExactHasMore<T>(
+  rows: T[],
+  pageSize: number,
+  fetchNextPage: () => Promise<T[]>,
+): Promise<{ rows: T[]; hasMore: boolean }> {
+  if (rows.length < pageSize) return { rows, hasMore: false };
+  return { rows, hasMore: (await fetchNextPage()).length > 0 };
+}
+
 /** The jobs API returns at most this many records per call (page_size 1 to 50). */
 const JOBS_API_PAGE_SIZE = 50;
 /** Safety stop per project group (20 pages * 50 = 1,000 jobs); a short page ends the scan sooner. */
@@ -578,7 +593,8 @@ export class SemanticIntentModule {
       }>,
       matchedBy: DatasetMatch["matchedBy"],
       evidence: string,
-      scan?: FindDatasetsData["scan"],
+      scan: FindDatasetsData["scan"] | undefined,
+      pagination: FindDatasetsData["pagination"],
     ): IntentResult<FindDatasetsData> => {
       const matches: DatasetMatch[] = rows.map((row) => ({
         dataset: row.dataset,
@@ -594,16 +610,21 @@ export class SemanticIntentModule {
           ...(input.latest && matches[0] ? { selected: matches[0].dataset } : {}),
           effectiveSort: { field: "uploaded_timestamp", order: "desc" },
           ...(scan ? { scan } : {}),
+          pagination,
           table: renderDatasetTable(matches),
         },
       };
     };
-    const complete = (
+    // Single API page plus an exact hasMore: a full first page is settled with
+    // a 1-row lookahead at page 2, so clients never guess the end.
+    const complete = async (
       datasets: Array<Record<string, unknown>>,
       matchedBy: DatasetMatch["matchedBy"],
       evidence: string,
-    ): IntentResult<FindDatasetsData> =>
-      result(
+      fetchNextPage: () => Promise<Array<Record<string, unknown>>>,
+    ): Promise<IntentResult<FindDatasetsData>> => {
+      const { hasMore } = await withExactHasMore(datasets, pageSize, fetchNextPage);
+      return result(
         datasets.map((dataset) => ({
           dataset,
           version: readDatasetVersion(dataset),
@@ -611,7 +632,10 @@ export class SemanticIntentModule {
         })),
         matchedBy,
         evidence,
+        undefined,
+        { page: 1, pageSize, returned: datasets.length, hasMore },
       );
+    };
 
     /** Project-group/service listings scan pages newest-first, then keep the latest per name. */
     const scanAndSelect = async (
@@ -651,18 +675,32 @@ export class SemanticIntentModule {
         : latestPerName
           ? `${scannedNote}; kept the latest version of each of ${latest.uniqueNames} dataset name(s) (${latest.versionsSuperseded} older version record(s) hidden).`
           : `${scannedNote}; ${filtered.length} dataset record(s) after the upload-date filter.`;
-      return result(shown, matchedBy, evidence, {
-        pagesRead: scan.pagesRead,
-        datasetsScanned: scan.datasets.length,
-        uniqueDatasetNames: latest.uniqueNames,
-        versionsSuperseded: latestPerName ? latest.versionsSuperseded : 0,
-        truncated: scan.truncated,
-        stoppedEarly: scan.stoppedEarly,
-        note:
-          rows.length > shown.length
-            ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 500) or narrow with serviceId/uploads.`
-            : note,
-      });
+      return result(
+        shown,
+        matchedBy,
+        evidence,
+        {
+          pagesRead: scan.pagesRead,
+          datasetsScanned: scan.datasets.length,
+          uniqueDatasetNames: latest.uniqueNames,
+          versionsSuperseded: latestPerName ? latest.versionsSuperseded : 0,
+          truncated: scan.truncated,
+          stoppedEarly: scan.stoppedEarly,
+          note:
+            rows.length > shown.length
+              ? `${note} Showing ${shown.length} of ${rows.length}; raise limit (max 500) or narrow with serviceId/uploads.`
+              : note,
+        },
+        {
+          page: 1,
+          pageSize,
+          returned: shown.length,
+          total: rows.length,
+          // A capped scan may hold more matches among the unread pages; a
+          // finished scan is exact over the display window.
+          hasMore: rows.length > shown.length || scan.truncated,
+        },
+      );
     };
     const search = async (extra: Partial<DatasetSearch>) =>
       applyCutoff(await this.dependencies.operations.searchDatasets({ ...common, ...extra }, context));
@@ -671,10 +709,15 @@ export class SemanticIntentModule {
     // supports tdei_dataset_id directly; date filtering is client-side.
     if (input.tdeiDatasetId?.trim()) {
       const id = input.tdeiDatasetId.trim();
-      return complete(await search({ tdeiDatasetId: id }), "dataset_id", `tdei_dataset_id = ${id}`);
+      return complete(await search({ tdeiDatasetId: id }), "dataset_id", `tdei_dataset_id = ${id}`, () =>
+        search({ tdeiDatasetId: id, page: 2, pageSize: 1 }),
+      );
     }
     if (input.bbox) {
-      return complete(await search({ bbox: input.bbox }), "bbox", `explicit bbox ${input.bbox.join(",")}`);
+      const bbox = input.bbox;
+      return complete(await search({ bbox }), "bbox", `explicit bbox ${bbox.join(",")}`, () =>
+        search({ bbox, page: 2, pageSize: 1 }),
+      );
     }
     if (projectGroupId) {
       // Send the service filter together with the project group when both are
@@ -702,12 +745,15 @@ export class SemanticIntentModule {
       };
     }
 
-    let datasets = await search({ name: input.place });
-    if (datasets.length > 0) return complete(datasets, "name", `name contains ${input.place}`);
-    datasets = await search({ city: input.place });
-    if (datasets.length > 0) return complete(datasets, "city", `city contains ${input.place}`);
+    const place: string = input.place;
+    let datasets = await search({ name: place });
+    if (datasets.length > 0)
+      return complete(datasets, "name", `name contains ${place}`, () => search({ name: place, page: 2, pageSize: 1 }));
+    datasets = await search({ city: place });
+    if (datasets.length > 0)
+      return complete(datasets, "city", `city contains ${place}`, () => search({ city: place, page: 2, pageSize: 1 }));
 
-    const placeCandidates = await this.dependencies.places.forwardGeocode(input.place);
+    const placeCandidates = await this.dependencies.places.forwardGeocode(place);
     if (placeCandidates.length > 1) {
       return {
         status: "ambiguous",
@@ -722,24 +768,35 @@ export class SemanticIntentModule {
     }
     const resolved = placeCandidates[0];
     if (resolved) {
-      return complete(await search({ bbox: resolved.bbox }), "bbox", `bbox for ${resolved.label}`);
+      return complete(await search({ bbox: resolved.bbox }), "bbox", `bbox for ${resolved.label}`, () =>
+        search({ bbox: resolved.bbox, page: 2, pageSize: 1 }),
+      );
     }
     // Nothing matched by name, city or geocode: report the (empty) name-search outcome.
-    return complete(datasets, "city", `city contains ${input.place}`);
+    // The empty page settles hasMore without a lookahead (the closure never runs).
+    return complete(datasets, "city", `city contains ${input.place}`, async () => []);
   }
 
   async listServices(
     input: ListServicesInput = {},
     context: RequestContext = {},
   ): Promise<IntentResult<ListServicesData>> {
-    const appliedFilters: ListServicesInput & { page: number; pageSize: number } = {
+    const page = Math.max(input.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(input.pageSize ?? 10, 1), 50);
+    const listInput = (listPage: number, listPageSize: number) => ({
       ...(input.searchText ? { searchText: input.searchText } : {}),
       ...(input.projectGroupId ? { projectGroupId: input.projectGroupId } : {}),
       ...(input.serviceType ? { serviceType: input.serviceType } : {}),
-      page: Math.max(input.page ?? 1, 1),
-      pageSize: Math.min(Math.max(input.pageSize ?? 10, 1), 50),
-    };
+      page: listPage,
+      pageSize: listPageSize,
+    });
+    const appliedFilters: ListServicesInput & { page: number; pageSize: number } = listInput(page, pageSize);
     const services = await this.dependencies.operations.listServices(appliedFilters, context);
+    // A full page may still be the last one (exact-multiple totals): settle it
+    // with a 1-row lookahead so clients never guess the end.
+    const { hasMore } = await withExactHasMore(services, pageSize, () =>
+      this.dependencies.operations.listServices(listInput(page + 1, 1), context),
+    );
     return {
       status: "complete",
       data: {
@@ -748,6 +805,7 @@ export class SemanticIntentModule {
         apiOperation: "listServices",
         method: "GET",
         path: "/api/v1/services",
+        pagination: { page, pageSize, returned: services.length, hasMore },
       },
     };
   }
@@ -756,15 +814,24 @@ export class SemanticIntentModule {
     input: ListProjectGroupsInput = {},
     context: RequestContext = {},
   ): Promise<IntentResult<ListProjectGroupsData>> {
-    const appliedFilters = {
+    const page = Math.max(input.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(input.pageSize ?? 50, 1), 50);
+    const listInput = (listPage: number, listPageSize: number) => ({
       ...(input.searchText ? { searchText: input.searchText } : {}),
-      page: Math.max(input.page ?? 1, 1),
-      pageSize: Math.min(Math.max(input.pageSize ?? 50, 1), 50),
-    };
+      page: listPage,
+      pageSize: listPageSize,
+    });
+    const appliedFilters = listInput(page, pageSize);
+    const projectGroups = await this.dependencies.operations.listProjectGroups(appliedFilters, context);
+    // A full page may still be the last one (exact-multiple totals): settle it
+    // with a 1-row lookahead so clients never guess the end.
+    const { hasMore } = await withExactHasMore(projectGroups, pageSize, () =>
+      this.dependencies.operations.listProjectGroups(listInput(page + 1, 1), context),
+    );
     return {
       status: "complete",
       data: {
-        projectGroups: await this.dependencies.operations.listProjectGroups(appliedFilters, context),
+        projectGroups,
         appliedFilters,
         accessScope: "authenticated_user",
         scopeExplanation:
@@ -772,6 +839,7 @@ export class SemanticIntentModule {
         apiOperation: "listProjectGroups",
         method: "GET",
         path: "/api/v1/project-groups",
+        pagination: { page, pageSize, returned: projectGroups.length, hasMore },
       },
     };
   }
@@ -1230,6 +1298,13 @@ export class SemanticIntentModule {
           pagesRead,
           runtime,
         },
+        pagination: {
+          page: 1,
+          pageSize: displayLimit,
+          returned: filtered.length,
+          total: matching.length,
+          hasMore: mayHaveMore,
+        },
         truncation,
       },
     };
@@ -1546,6 +1621,13 @@ export class SemanticIntentModule {
         summary,
         rows: shown,
         table: renderTcatQaReportTable(shown),
+        pagination: {
+          page: 1,
+          pageSize: limit,
+          returned: shown.length,
+          total: rows.length,
+          hasMore: mayHaveMore,
+        },
         truncation: {
           shown: shown.length,
           available: rows.length,
@@ -2532,6 +2614,13 @@ export class SemanticIntentModule {
         method: "GET",
         path: "/api/v1/osw/dataset-viewer/feedbacks",
         summary: { matchingFeedbacks: collected.length, pagesRead },
+        pagination: {
+          page: 1,
+          pageSize: displayLimit,
+          returned: shown.length,
+          total: collected.length,
+          hasMore: mayHaveMore,
+        },
         truncation: {
           matching: collected.length,
           shown: shown.length,

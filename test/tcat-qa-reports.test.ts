@@ -183,6 +183,7 @@ test("tcat QA/QC inventory reports truncation without hiding the summary", async
   assert.equal(result.data.truncation.mayHaveMore, true);
   assert.equal(result.data.summary.matchingRows, 5);
   assert.equal(result.data.rows.length, 2);
+  assert.deepEqual(result.data.pagination, { page: 1, pageSize: 2, returned: 2, total: 5, hasMore: true });
 });
 
 test("tcat QA/QC inventory can return every version instead of the latest per name", async () => {
