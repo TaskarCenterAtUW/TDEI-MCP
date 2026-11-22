@@ -2,7 +2,8 @@ import type { AuthManager } from "./auth-manager.js";
 import type { SsoLoginOptions } from "./types.js";
 import { SsoRequiredError } from "../mcp/errors.js";
 
-type SessionAuth = Pick<AuthManager, "getAccessToken" | "startSsoLogin">;
+type SessionAuth = Pick<AuthManager, "getAccessToken" | "startSsoLogin"> &
+  Partial<Pick<AuthManager, "restoreSharedSession">>;
 
 /**
  * Pre-call auth gate for MCP tool handlers. Resolves when this session holds
@@ -11,6 +12,9 @@ type SessionAuth = Pick<AuthManager, "getAccessToken" | "startSsoLogin">;
  * call never proceeds upstream without a session and the agent can show the
  * sign-in link instead of sending the user to client Settings.
  *
+ * A fresh process holds no in-memory token even when a sibling login already
+ * persisted a valid shared session to disk, so the gate adopts that shared
+ * session first and only starts a browser login when nothing usable exists.
  * startSsoLogin is idempotent while a login is pending, so repeated
  * unauthenticated calls reuse the same loginUrl and never stack listeners.
  */
@@ -19,7 +23,22 @@ export async function ensureSessionAuth(auth: SessionAuth, options?: SsoLoginOpt
     await auth.getAccessToken();
     return;
   } catch {
-    // No usable token (missing or refresh failed): fall through to login.
+    // No usable in-memory token (missing or refresh failed): a sibling MCP
+    // may still hold a live shared session on disk. Adopting it here means
+    // the agent never has to call the login tool for a token that is
+    // already present.
+    if (typeof auth.restoreSharedSession === "function") {
+      const restored = await auth.restoreSharedSession().catch(() => false);
+      if (restored) {
+        try {
+          await auth.getAccessToken();
+          return;
+        } catch {
+          // Adoption reported success but yielded no usable token:
+          // fall through to a browser login.
+        }
+      }
+    }
   }
   let login: { loginUrl: string; callbackUrl: string };
   try {

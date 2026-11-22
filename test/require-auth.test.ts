@@ -34,6 +34,48 @@ test("ensureSessionAuth resolves without starting a login when the token is usab
   assert.equal(starts, 0);
 });
 
+test("ensureSessionAuth adopts a valid shared session instead of starting a login", async () => {
+  let starts = 0;
+  let token: string | undefined;
+  const auth = {
+    getAccessToken: async () => {
+      if (!token) throw new Error("TDEI_SSO_REQUIRED");
+      return token;
+    },
+    // Mirrors AuthManager.restoreSharedSession: adopts the on-disk session.
+    restoreSharedSession: async () => {
+      token = "shared-token";
+      return true;
+    },
+    startSsoLogin: async () => {
+      starts += 1;
+      return pendingLogin();
+    },
+  };
+  await ensureSessionAuth(auth);
+  assert.equal(starts, 0);
+});
+
+test("ensureSessionAuth starts a login when no shared session exists", async () => {
+  let starts = 0;
+  const auth = {
+    getAccessToken: async () => {
+      throw new Error("TDEI_SSO_REQUIRED");
+    },
+    restoreSharedSession: async () => false,
+    startSsoLogin: async () => {
+      starts += 1;
+      return pendingLogin();
+    },
+  };
+  const error = await ensureSessionAuth(auth).then(
+    () => assert.fail("expected SsoRequiredError"),
+    (err: unknown) => err,
+  );
+  assert.ok(error instanceof SsoRequiredError);
+  assert.equal(starts, 1);
+});
+
 test("ensureSessionAuth starts one login and throws copy-pasteable URLs when signed out", async () => {
   let starts = 0;
   let pending: ReturnType<typeof pendingLogin> | undefined;
