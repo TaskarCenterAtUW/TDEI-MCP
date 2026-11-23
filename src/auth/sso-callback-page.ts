@@ -1,3 +1,5 @@
+import { npxDoctorCommand } from "../setup/targets.js";
+
 export interface SsoErrorPageOptions {
   /** Ordered fallback actions rendered as a numbered list (HTML allowed, trusted text only). */
   steps?: string[];
@@ -95,14 +97,14 @@ button, a.btn { display: inline-block; margin: 6px 4px; padding: 9px 16px; borde
 </section>
 <section id="missing" hidden>
 <h1>Sign-in helper is not running</h1>
-<p>After you sign in, TDEI sends you back to a small helper on this computer (<code>127.0.0.1:8765</code>). It is not answering, so the sign-in would end on a &ldquo;can&rsquo;t reach this page&rdquo; screen. (The helper exits after 10 minutes idle and is restarted on demand, so start it when a sign-in needs it.)</p>
+<p>After you sign in, TDEI sends you back to a small helper on this computer (<code>127.0.0.1:8765</code>). It is not answering, so the sign-in would end on a &ldquo;can&rsquo;t reach this page&rdquo; screen. (Setup normally starts it automatically at login. If it was stopped or never registered, start it by hand below.)</p>
 <ol class="steps">
 <li>Start it in a terminal: <code>${escapeHtml(RELAY_START_COMMAND)}</code></li>
 <li>If that file is missing, run the TDEI MCP setup again from your install page.</li>
 <li>Check that nothing else is using port 8765: <code>lsof -nP -iTCP:8765</code></li>
 </ol>
 <p><button id="retry" type="button">Check again</button> <a class="btn" href="${escapeHtml(loginUrl)}">Continue anyway</a></p>
-<p class="muted">Continue anyway is safe if your browser blocks this check (for example Safari).</p>
+<p class="muted">Continue anyway is safe if your browser blocks this check. To repair the helper, run: <code>${escapeHtml(npxDoctorCommand())}</code></p>
 </section>
 </main>
 <script>
@@ -111,17 +113,33 @@ button, a.btn { display: inline-block; margin: 6px 4px; padding: 9px 16px; borde
   var healthUrl = ${jsString(relayHealthUrl)};
   var checking = document.getElementById("checking");
   var missing = document.getElementById("missing");
-  function probe() {
+  // Only a fast connection failure proves the helper is down. A timeout
+  // (hung socket, or a browser waiting on a local-network permission prompt)
+  // and Safari (blocks http://127.0.0.1 from an https page, so it cannot
+  // answer) are inconclusive, so those continue to sign-in instead of
+  // blocking a working setup. A few quick retries ride out a service restart.
+  var unverifiable = /^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+  var attempts = 0;
+  function go() { location.replace(loginUrl); }
+  function probe(auto) {
+    if (unverifiable) { go(); return; }
     checking.hidden = false;
     missing.hidden = true;
     var timer = new AbortController();
     var cut = setTimeout(function () { timer.abort(); }, 2500);
     fetch(healthUrl, { mode: "no-cors", cache: "no-store", signal: timer.signal })
-      .then(function () { clearTimeout(cut); location.replace(loginUrl); })
-      .catch(function () { clearTimeout(cut); checking.hidden = true; missing.hidden = false; });
+      .then(function () { clearTimeout(cut); go(); })
+      .catch(function (error) {
+        clearTimeout(cut);
+        if (error && error.name === "AbortError") { go(); return; }
+        attempts += 1;
+        if (auto && attempts < 4) { setTimeout(function () { probe(true); }, 1000); return; }
+        checking.hidden = true;
+        missing.hidden = false;
+      });
   }
-  document.getElementById("retry").addEventListener("click", probe);
-  probe();
+  document.getElementById("retry").addEventListener("click", function () { probe(false); });
+  probe(true);
 })();
 </script>
 </body>

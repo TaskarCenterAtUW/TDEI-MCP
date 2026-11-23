@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -9,8 +9,10 @@ import { publicAuthCallbackUrl } from "../sso-public-callback.js";
  * http://127.0.0.1:8765/callback, so a small relay on the CLIENT machine
  * forwards that hit to the hosted gateway(s).
  *
- * Lifecycle: the installer starts the relay and it stays running while
- * sign-ins are happening, then exits after 10 minutes idle so the shared
+ * Lifecycle: the installer registers a login-time service that keeps the
+ * relay running (so client-initiated first sign-ins always work). Without
+ * that service (TDEI_NO_AUTOSTART, unsupported OS) the relay is started by
+ * the installer and exits after 10 minutes idle so the shared
  * loopback port (127.0.0.1:8765) is freed for other tools on the same
  * machine (for example the TDEI-Orchestrator backend, which must bind 8765
  * itself during its own login). The next TDEI sign-in restarts it on demand
@@ -34,6 +36,15 @@ const RELAY_SCRIPT_NAME = "sso-callback-relay.cjs";
 export const RELAY_TARGETS_NAME = "sso-callback-targets.json";
 export const RELAY_PID_NAME = "sso-callback-relay.pid";
 const MAX_TARGETS = 5;
+/** Bumped when the relay program changes; /health reports it so `doctor` can spot a stale relay. */
+export const RELAY_VERSION = 2;
+export const RELAY_WRAPPER_NAME = "run-relay.sh";
+export const RELAY_LOG_NAME = "relay.log";
+/** The service log is truncated at this size so it can never fill the disk. */
+export const RELAY_LOG_MAX_BYTES = 512 * 1024;
+export const RELAY_SERVICE_LABEL = "us.tdei.mcp.sso-relay";
+export const RELAY_SYSTEMD_UNIT = "tdei-mcp-sso-relay.service";
+export const RELAY_WINDOWS_TASK = "TdeiMcpSsoRelay";
 
 /**
  * Query parameter the relay adds when it sends the browser to a gateway.
@@ -87,6 +98,108 @@ const relayDir = path.join(os.homedir(), ".tdei-mcp");
 const targetsFile = path.join(relayDir, ${JSON.stringify(RELAY_TARGETS_NAME)});
 const pidFile = path.join(relayDir, ${JSON.stringify(RELAY_PID_NAME)});
 
+// --persist: started by the login-time service (launchd/systemd/Task
+// Scheduler), so it must stay up and never idle-exit. --install-autostart /
+// --remove-autostart register or remove that service and exit.
+const ARGS = process.argv.slice(2);
+const PERSIST = ARGS.includes("--persist");
+if (ARGS.includes("--install-autostart") || ARGS.includes("--remove-autostart")) {
+  process.exit(manageAutostart(ARGS.includes("--remove-autostart")) ? 0 : 1);
+}
+
+function manageAutostart(remove) {
+  const cp = require("node:child_process");
+  const dry = process.env.TDEI_AUTOSTART_DRY_RUN === "1";
+  const run = (cmd, args) => (dry ? 0 : cp.spawnSync(cmd, args, { stdio: "ignore" }).status);
+  const xml = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const home = os.homedir();
+  const node = process.execPath;
+  const script = __filename;
+  const logFile = path.join(relayDir, ${JSON.stringify(RELAY_LOG_NAME)});
+  const shq = (v) => "'" + String(v).replace(/'/g, "'\\\\''") + "'";
+  // The service runs this wrapper instead of a hard-coded node path: if the
+  // node that installed the relay is upgraded or removed (nvm, brew), the
+  // wrapper finds another node at start time instead of dying silently.
+  const wrapper = path.join(relayDir, ${JSON.stringify(RELAY_WRAPPER_NAME)});
+  function writeWrapper() {
+    const body = [
+      "#!/bin/sh",
+      "NODE=" + shq(node),
+      '[ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"',
+      'if [ ! -x "$NODE" ]; then',
+      '  for c in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$HOME"/.volta/bin/node "$HOME"/.nvm/versions/node/*/bin/node; do',
+      '    [ -x "$c" ] && NODE="$c" && break',
+      "  done",
+      "fi",
+      '[ -x "$NODE" ] || { echo "tdei relay: node not found" >&2; exit 1; }',
+      'exec "$NODE" ' + shq(script) + " --persist",
+      "",
+    ].join("\\n");
+    fs.writeFileSync(wrapper, body, { mode: 0o755 });
+  }
+  try {
+    if (process.platform === "darwin") {
+      const label = "us.tdei.mcp.sso-relay";
+      const file = path.join(home, "Library", "LaunchAgents", label + ".plist");
+      const domain = "gui/" + (typeof process.getuid === "function" ? process.getuid() : 501);
+      run("launchctl", ["bootout", domain + "/" + label]);
+      if (remove) { try { fs.unlinkSync(file); } catch {} return true; }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      writeWrapper();
+      const plist = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+        '<plist version="1.0"><dict>',
+        "<key>Label</key><string>" + label + "</string>",
+        "<key>ProgramArguments</key><array><string>/bin/sh</string><string>" + xml(wrapper) + "</string></array>",
+        "<key>RunAtLoad</key><true/>",
+        "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>",
+        "<key>StandardOutPath</key><string>" + xml(logFile) + "</string>",
+        "<key>StandardErrorPath</key><string>" + xml(logFile) + "</string>",
+        "</dict></plist>",
+        "",
+      ].join("\\n");
+      fs.writeFileSync(file, plist, "utf-8");
+      return run("launchctl", ["bootstrap", domain, file]) === 0;
+    }
+    if (process.platform === "linux") {
+      const file = path.join(home, ".config", "systemd", "user", "tdei-mcp-sso-relay.service");
+      if (remove) {
+        run("systemctl", ["--user", "disable", "--now", "tdei-mcp-sso-relay.service"]);
+        try { fs.unlinkSync(file); } catch {}
+        return true;
+      }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      writeWrapper();
+      const unit = [
+        "[Unit]",
+        "Description=TDEI MCP SSO callback relay",
+        "",
+        "[Service]",
+        "ExecStart=/bin/sh " + shq(wrapper),
+        "Restart=on-failure",
+        "RestartSec=5",
+        "",
+        "[Install]",
+        "WantedBy=default.target",
+        "",
+      ].join("\\n");
+      fs.writeFileSync(file, unit, "utf-8");
+      if (run("systemctl", ["--user", "daemon-reload"]) !== 0) return false;
+      return run("systemctl", ["--user", "enable", "--now", "tdei-mcp-sso-relay.service"]) === 0;
+    }
+    if (process.platform === "win32") {
+      const task = "TdeiMcpSsoRelay";
+      if (remove) { run("schtasks", ["/Delete", "/TN", task, "/F"]); return true; }
+      const ps = "$n='" + node + "'; if (-not (Test-Path $n)) { $n=(Get-Command node -ErrorAction Stop).Source }; & $n '" + script + "' --persist";
+      const command = "powershell.exe -NoProfile -WindowStyle Hidden -Command \\"" + ps + "\\"";
+      if (run("schtasks", ["/Create", "/TN", task, "/SC", "ONLOGON", "/TR", command, "/F"]) !== 0) return false;
+      return run("schtasks", ["/Run", "/TN", task]) === 0;
+    }
+  } catch {}
+  return false;
+}
+
 function targets() {
   try {
     const parsed = JSON.parse(fs.readFileSync(targetsFile, "utf-8"));
@@ -108,12 +221,21 @@ function targets() {
 // gateway's pending login lives in an origin-scoped tdei_oauth cookie that
 // only the browser can send.
 try { fs.mkdirSync(relayDir, { recursive: true }); } catch {}
+const logPath = path.join(relayDir, ${JSON.stringify(RELAY_LOG_NAME)});
+function capLog() {
+  try {
+    if (fs.statSync(logPath).size > ${RELAY_LOG_MAX_BYTES}) fs.truncateSync(logPath, 0);
+  } catch {}
+}
+capLog();
+if (PERSIST) setInterval(capLog, 60 * 60 * 1000).unref();
 try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch {}
 
 const TRY_PARAM = ${JSON.stringify(RELAY_TRY_PARAM)};
 const IDLE_TIMEOUT_MS = ${RELAY_IDLE_TIMEOUT_MS};
 let idleTimer = null;
 function armIdleTimer() {
+  if (PERSIST) return;
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     try {
@@ -174,7 +296,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify({ ok: true, service: "tdei-mcp-sso-relay" }));
+    res.end(JSON.stringify({ ok: true, service: "tdei-mcp-sso-relay", version: ${RELAY_VERSION}, persist: PERSIST }));
     return;
   }
   res.writeHead(404);
@@ -182,15 +304,23 @@ const server = http.createServer((req, res) => {
 });
 let listenRetries = 0;
 server.on("error", (error) => {
-  // A reinstall kills the previous relay just before starting this one; give
-  // that process a moment to release the port instead of silently exiting.
-  if (error && error.code === "EADDRINUSE" && listenRetries < 20) {
+  if (error && error.code === "EADDRINUSE") {
+    // A reinstall kills the previous relay just before starting this one; a
+    // different local backend (for example TDEI-Orchestrator) may also hold
+    // the shared port for its own login. The service keeps retrying with
+    // backoff, so the relay takes the port back as soon as it is released
+    // instead of staying dead until the next login. A detached (non-service)
+    // relay gives up after about 5 seconds so it never lingers.
     listenRetries += 1;
-    setTimeout(() => server.listen(port, "127.0.0.1"), 250);
+    if (!PERSIST && listenRetries > 20) process.exit(0);
+    if (listenRetries === 1 || listenRetries % 20 === 0) console.log("port " + port + " is busy; retrying until it is free");
+    setTimeout(() => server.listen(port, "127.0.0.1"), Math.min(15000, 250 * Math.pow(2, Math.min(listenRetries, 6))));
     return;
   }
-  process.exit(0);
+  console.log("relay error: " + (error && error.message));
+  process.exit(1);
 });
+server.on("listening", () => console.log("relay v${RELAY_VERSION} listening on 127.0.0.1:" + port));
 server.listen(port, "127.0.0.1");
 armIdleTimer();
 `;
@@ -244,14 +374,29 @@ export function stopCallbackRelay(home: string): boolean {
 }
 
 /**
- * Writes the relay files and starts the relay detached. It stays running
- * while sign-ins are happening and exits after 10 minutes idle (see
- * RELAY_IDLE_TIMEOUT_MS); the next login restarts it on demand.
- * Returns the script path.
+ * Writes the relay files and makes the relay available. By default it also
+ * registers a login-time service (launchd, systemd user unit or Task
+ * Scheduler) that keeps the relay running, so a client-initiated first
+ * sign-in always finds it listening. If that is unsupported, fails or is
+ * disabled (autostart=false or TDEI_NO_AUTOSTART), the relay is started
+ * detached instead; that one exits after 10 minutes idle (see
+ * RELAY_IDLE_TIMEOUT_MS) and is restarted on demand. Returns the script path.
  */
-export function startCallbackRelay(home: string, gatewayOrigin: string, port = RELAY_PORT): string {
+export function startCallbackRelay(
+  home: string,
+  gatewayOrigin: string,
+  port = RELAY_PORT,
+  autostart = !process.env["TDEI_NO_AUTOSTART"],
+): string {
   stopCallbackRelay(home);
   const { script } = writeRelayFiles(home, gatewayOrigin, port);
+  if (autostart) {
+    const installed = spawnSync(process.execPath, [script, "--install-autostart"], {
+      stdio: "ignore",
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    if (installed.status === 0) return script;
+  }
   spawn(process.execPath, [script], { detached: true, stdio: "ignore", windowsHide: true }).unref();
   return script;
 }
@@ -279,7 +424,7 @@ export async function ensureCallbackRelay(
     // Not listening: fall through and start it.
   }
   try {
-    startCallbackRelay(home, gatewayOrigin, port);
+    startCallbackRelay(home, gatewayOrigin, port, false);
   } catch {
     return { listening: false, started: false };
   }

@@ -292,3 +292,28 @@ test("relay files merge gateways across installs into one targets file", () => {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("relay --install-autostart writes a login-time service that runs the relay with --persist", async () => {
+  const home = mkdtempSync(join(tmpdir(), "tdei-autostart-"));
+  try {
+    const { script } = writeRelayFiles(home, "https://gw.example", 8765);
+    await execFileAsync(process.execPath, [script, "--install-autostart"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, TDEI_AUTOSTART_DRY_RUN: "1" },
+    });
+    if (process.platform === "darwin") {
+      const plist = readFileSync(join(home, "Library", "LaunchAgents", "us.tdei.mcp.sso-relay.plist"), "utf-8");
+      assert.ok(plist.includes("run-relay.sh"));
+      assert.ok(readFileSync(join(home, ".tdei-mcp", "run-relay.sh"), "utf-8").includes(script));
+      assert.match(plist, /RunAtLoad/);
+    } else if (process.platform === "linux") {
+      const unit = readFileSync(join(home, ".config", "systemd", "user", "tdei-mcp-sso-relay.service"), "utf-8");
+      assert.match(unit, /run-relay\.sh/);
+      assert.match(unit, /WantedBy=default.target/);
+    }
+    await execFileAsync(process.execPath, [script, "--remove-autostart"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, TDEI_AUTOSTART_DRY_RUN: "1" },
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

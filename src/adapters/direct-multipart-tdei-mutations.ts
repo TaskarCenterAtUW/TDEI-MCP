@@ -96,12 +96,12 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
     const path = `api/v1/${this.dataTypePath(input.dataType)}/upload/${encodeURIComponent(input.projectGroupId)}/${encodeURIComponent(input.serviceId)}`;
     const url = new URL(path, this.baseUrl);
     url.search = params.toString();
-    const metadataArg = `-F ${curlMetadataField(input.metadata)}`;
+    const metadataArg = `-F ${curlMetadataField()}`;
     const changesetArg = input.changeset ? ` -F "changeset=@${clientAssetPath(input.changeset, "changeset")}"` : "";
     const bearer = await this.resolveCurlToken(context);
     const auth = bearer ?? "$TDEI_TOKEN";
     const curlCommand =
-      `curl -X POST "${url.toString()}" -H "Authorization: Bearer ${auth}" ` +
+      `${curlMetadataStdin(input.metadata)}curl -X POST "${url.toString()}" -H "Authorization: Bearer ${auth}" ` +
       `-F "dataset=@${datasetPath}" ${metadataArg}${changesetArg} -sS --fail-with-body -w "\\nHTTP_STATUS:%{http_code}\\n"`;
     return {
       dataType: input.dataType,
@@ -116,7 +116,7 @@ export class DirectMultipartTdeiMutations implements DatasetMutations {
           ? `The caller's TDEI bearer is already embedded; no export needed. `
           : `$TDEI_TOKEN must hold the caller's TDEI SSO bearer (sign in first). `) +
         `File bytes flow directly to the TDEI backend; the gateway is not a relay. ` +
-        `Then poll with tdei_list_jobs. The metadata value is single-quoted for bash/zsh; on Windows cmd.exe re-quote it with double quotes.`,
+        `Then poll with tdei_list_jobs. The metadata JSON is piped into curl as a file part (metadata.json) because the endpoint requires a file upload; the command is for bash/zsh. In Windows PowerShell pipe the same JSON string into curl.exe instead of using printf.`,
     };
   }
 
@@ -217,16 +217,24 @@ function isClientAbsolutePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
 
+/** Part filename sent with the metadata document; the upload endpoints declare `metadata` as a binary file part. */
+export const METADATA_PART_FILENAME = "metadata.json";
+
 /**
- * One shell-safe curl -F argument for the metadata JSON. curl's quoted-value
- * form ("...", with \\ and \" escaped) lets ';' and ',' appear inside the JSON,
- * and the whole argument is single-quoted for the shell with ' escaped. No
- * temp file or heredoc is needed, so the command stays a single line.
+ * The curl -F argument for the metadata part. The TDEI upload endpoints
+ * declare `metadata` as `type: string, format: binary` (a file upload), so the
+ * part must carry a filename: a plain `metadata="<json>"` field is a text
+ * field and the backend rejects it. `@-` makes curl read the part from stdin
+ * (see curlMetadataStdin) and `filename=` makes it a file part, so no temp
+ * file is needed and the command stays a single line.
  */
-export function curlMetadataField(metadata: DatasetMetadata): string {
-  const curlQuoted = JSON.stringify(metadata).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const arg = `metadata="${curlQuoted}";type=application/json`;
-  return `'${arg.replace(/'/g, `'\\''`)}'`;
+export function curlMetadataField(): string {
+  return `'metadata=@-;filename=${METADATA_PART_FILENAME};type=application/json'`;
+}
+
+/** Shell prefix that pipes the metadata JSON into curl's stdin (single-quoted, ' escaped). */
+export function curlMetadataStdin(metadata: DatasetMetadata): string {
+  return `printf '%s' '${JSON.stringify(metadata).replace(/'/g, `'\\''`)}' | `;
 }
 
 function assertAllowedExtension(filePathOrName: string): void {

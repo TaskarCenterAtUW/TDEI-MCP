@@ -593,13 +593,26 @@ if (!isLoopbackServer && !process.env.TDEI_NO_RELAY) {
       try { process.kill(oldPid); } catch {}
     }
   } catch {}
-  const child = spawn(process.execPath, [relayScript], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  child.unref();
-  console.log(\`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (exits after 10 min idle so the shared port stays free for other local backends; restarted on demand at the next sign-in; redirects the browser to this gateway and any other installed TDEI gateway)\`);
+  // Preferred: a login-time service (launchd / systemd user unit / Task
+  // Scheduler) keeps the relay up, so a client-initiated first sign-in never
+  // finds it missing. Fallback: a detached relay that exits after 10 min idle.
+  let relayAutostart = false;
+  if (!process.env.TDEI_NO_AUTOSTART) {
+    try {
+      relayAutostart = require("node:child_process").spawnSync(process.execPath, [relayScript, "--install-autostart"], { stdio: "ignore" }).status === 0;
+    } catch {}
+  }
+  if (!relayAutostart) {
+    const child = spawn(process.execPath, [relayScript], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  }
+  console.log(relayAutostart
+    ? \`[tdei-mcp] Local SSO callback relay on http://127.0.0.1:\${callbackPortRaw}/callback now starts at login and stays running (remove with: node ~/.tdei-mcp/sso-callback-relay.cjs --remove-autostart); it redirects the browser to this gateway and any other installed TDEI gateway\`
+    : \`[tdei-mcp] Local SSO callback relay listening on http://127.0.0.1:\${callbackPortRaw}/callback (autostart unavailable: it exits after 10 min idle so the shared port stays free for other local backends; restarted on demand at the next sign-in; redirects the browser to this gateway and any other installed TDEI gateway)\`);
 }
 `;
 

@@ -186,7 +186,7 @@ test("HTTP adapter upload returns curl with inline metadata and encoded target",
   assert.equal(instruction.path, "/api/v1/gtfs-pathways/upload/group%201/service%2F1");
   assert.ok(instruction.curlCommand.includes("derived_from_dataset_id=source-1"));
   assert.ok(instruction.curlCommand.includes('-F "dataset=@/Users/tester/data/upload.zip"'));
-  assert.ok(instruction.curlCommand.includes(`-F ${curlMetadataField(metadata)}`));
+  assert.ok(instruction.curlCommand.includes(`-F ${curlMetadataField()}`));
   assert.equal(instruction.curlCommand.includes("\n"), false);
   assert.ok(instruction.curlCommand.includes('-F "changeset=@/Users/tester/data/change.osc"'));
   assert.ok(instruction.curlCommand.includes("Bearer bearer-A"));
