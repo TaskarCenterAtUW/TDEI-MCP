@@ -112,6 +112,11 @@ export function npxPackageSpec(buildSha?: string, env: NodeJS.ProcessEnv = proce
   return `${SETUP_REPO}#${npxPin(buildSha) ?? "dev"}`;
 }
 
+/** Same package spec as the setup command, running the relay `doctor`. */
+export function npxDoctorCommand(buildSha?: string, env: NodeJS.ProcessEnv = process.env): string {
+  return `npx -y ${npxPackageSpec(buildSha, env)} doctor --fix`;
+}
+
 /** `npx -y <package> setup`: the prefix every setup command on the pages and in messages starts with. */
 export function npxSetupCommand(buildSha?: string, env: NodeJS.ProcessEnv = process.env): string {
   return `npx -y ${npxPackageSpec(buildSha, env)} setup`;

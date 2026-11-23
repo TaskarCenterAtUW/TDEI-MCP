@@ -51,6 +51,8 @@ if (isEntryPoint()) {
     ["init", "switch", "--help", "-h"].includes(command ?? "") || (command !== undefined && !command.startsWith("--"));
   if (command === "setup") {
     await import("./setup.js");
+  } else if (command === "doctor") {
+    await import("./doctor.js");
   } else if (isSetupCommand) {
     await import("./init.js");
   } else {
