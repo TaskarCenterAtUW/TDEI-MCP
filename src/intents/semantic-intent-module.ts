@@ -281,6 +281,30 @@ function readDatasetServiceName(dataset: Record<string, unknown>): string | unde
   return firstText(dataset, ["service", "service_name"]);
 }
 
+function readDatasetServiceId(dataset: Record<string, unknown>): string | undefined {
+  return firstText(dataset, ["tdei_service_id", "service_id"]);
+}
+
+function readDatasetProjectGroupName(dataset: Record<string, unknown>): string | undefined {
+  return firstText(dataset, [
+    "project_group",
+    "project_group_name",
+    "tdei_project_group_name",
+    "projectGroup",
+    "projectGroupName",
+  ]);
+}
+
+function readDatasetProjectGroupId(dataset: Record<string, unknown>): string | undefined {
+  return firstText(dataset, ["tdei_project_group_id", "project_group_id"]);
+}
+
+/** Display value that keeps both the name and the id when both are known (ids are needed for the next step). */
+function withIdSuffix(name: string | undefined, id: string | undefined): string {
+  if (name && id && id !== name) return `${name} (${id})`;
+  return name ?? id ?? "";
+}
+
 /** Natural compare so "1.10" is newer than "1.9" (a plain string sort gets this wrong). */
 const VERSION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -303,13 +327,15 @@ function tableCell(value: unknown): string {
 
 /**
  * Markdown table of dataset matches for the user to pick from: numbered rows
- * with the name, UUID, data type and status. The user replies with a UUID
+ * with the name, UUID, data type, status, project group and service. The
+ * project-group and service cells keep the id in parentheses when it is known,
+ * so the user can use them in the next step. The user replies with a UUID
  * (or a pasted row containing one) or a 1-based row number.
  */
 function renderDatasetTable(matches: DatasetMatch[]): string {
   if (matches.length === 0) return "No datasets matched.";
-  const header = "| # | name | version | tdei_dataset_id | data_type | status |";
-  const divider = "|---|------|---------|-----------------|-----------|--------|";
+  const header = "| # | name | version | tdei_dataset_id | data_type | status | project_group | service |";
+  const divider = "|---|------|---------|-----------------|-----------|--------|---------------|---------|";
   const rows = matches.map((match, index) => {
     const dataset = match.dataset;
     const name = readDatasetName(dataset) ?? "";
@@ -317,7 +343,9 @@ function renderDatasetTable(matches: DatasetMatch[]): string {
     const id = readDatasetId(dataset) ?? "";
     const rawType = String(dataset.data_type ?? dataset.dataType ?? "");
     const status = String(dataset.status ?? "");
-    return `| ${index + 1} | ${tableCell(name)} | ${tableCell(version)} | ${tableCell(id)} | ${tableCell(rawType)} | ${tableCell(status)} |`;
+    const projectGroup = withIdSuffix(readDatasetProjectGroupName(dataset), readDatasetProjectGroupId(dataset));
+    const service = withIdSuffix(readDatasetServiceName(dataset), readDatasetServiceId(dataset));
+    return `| ${index + 1} | ${tableCell(name)} | ${tableCell(version)} | ${tableCell(id)} | ${tableCell(rawType)} | ${tableCell(status)} | ${tableCell(projectGroup)} | ${tableCell(service)} |`;
   });
   return [header, divider, ...rows].join("\n");
 }

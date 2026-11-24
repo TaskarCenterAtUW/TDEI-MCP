@@ -86,7 +86,7 @@ test("latest dataset name match completes without geographic fallback", async ()
       effectiveSort: { field: "uploaded_timestamp", order: "desc" },
       pagination: { page: 1, pageSize: 10, returned: 1, hasMore: false },
       table:
-        "| # | name | version | tdei_dataset_id | data_type | status |\n|---|------|---------|-----------------|-----------|--------|\n| 1 | Seattle Accessible Sidewalks |  | dataset-1 |  |  |",
+        "| # | name | version | tdei_dataset_id | data_type | status | project_group | service |\n|---|------|---------|-----------------|-----------|--------|---------------|---------|\n| 1 | Seattle Accessible Sidewalks |  | dataset-1 |  |  |  |  |",
     },
   });
   assert.deepEqual(harness.searches, [
