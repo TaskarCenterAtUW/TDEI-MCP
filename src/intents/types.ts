@@ -148,7 +148,7 @@ export interface FindDatasetsData {
     stoppedEarly: boolean;
     note: string;
   };
-  /** Markdown table of the matches (#, name, version, uuid, type, status) for the user to pick from. */
+  /** Markdown table of the matches (#, name, version, uuid, type, status, project group, service) for the user to pick from. */
   table: string;
 }
 
