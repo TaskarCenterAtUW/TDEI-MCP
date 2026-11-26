@@ -99,8 +99,9 @@ const TDEI_WORKSPACE_TOOL_INSTRUCTIONS: Readonly<Record<string, string>> = {
     "Set custom imagery with a raw JSON definition that follows the ASR imagery-list schema; ask the user for the JSON and validate it first. Check the imagery source's access and attribution terms.",
 
   get_jobs_by_workspace_id:
-    "Workspace jobs (import, creation, export-style processing). Poll after any async action and read the result when the job completes.",
-  get_job_by_id: "One workspace job by id. Do not treat a job as finished until its status says so.",
+    "Workspace jobs (import, creation, export-style processing). Use only when the user explicitly asks for workspace jobs, workspace import status, or names a workspace job — job status otherwise defaults to the TDEI core job API (tdei_list_jobs). Poll after any async action and read the result when the job completes.",
+  get_job_by_id:
+    "One workspace job by id. Use only when the user explicitly asks for workspace jobs — job status otherwise defaults to the TDEI core job API (tdei_list_jobs). Do not treat a job as finished until its status says so.",
 
   get_privileged_workspace_members: `Lists privileged workspace members and their roles. ${ROLES_HELP}`,
   assign_member_role: `Assign a workspace role (lead, validator, contributor). ${ROLES_HELP} Confirm the user and role first.`,
