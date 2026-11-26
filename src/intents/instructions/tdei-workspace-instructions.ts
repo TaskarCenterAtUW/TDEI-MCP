@@ -12,7 +12,7 @@ This server talks to the TDEI Workspace backend for workspace editing, tasking, 
 - Start with get_my_workspaces (GET /api/v1/workspaces/mine) and cache each workspace_id and name. Almost every workspace tool is scoped by workspace_id; never guess or invent one.
 - Tasking tools also need project_id and, for task actions, task_number. List projects and tasks before acting, and reuse cached IDs.
 - Typical task flow: list projects → list tasks → lock task → work → extend lock if needed → submit task or submit changeset → review the task/project audit. Reset only when the user explicitly asks.
-- Workspace jobs use the workspace endpoints: GET /api/v1/workspaces/{workspace_id}/jobs and GET /api/v1/workspaces/jobs/{job_id}. Poll them after starting an async action and fetch the result when the job completes.
+- Workspace jobs use the workspace endpoints only when the user explicitly asks for workspace jobs: GET /api/v1/workspaces/{workspace_id}/jobs and GET /api/v1/workspaces/jobs/{job_id}. Poll them after starting an async action and fetch the result when the job completes. Otherwise job status defaults to the TDEI core job API (tdei_list_jobs on the matching tdei-core-* server).
 - Workspace file operations (create workspace from file, upload project AOI) follow the same client-side curl rule: ask for the absolute path on the CLIENT machine and run the returned command there.
 - Dataset validation, upload, publish, and dataset downloads belong to the matching tdei-core-* server. Send the user there only when they ask for those operations; do not call core-only tools on this workspace server and do not bring them up otherwise.
 
